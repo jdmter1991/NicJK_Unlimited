@@ -707,6 +707,17 @@ static void CG_RegisterSounds( void ) {
 	cgs.media.purpleSaberGlowShaderTPMTheatrical = trap->R_RegisterShader("gfx/effects/sabers/purple_glow_tpm"); // Niksata Edit
 	cgs.media.rgbSaberGlowShaderTPMTheatrical = trap->R_RegisterShader("gfx/effects/sabers/RGBglow1_tpm"); // Niksata Edit
 
+	//sfx AOTC Theatrical // Niksata Edit
+	cgs.media.ShaderSaberBladeAOTCTheatrical = trap->R_RegisterShader("SFX_Sabers/saber_blade_aotc"); // Niksata Edit
+	cgs.media.ShaderSaberBladeRGBAOTCTheatrical = trap->R_RegisterShader("SFX_Sabers/saber_blade_aotc"); // Niksata Edit
+	cgs.media.redSaberGlowShaderAOTCTheatrical = trap->R_RegisterShader("gfx/effects/sabers/red_glow_aotc"); // Niksata Edit
+	cgs.media.orangeSaberGlowShaderAOTCTheatrical = trap->R_RegisterShader("gfx/effects/sabers/orange_glow_aotc"); // Niksata Edit
+	cgs.media.yellowSaberGlowShaderAOTCTheatrical = trap->R_RegisterShader("gfx/effects/sabers/yellow_glow_aotc"); // Niksata Edit
+	cgs.media.greenSaberGlowShaderAOTCTheatrical = trap->R_RegisterShader("gfx/effects/sabers/green_glow_aotc"); // Niksata Edit
+	cgs.media.blueSaberGlowShaderAOTCTheatrical = trap->R_RegisterShader("gfx/effects/sabers/blue_glow_aotc"); // Niksata Edit
+	cgs.media.purpleSaberGlowShaderAOTCTheatrical = trap->R_RegisterShader("gfx/effects/sabers/purple_glow_aotc"); // Niksata Edit
+	cgs.media.rgbSaberGlowShaderAOTCTheatrical = trap->R_RegisterShader("gfx/effects/sabers/RGBglow1_aotc"); // Niksata Edit
+
 	//sfx Ahsoka // Niksata Edit
 	cgs.media.ShaderSaberBladeAhsoka = trap->R_RegisterShader("SFX_Sabers/ahsoka_rgb_blade"); // Niksata Edit
 	cgs.media.ShaderSaberBladeAhsokared = trap->R_RegisterShader("SFX_Sabers/ahsoka_red_blade"); // Niksata Edit

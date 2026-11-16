@@ -1664,6 +1664,17 @@ typedef struct cgMedia_s {
 	qhandle_t	purpleSaberGlowShaderTPMTheatrical;
 	qhandle_t	rgbSaberGlowShaderTPMTheatrical; // Niksata Edit
 
+	//sfx AOTC Theatrical // Niksata Edit
+	qhandle_t	ShaderSaberBladeAOTCTheatrical;
+	qhandle_t	ShaderSaberBladeRGBAOTCTheatrical;
+	qhandle_t	redSaberGlowShaderAOTCTheatrical;
+	qhandle_t	orangeSaberGlowShaderAOTCTheatrical;
+	qhandle_t	yellowSaberGlowShaderAOTCTheatrical;
+	qhandle_t	greenSaberGlowShaderAOTCTheatrical;
+	qhandle_t	blueSaberGlowShaderAOTCTheatrical;
+	qhandle_t	purpleSaberGlowShaderAOTCTheatrical;
+	qhandle_t	rgbSaberGlowShaderAOTCTheatrical; // Niksata Edit
+
 	//sfx Ahsoka // Niksata Edit
 	qhandle_t	ShaderSaberBladeAhsoka;
 	qhandle_t	ShaderSaberBladeAhsokared;

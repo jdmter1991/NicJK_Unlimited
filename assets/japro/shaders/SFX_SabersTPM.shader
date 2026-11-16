@@ -99,7 +99,7 @@ gfx/effects/sabers/purple_glow_tpm
 	notc
 	cull	twosided
 	{
-		map gfx/effects/sabers/purple_glow2ep2_theatrical
+		map gfx/effects/sabers/purple_glow2ep1_theatrical
 		blendFunc GL_ONE GL_ONE
 		glow
 		rgbGen vertex
