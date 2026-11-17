@@ -91,7 +91,7 @@ gfx/effects/sabers/purple_glow_aotc
 	}
 }
 
-gfx/effects/sabers/RGBglow1_aotc {
+gfx/effects/sabers/RGBglow1ep2_theatrical {
 	nopicmip
 	notc
 	cull twosided
