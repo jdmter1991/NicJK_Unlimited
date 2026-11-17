@@ -6299,7 +6299,7 @@ static void CG_RGBForSaberColorAOTCTheatrical(saber_colors_t color, vec3_t rgb, 
 		VectorSet(rgb, 0.808f, 0.667f, 0.000f);  // ceaa00
 		break;
 	case SABER_GREEN:
-		VectorSet(rgb, 0.141f, 0.333f, 0.161f);  // 245529
+		VectorSet(rgb, 0.078f, 0.478f, 0.224f);  // 147A39
 		break;
 	case SABER_BLUE:
 		VectorSet(rgb, 0.000f, 0.141f, 0.349f);  // 002459
@@ -11559,7 +11559,7 @@ JustDoIt:
 
 		// Fix black trail shader // Niksata Edit
 		if (scolor == SABER_BLACK) {
-			if (cg_SFXSabers.integer == 3) {
+			if (cg_SFXSabers.integer == 7) {
 				fx.mShader = cgs.media.ShaderSaberTrailblackAhsoka;
 			}
 			else {
@@ -11568,13 +11568,49 @@ JustDoIt:
 			VectorSet(rgb1, 0.0f, 0.0f, 0.0f);
 		}
 		else {
-			if (cg_SFXSabers.integer == 3) {
+			if (cg_SFXSabers.integer == 7) {
 				fx.mShader = cgs.media.ShaderSaberTrailAhsoka;
 			}
 			else {
 				fx.mShader = cgs.media.ShaderSaberTrail;
 			}
 		} // Niksata Edit
+
+		// Niksata Edit - Per-style SFX saber trail colors
+		switch (cg_SFXSabers.integer)
+		{
+		case 1:  // TPM
+			VectorSet(rgb1, 255.0f, 255.0f, 255.0f);
+			break;
+
+		case 11: // Theatrical TPM
+			VectorSet(rgb1, 229.0f, 220.0f, 217.0f);
+			break;
+
+		case 2:  // AOTC
+			VectorSet(rgb1, 252.0f, 252.0f, 253.0f);
+			break;
+
+		case 3:  // ROTS
+			VectorSet(rgb1, 255.0f, 255.0f, 255.0f);
+			break;
+
+		case 4:  // OT
+			VectorSet(rgb1, 253.0f, 253.0f, 253.0f);
+			break;
+
+		case 44: // McQuarrie
+			VectorSet(rgb1, 217.0f, 214.0f, 212.0f);
+			break;
+
+		case 7:  // Ahsoka
+			VectorSet(rgb1, 219.0f, 233.0f, 235.0f);
+			break;
+
+		default:
+			break;
+		}
+
 		fx.mKillTime = 2;
 		fx.mSetFlags = FX_USE_ALPHA;
 

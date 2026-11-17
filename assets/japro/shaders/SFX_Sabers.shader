@@ -5,7 +5,7 @@ sfx_sabers/saber_trail
     {
         map $whiteimage
         blendFunc GL_ONE GL_ONE
-        rgbGen identity
+        rgbGen vertex
     }
 }
 
