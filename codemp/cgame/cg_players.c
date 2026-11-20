@@ -6235,7 +6235,7 @@ static void CG_RGBForSaberColorTPMTheatrical(saber_colors_t color, vec3_t rgb, i
 		VectorSet(rgb, 0.259f, 0.573f, 0.267f);  // 429244
 		break;
 	case SABER_BLUE:
-		VectorSet(rgb, 0.020f, 0.200f, 0.475f);  // 053379
+		VectorSet(rgb, 0.035f, 0.200f, 0.467f);  // 093377
 		break;
 	case SABER_PURPLE:
 		VectorSet(rgb, 0.451f, 0.235f, 0.588f);  // 733c96
@@ -11575,7 +11575,7 @@ JustDoIt:
 				fx.mShader = cgs.media.ShaderSaberTrail;
 			}
 		} // Niksata Edit
-
+		/*
 		// Niksata Edit - Per-style SFX saber trail colors
 		switch (cg_SFXSabers.integer)
 		{
@@ -11610,7 +11610,7 @@ JustDoIt:
 		default:
 			break;
 		}
-
+		*/
 		fx.mKillTime = 2;
 		fx.mSetFlags = FX_USE_ALPHA;
 

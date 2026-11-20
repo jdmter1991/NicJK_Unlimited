@@ -426,7 +426,7 @@ XCVAR_DEF( ui_tm3_cnt,							"0",					NULL,					CVAR_ROM|CVAR_INTERNAL )
 // 7  = Ahsoka
 XCVAR_DEF( cg_SFXSabers,						"3",					NULL,					CVAR_ARCHIVE ) // Niksata Edit
 XCVAR_DEF( cg_SFXSabersGlowSizeTPM,				"0.9",					NULL,					CVAR_ARCHIVE ) // Niksata Edit
-XCVAR_DEF( cg_SFXSabersGlowSizeAOTC,			"1",					NULL,					CVAR_ARCHIVE ) // Niksata Edit
+XCVAR_DEF( cg_SFXSabersGlowSizeAOTC,			"0.9",					NULL,					CVAR_ARCHIVE ) // Niksata Edit
 XCVAR_DEF( cg_SFXSabersGlowSizeROTS,			"0.9",					NULL,					CVAR_ARCHIVE ) // Niksata Edit
 XCVAR_DEF( cg_SFXSabersGlowSizeOT,				"1.6",					NULL,					CVAR_ARCHIVE ) // Niksata Edit
 XCVAR_DEF( cg_SFXSabersGlowSizeMcquarrie,		"1",					NULL,					CVAR_ARCHIVE ) // Niksata Edit
@@ -434,7 +434,7 @@ XCVAR_DEF( cg_SFXSabersGlowSizeAhsoka,			"1.1",					NULL,					CVAR_ARCHIVE ) // 
 XCVAR_DEF( cg_SFXSabersCoreSizeTPM,				"0.9",					NULL,					CVAR_ARCHIVE ) // Niksata Edit
 XCVAR_DEF( cg_SFXSabersCoreSizeAOTC,			"0.9",					NULL,					CVAR_ARCHIVE ) // Niksata Edit
 XCVAR_DEF( cg_SFXSabersCoreSizeROTS,			"0.9",					NULL,					CVAR_ARCHIVE ) // Niksata Edit
-XCVAR_DEF( cg_SFXSabersCoreSizeOT,				"1.1",					NULL,					CVAR_ARCHIVE ) // Niksata Edit
+XCVAR_DEF( cg_SFXSabersCoreSizeOT,				"1.035",				NULL,					CVAR_ARCHIVE ) // Niksata Edit
 XCVAR_DEF( cg_SFXSabersCoreSizeMcquarrie,		"2",					NULL,					CVAR_ARCHIVE ) // Niksata Edit
 XCVAR_DEF( cg_SFXSabersCoreSizeAhsoka,			"1",					NULL,					CVAR_ARCHIVE ) // Niksata Edit
 XCVAR_DEF( cg_SFXSabersOTrestored,				"1",					NULL,					CVAR_ARCHIVE ) // Niksata Edit
