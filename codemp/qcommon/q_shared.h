@@ -219,7 +219,7 @@ typedef enum {
 //
 // these aren't needed by any of the VMs.  put in another header?
 //
-#define	MAX_MAP_AREA_BYTES		32		// bit vector of area visibility
+#define	MAX_MAP_AREA_BYTES		128		// bit vector of area visibility // Niksata Edit
 
 
 #define LS_STYLES_START			0
