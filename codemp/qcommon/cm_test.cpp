@@ -22,6 +22,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 */
 
 #include "cm_local.h"
+#include "com_profile.h"
 
 /*
 ==================
@@ -237,9 +238,21 @@ int CM_PointContents( const vec3_t p, clipHandle_t model ) {
 		leaf = &local->leafs[leafnum];
 	}
 
+	// a point can only be inside brushes whose bounds contain it; the result is an OR of
+	// contents, so the order the brushes are visited in does not matter
+	int			candidates[CM_ACCEL_MAX_CANDIDATES];
+	int			numCandidates = -1;
+	if ( leaf->accelRoot && cm_accel && cm_accel->integer ) {
+		numCandidates = CM_AccelCollect( local, leaf, p, p, NULL, candidates, CM_ACCEL_MAX_CANDIDATES );
+	}
+	const int	numBrushes = numCandidates >= 0 ? numCandidates : leaf->numLeafBrushes;
+
+	com_prof.cmLeafVisits++;
+	com_prof.cmLeafBrushesWalked += numBrushes;
+
 	contents = 0;
-	for (k=0 ; k<leaf->numLeafBrushes ; k++) {
-		brushnum = local->leafbrushes[leaf->firstLeafBrush+k];
+	for (k=0 ; k<numBrushes ; k++) {
+		brushnum = local->leafbrushes[leaf->firstLeafBrush + ( numCandidates >= 0 ? candidates[k] : k )];
 		b = &local->brushes[brushnum];
 
 		// see if the point is in the brush

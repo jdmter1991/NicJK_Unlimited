@@ -24,6 +24,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 // world.c -- world query functions
 
 #include "server.h"
+#include "qcommon/com_profile.h"
 #include "ghoul2/ghoul2_shared.h"
 #include "qcommon/cm_public.h"
 
@@ -835,11 +836,28 @@ Ghoul2 Insert End
 
 	Com_Memset ( &clip, 0, sizeof ( moveclip_t ) );
 
+	const int profPhase = com_prof.phase;
+	const uint64_t profStart = com_prof.enabled ? Com_ProfNowNs() : 0;
+	com_prof.svTraces[profPhase]++;
+
 	// clip to world
 	CM_BoxTrace( &clip.trace, start, end, mins, maxs, 0, contentmask, capsule );
+	if ( profStart ) {
+		const uint64_t d = Com_ProfNowNs() - profStart;
+		com_prof.svWorldTraceNs[profPhase] += d;
+	}
 	clip.trace.entityNum = clip.trace.fraction != 1.0 ? ENTITYNUM_WORLD : ENTITYNUM_NONE;
 	if ( clip.trace.fraction == 0 ) {
 		*results = clip.trace;
+		if ( profStart ) {
+			const uint64_t d = Com_ProfNowNs() - profStart;
+			com_prof.svTraceNs[profPhase] += d;
+			if ( d > com_prof.worstTraceNs ) {
+				com_prof.worstTraceNs = d;	com_prof.worstTracePhase = profPhase;
+				VectorCopy( start, com_prof.worstTraceStart );	VectorCopy( end, com_prof.worstTraceEnd );
+				VectorCopy( mins, com_prof.worstTraceMins );	VectorCopy( maxs, com_prof.worstTraceMaxs );
+			}
+		}
 		return;		// blocked immediately by the world
 	}
 
@@ -878,6 +896,16 @@ Ghoul2 Insert End
 	SV_ClipMoveToEntities ( &clip );
 
 	*results = clip.trace;
+
+	if ( profStart ) {
+		const uint64_t d = Com_ProfNowNs() - profStart;
+		com_prof.svTraceNs[profPhase] += d;
+		if ( d > com_prof.worstTraceNs ) {
+			com_prof.worstTraceNs = d;	com_prof.worstTracePhase = profPhase;
+			VectorCopy( start, com_prof.worstTraceStart );	VectorCopy( end, com_prof.worstTraceEnd );
+			VectorCopy( mins, com_prof.worstTraceMins );	VectorCopy( maxs, com_prof.worstTraceMaxs );
+		}
+	}
 }
 
 
@@ -893,6 +921,10 @@ int SV_PointContents( const vec3_t p, int passEntityNum ) {
 	int			i, num;
 	int			contents, c2;
 	clipHandle_t	clipHandle;
+
+	const int profPhase = com_prof.phase;
+	const uint64_t profStart = com_prof.enabled ? Com_ProfNowNs() : 0;
+	com_prof.svPointContents[profPhase]++;
 
 	// get base contents from world
 	contents = CM_PointContents( p, 0 );
@@ -911,6 +943,10 @@ int SV_PointContents( const vec3_t p, int passEntityNum ) {
 		c2 = CM_TransformedPointContents (p, clipHandle, hit->r.currentOrigin, hit->r.currentAngles);
 
 		contents |= c2;
+	}
+
+	if ( profStart ) {
+		com_prof.svPointContentsNs[profPhase] += Com_ProfNowNs() - profStart;
 	}
 
 	return contents;

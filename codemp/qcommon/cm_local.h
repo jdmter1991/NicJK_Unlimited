@@ -50,7 +50,24 @@ typedef struct cLeaf_s {
 
 	ptrdiff_t	firstLeafSurface;
 	int			numLeafSurfaces;
+
+	int			accelRoot;			// 1 + index into clipMap_t::accelNodes, 0 = no accelerator for this leaf
 } cLeaf_t;
+
+// Per-leaf bounding volume hierarchy over the leaf's brush list (see CM_BuildLeafAccel).
+// Inner node: count == 0, children are nodes[first] and nodes[first+1].
+// Leaf node:  count > 0, items are accelItems[first .. first+count-1]; each item is the
+//             position k of a brush inside its BSP leaf's brush list.
+typedef struct cmAccelNode_s {
+	vec3_t		mins;
+	int			first;
+	vec3_t		maxs;
+	int			count;
+} cmAccelNode_t;
+
+#define	CM_ACCEL_MIN_LEAF_BRUSHES	24		// leaves with fewer brushes are walked linearly
+#define	CM_ACCEL_NODE_ITEMS			4		// max brushes in a hierarchy leaf node
+#define	CM_ACCEL_MAX_CANDIDATES		4096	// more overlapping brushes than this -> linear walk
 
 typedef struct cmodel_s {
 	vec3_t		mins, maxs;
@@ -69,7 +86,9 @@ typedef struct cbrush_s {
 	vec3_t				bounds[2];
 	cbrushside_t		*sides;
 	unsigned short		numsides;
-	unsigned short		checkcount;		// to avoid repeated testings
+	unsigned short		boundsUsable;	// bounds[] really contain the brush (first six sides are the axial planes)
+	int					checkcount;		// to avoid repeated testings (int: clipMap_t::checkcount is an int and
+										// passes 65535 within seconds; a 16-bit copy never matched after that)
 } cbrush_t;
 
 class CCMShader
@@ -146,6 +165,11 @@ typedef struct clipMap_s {
 
 	int			floodvalid;
 	int			checkcount;					// incremented on each trace
+
+	int			numAccelNodes;
+	cmAccelNode_t *accelNodes;				// per-leaf brush hierarchies, all leaves in one pool
+	int			numAccelItems;
+	int			*accelItems;
 } clipMap_t;
 
 
@@ -160,6 +184,52 @@ extern	cvar_t		*cm_noAreas;
 extern	cvar_t		*cm_noCurves;
 extern	cvar_t		*cm_playerCurveClip;
 extern	cvar_t		*cm_extraVerbose;
+extern	cvar_t		*cm_accel;
+extern	cvar_t		*cm_accelVerify;
+
+// The moving trace volume as a segment plus half-extents, for swept culling against boxes.
+typedef struct cmSweep_s {
+	int		use;			// 0 for position tests / when disabled
+	float	start[3];
+	float	delta[3];		// end - start
+	float	invDelta[3];	// 1/delta, unused where delta is 0
+	float	ext[3];			// half-size of the trace volume plus a safety margin
+} cmSweep_t;
+
+#define	CM_SWEEP_MARGIN		1.0f	// > SURFACE_CLIP_EPSILON; brushes are effectively that much larger
+
+extern	cmSweep_t	cm_sweep;
+
+// true when the swept volume can touch the box [mins,maxs]
+static inline bool CM_SweepTouchesBox( const cmSweep_t *sw, const float *mins, const float *maxs ) {
+	float tmin = 0.0f, tmax = 1.0f;
+
+	for ( int a = 0; a < 3; a++ ) {
+		const float lo = mins[a] - sw->ext[a] - sw->start[a];
+		const float hi = maxs[a] + sw->ext[a] - sw->start[a];
+
+		if ( sw->delta[a] == 0.0f ) {
+			if ( lo > 0.0f || hi < 0.0f ) {
+				return false;
+			}
+			continue;
+		}
+		float t0 = lo * sw->invDelta[a];
+		float t1 = hi * sw->invDelta[a];
+		if ( t0 > t1 ) {
+			const float t = t0; t0 = t1; t1 = t;
+		}
+		if ( t0 > tmin ) tmin = t0;
+		if ( t1 < tmax ) tmax = t1;
+		if ( tmin > tmax ) {
+			return false;
+		}
+	}
+	return true;
+}
+
+void	CM_BuildLeafAccel( clipMap_t &cm );
+int		CM_AccelCollect( const clipMap_t *local, const cLeaf_t *leaf, const vec3_t mins, const vec3_t maxs, const cmSweep_t *sweep, int *out, int maxOut );
 
 // cm_test.c
 

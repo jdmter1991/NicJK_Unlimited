@@ -23,6 +23,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 */
 
 #include "server.h"
+#include "qcommon/com_profile.h"
 
 #include "ghoul2/ghoul2_shared.h"
 #include "sv_gameapi.h"
@@ -1177,6 +1178,253 @@ int SV_FrameMsec()
 
 /*
 ==================
+Hitch stack sampler (Windows only, debugging aid)
+
+"sv_hitchStacks <ms>": while a server frame has been running for longer than <ms>, a watchdog
+thread samples the main thread's call stack every 20 ms and appends the symbolized stacks to
+sv_hitch_stacks.log in the working directory. 0 = off (no thread is created).
+==================
+*/
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <dbghelp.h>
+#include <cstdio>
+#pragma comment( lib, "dbghelp.lib" )
+
+static HANDLE			svWatchMainThread = NULL;
+static volatile LONG64	svWatchFrameStartMs = 0;	// 0 = not inside a frame
+static volatile LONG	svWatchThresholdMs = 0;
+static volatile LONG	svWatchServerTime = 0;
+
+static DWORD WINAPI SV_WatchdogThread( LPVOID ) {
+	const HANDLE proc = GetCurrentProcess();
+	FILE *f = NULL;
+	bool symReady = false;
+	LONG64 lastFrame = 0;
+	int samplesThisFrame = 0;
+
+	for ( ;; ) {
+		Sleep( 20 );
+		const LONG64 start = svWatchFrameStartMs;
+		const LONG threshold = svWatchThresholdMs;
+		if ( !start || threshold <= 0 ) {
+			continue;
+		}
+		const LONG64 elapsed = (LONG64)GetTickCount64() - start;
+		if ( elapsed < threshold ) {
+			continue;
+		}
+		if ( start != lastFrame ) {
+			lastFrame = start;
+			samplesThisFrame = 0;
+		}
+		if ( samplesThisFrame >= 40 ) {
+			continue;
+		}
+
+		void *pcs[48];
+		int n = 0;
+		CONTEXT ctx;
+		memset( &ctx, 0, sizeof( ctx ) );
+		ctx.ContextFlags = CONTEXT_FULL;
+		if ( SuspendThread( svWatchMainThread ) == (DWORD)-1 ) {
+			continue;
+		}
+		if ( GetThreadContext( svWatchMainThread, &ctx ) ) {
+#ifdef _M_X64
+			while ( n < 48 && ctx.Rip ) {
+				pcs[n++] = (void *)ctx.Rip;
+				DWORD64 imageBase = 0;
+				PRUNTIME_FUNCTION fn = RtlLookupFunctionEntry( ctx.Rip, &imageBase, NULL );
+				if ( !fn ) {
+					// leaf function: return address is at the top of the stack
+					if ( IsBadReadPtr( (void *)ctx.Rsp, 8 ) ) break;
+					ctx.Rip = *(DWORD64 *)ctx.Rsp;
+					ctx.Rsp += 8;
+					continue;
+				}
+				PVOID handlerData = NULL;
+				DWORD64 establisher = 0;
+				RtlVirtualUnwind( UNW_FLAG_NHANDLER, imageBase, ctx.Rip, fn, &ctx, &handlerData, &establisher, NULL );
+			}
+#endif
+		}
+		ResumeThread( svWatchMainThread );
+		if ( !n ) {
+			continue;
+		}
+
+		if ( !symReady ) {
+			char exe[MAX_PATH], path[MAX_PATH * 3];
+			GetModuleFileNameA( NULL, exe, sizeof( exe ) );
+			char *slash = strrchr( exe, '\\' );
+			if ( slash ) *slash = 0;
+			snprintf( path, sizeof( path ), "%s;%s\\taystjk;%s\\base", exe, exe, exe );
+			SymSetOptions( SYMOPT_UNDNAME | SYMOPT_DEFERRED_LOADS | SYMOPT_LOAD_LINES );
+			SymInitialize( proc, path, TRUE );
+			symReady = true;
+			f = fopen( "sv_hitch_stacks.log", "a" );
+		} else {
+			SymRefreshModuleList( proc );
+		}
+		if ( !f ) {
+			continue;
+		}
+		fprintf( f, "--- svtime %ld frame running %lld ms, sample %d\n", (long)svWatchServerTime, (long long)elapsed, samplesThisFrame );
+		for ( int i = 0; i < n; i++ ) {
+			char buf[sizeof( SYMBOL_INFO ) + 256];
+			SYMBOL_INFO *sym = (SYMBOL_INFO *)buf;
+			DWORD64 disp = 0;
+			memset( buf, 0, sizeof( buf ) );
+			sym->SizeOfStruct = sizeof( SYMBOL_INFO );
+			sym->MaxNameLen = 255;
+			IMAGEHLP_MODULE64 mod;
+			memset( &mod, 0, sizeof( mod ) );
+			mod.SizeOfStruct = sizeof( mod );
+			const BOOL haveMod = SymGetModuleInfo64( proc, (DWORD64)pcs[i], &mod );
+			if ( SymFromAddr( proc, (DWORD64)pcs[i], &disp, sym ) ) {
+				fprintf( f, "  %s!%s+0x%llx\n", haveMod ? mod.ModuleName : "?", sym->Name, (unsigned long long)disp );
+			} else {
+				fprintf( f, "  %s!%p\n", haveMod ? mod.ModuleName : "?", pcs[i] );
+			}
+		}
+		fflush( f );
+		samplesThisFrame++;
+	}
+	return 0;
+}
+
+static void SV_WatchdogFrameBegin( int thresholdMs ) {
+	if ( thresholdMs > 0 && !svWatchMainThread ) {
+		DuplicateHandle( GetCurrentProcess(), GetCurrentThread(), GetCurrentProcess(), &svWatchMainThread,
+			THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT | THREAD_QUERY_INFORMATION, FALSE, 0 );
+		CreateThread( NULL, 0, SV_WatchdogThread, NULL, 0, NULL );
+	}
+	svWatchThresholdMs = thresholdMs;
+	svWatchServerTime = sv.time;
+	svWatchFrameStartMs = thresholdMs > 0 ? (LONG64)GetTickCount64() : 0;
+}
+static void SV_WatchdogFrameEnd( void ) {
+	svWatchFrameStartMs = 0;
+}
+#else
+static void SV_WatchdogFrameBegin( int ) {}
+static void SV_WatchdogFrameEnd( void ) {}
+#endif
+
+/*
+==================
+SV_Profile
+
+"sv_profile <seconds>": prints one SVPROF line every <seconds> (0 = off).
+All times are wall-clock milliseconds of work done inside SV_Frame.
+==================
+*/
+static cvar_t *sv_profile = NULL;
+
+typedef struct svProfAccum_s {
+	uint64_t	windowStartNs;
+	int			frames;			// SV_Frame calls that ran at least one game frame
+	int			gameFrames;
+	int			overBudget;		// frames whose work exceeded 1000/sv_fps ms
+	uint64_t	totalNs, botNs, gameNs, snapNs;
+	uint64_t	maxTotalNs, maxBotNs, maxGameNs, maxSnapNs;
+	comProfile_t base;			// counter values at window start
+} svProfAccum_t;
+static svProfAccum_t svProf;
+
+static void SV_ProfileReport( uint64_t nowNs ) {
+	static const char *phaseNames[CPROF_NUM_PHASES] = { "other", "botai", "game", "snap" };
+	const double f = svProf.frames > 0 ? (double)svProf.frames : 1.0;
+	int bots = 0, humans = 0;
+
+	for ( int i = 0; i < sv_maxclients->integer; i++ ) {
+		if ( svs.clients[i].state >= CS_CONNECTED ) {
+			if ( svs.clients[i].netchan.remoteAddress.type == NA_BOT ) bots++; else humans++;
+		}
+	}
+
+	Com_Printf( "SVPROF window=%.1fs frames=%d gameframes=%d bots=%d humans=%d over_budget=%d\n",
+		(double)(nowNs - svProf.windowStartNs) / 1e9, svProf.frames, svProf.gameFrames, bots, humans, svProf.overBudget );
+	Com_Printf( "SVPROF ms/frame avg(max): total %.3f (%.3f)  botai %.3f (%.3f)  game %.3f (%.3f)  snap %.3f (%.3f)\n",
+		svProf.totalNs / f / 1e6, svProf.maxTotalNs / 1e6,
+		svProf.botNs / f / 1e6, svProf.maxBotNs / 1e6,
+		svProf.gameNs / f / 1e6, svProf.maxGameNs / 1e6,
+		svProf.snapNs / f / 1e6, svProf.maxSnapNs / 1e6 );
+	for ( int ph = 0; ph < CPROF_NUM_PHASES; ph++ ) {
+		const uint64_t tr = com_prof.svTraces[ph] - svProf.base.svTraces[ph];
+		const uint64_t trNs = com_prof.svTraceNs[ph] - svProf.base.svTraceNs[ph];
+		const uint64_t wNs = com_prof.svWorldTraceNs[ph] - svProf.base.svWorldTraceNs[ph];
+		const uint64_t pc = com_prof.svPointContents[ph] - svProf.base.svPointContents[ph];
+		const uint64_t pcNs = com_prof.svPointContentsNs[ph] - svProf.base.svPointContentsNs[ph];
+		if ( !tr && !pc ) {
+			continue;
+		}
+		Com_Printf( "SVPROF %-5s traces/frame %.1f  trace ms/frame %.3f (world %.3f)  us/trace %.2f  pointcontents/frame %.1f (%.3f ms)\n",
+			phaseNames[ph], tr / f, trNs / f / 1e6, wNs / f / 1e6, tr ? trNs / (double)tr / 1e3 : 0.0, pc / f, pcNs / f / 1e6 );
+	}
+	{
+		const uint64_t lv = com_prof.cmLeafVisits - svProf.base.cmLeafVisits;
+		const uint64_t lb = com_prof.cmLeafBrushesWalked - svProf.base.cmLeafBrushesWalked;
+		const uint64_t bt = com_prof.cmBrushesTested - svProf.base.cmBrushesTested;
+		const uint64_t an = com_prof.cmAccelNodes - svProf.base.cmAccelNodes;
+		Com_Printf( "SVPROF cm per frame: leaf visits %.1f  leafbrushes walked %.0f  brushes plane-tested %.1f  accel nodes %.0f\n",
+			lv / f, lb / f, bt / f, an / f );
+	}
+}
+
+static void SV_ProfileFrame( uint64_t startNs, uint64_t botNs, uint64_t gameNs, uint64_t snapNs, int gameFrames ) {
+	const uint64_t nowNs = Com_ProfNowNs();
+	const uint64_t totalNs = nowNs - startNs;
+	static comProfile_t frameBase;
+
+	// one line for every frame that blew well past the frame budget, with what it spent on traces
+	if ( totalNs > 60000000ull && svProf.windowStartNs ) {
+		uint64_t tr = 0, trNs = 0, pc = 0, pcNs = 0;
+		for ( int ph = 0; ph < CPROF_NUM_PHASES; ph++ ) {
+			tr += com_prof.svTraces[ph] - frameBase.svTraces[ph];
+			trNs += com_prof.svTraceNs[ph] - frameBase.svTraceNs[ph];
+			pc += com_prof.svPointContents[ph] - frameBase.svPointContents[ph];
+			pcNs += com_prof.svPointContentsNs[ph] - frameBase.svPointContentsNs[ph];
+		}
+		Com_Printf( "SVPROF HITCH time=%d total %.1f ms (botai %.1f game %.1f snap %.1f, %d game frames): %d traces %.1f ms, %d pointcontents %.1f ms, slowest trace %.1f ms phase %d (%.0f %.0f %.0f)->(%.0f %.0f %.0f) box (%.0f %.0f %.0f)(%.0f %.0f %.0f)\n",
+			sv.time, totalNs / 1e6, botNs / 1e6, gameNs / 1e6, snapNs / 1e6, gameFrames,
+			(int)tr, trNs / 1e6, (int)pc, pcNs / 1e6, com_prof.worstTraceNs / 1e6, com_prof.worstTracePhase,
+			com_prof.worstTraceStart[0], com_prof.worstTraceStart[1], com_prof.worstTraceStart[2],
+			com_prof.worstTraceEnd[0], com_prof.worstTraceEnd[1], com_prof.worstTraceEnd[2],
+			com_prof.worstTraceMins[0], com_prof.worstTraceMins[1], com_prof.worstTraceMins[2],
+			com_prof.worstTraceMaxs[0], com_prof.worstTraceMaxs[1], com_prof.worstTraceMaxs[2] );
+	}
+	com_prof.worstTraceNs = 0;
+	frameBase = com_prof;
+
+	if ( !svProf.windowStartNs ) {
+		Com_Memset( &svProf, 0, sizeof( svProf ) );
+		svProf.windowStartNs = nowNs;
+		svProf.base = com_prof;
+		return;
+	}
+	if ( gameFrames > 0 ) {
+		svProf.frames++;
+		svProf.gameFrames += gameFrames;
+		svProf.totalNs += totalNs;	svProf.botNs += botNs;	svProf.gameNs += gameNs;	svProf.snapNs += snapNs;
+		if ( totalNs > svProf.maxTotalNs ) svProf.maxTotalNs = totalNs;
+		if ( botNs > svProf.maxBotNs ) svProf.maxBotNs = botNs;
+		if ( gameNs > svProf.maxGameNs ) svProf.maxGameNs = gameNs;
+		if ( snapNs > svProf.maxSnapNs ) svProf.maxSnapNs = snapNs;
+		if ( sv_fps->integer > 0 && totalNs > (uint64_t)( 1000000000 / sv_fps->integer ) ) svProf.overBudget++;
+	}
+	if ( nowNs - svProf.windowStartNs >= (uint64_t)sv_profile->integer * 1000000000ull ) {
+		SV_ProfileReport( nowNs );
+		Com_Memset( &svProf, 0, sizeof( svProf ) );
+		svProf.windowStartNs = nowNs;
+		svProf.base = com_prof;
+	}
+}
+
+/*
+==================
 SV_Frame
 
 Player movement occurs as a result of packet events, which
@@ -1287,7 +1535,29 @@ void SV_Frame( int msec ) {
 	// update ping based on the all received frames
 	SV_CalcPings();
 
-	if (com_dedicated->integer) SV_BotFrame( sv.time );
+	if ( !sv_profile ) {
+		sv_profile = Cvar_Get( "sv_profile", "0", CVAR_TEMP, "Print server frame/AI/trace profile every N seconds (0 = off)" );
+	}
+	com_prof.enabled = sv_profile->integer > 0;
+	if ( !com_prof.enabled ) {
+		svProf.windowStartNs = 0;
+	}
+	static cvar_t *sv_hitchStacks = NULL;
+	if ( !sv_hitchStacks ) {
+		sv_hitchStacks = Cvar_Get( "sv_hitchStacks", "0", CVAR_TEMP, "Sample the server call stack into sv_hitch_stacks.log while a frame runs longer than N ms (Windows, 0 = off)" );
+	}
+	SV_WatchdogFrameBegin( sv_hitchStacks->integer );
+	const uint64_t profFrameStart = com_prof.enabled ? Com_ProfNowNs() : 0;
+	uint64_t profBotNs = 0, profGameNs = 0, profSnapNs = 0;
+	int profGameFrames = 0;
+
+	if (com_dedicated->integer) {
+		const uint64_t t0 = com_prof.enabled ? Com_ProfNowNs() : 0;
+		com_prof.phase = CPROF_BOTAI;
+		SV_BotFrame( sv.time );
+		com_prof.phase = CPROF_OTHER;
+		if ( com_prof.enabled ) profBotNs = Com_ProfNowNs() - t0;
+	}
 
 	// run the game simulation in chunks
 	while ( sv.timeResidual >= frameMsec ) {
@@ -1296,7 +1566,12 @@ void SV_Frame( int msec ) {
 		sv.time += frameMsec;
 
 		// let everything in the world think and move
+		const uint64_t t0 = com_prof.enabled ? Com_ProfNowNs() : 0;
+		com_prof.phase = CPROF_GAME;
 		GVM_RunFrame( sv.time );
+		com_prof.phase = CPROF_OTHER;
+		if ( com_prof.enabled ) profGameNs += Com_ProfNowNs() - t0;
+		profGameFrames++;
 	}
 
 	//rww - RAGDOLL_BEGIN
@@ -1311,7 +1586,18 @@ void SV_Frame( int msec ) {
 	SV_CheckTimeouts();
 
 	// send messages back to the clients
-	SV_SendClientMessages();
+	{
+		const uint64_t t0 = com_prof.enabled ? Com_ProfNowNs() : 0;
+		com_prof.phase = CPROF_SNAPSHOT;
+		SV_SendClientMessages();
+		com_prof.phase = CPROF_OTHER;
+		if ( com_prof.enabled ) profSnapNs = Com_ProfNowNs() - t0;
+	}
+
+	SV_WatchdogFrameEnd();
+	if ( com_prof.enabled ) {
+		SV_ProfileFrame( profFrameStart, profBotNs, profGameNs, profSnapNs, profGameFrames );
+	}
 
 	SV_CheckCvars();
 

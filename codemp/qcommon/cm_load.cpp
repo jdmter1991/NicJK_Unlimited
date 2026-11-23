@@ -23,6 +23,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 
 // cmodel.c -- model loading
 #include "cm_local.h"
+#include "com_profile.h"
 #include "qcommon/qfiles.h"
 
 #ifdef BSPC
@@ -56,6 +57,7 @@ void SetPlaneSignbits (cplane_t *out) {
 clipMap_t	cmg; //rwwRMG - changed from cm
 int			c_pointcontents;
 int			c_traces, c_brush_traces, c_patch_traces;
+comProfile_t	com_prof;
 
 
 byte		*cmod_base;
@@ -65,6 +67,8 @@ cvar_t		*cm_noAreas;
 cvar_t		*cm_noCurves;
 cvar_t		*cm_playerCurveClip;
 cvar_t		*cm_extraVerbose;
+cvar_t		*cm_accel;
+cvar_t		*cm_accelVerify;
 #endif
 
 cmodel_t	box_model;
@@ -635,6 +639,8 @@ static void CM_LoadMap_Actual( const char *name, qboolean clientload, int *check
 	cm_noCurves = Cvar_Get ("cm_noCurves", "0", CVAR_CHEAT);
 	cm_playerCurveClip = Cvar_Get ("cm_playerCurveClip", "1", CVAR_ARCHIVE_ND|CVAR_CHEAT );
 	cm_extraVerbose = Cvar_Get ("cm_extraVerbose", "0", CVAR_TEMP );
+	cm_accel = Cvar_Get ("cm_accel", "1", CVAR_TEMP, "Use the per-leaf brush hierarchy for world traces (results are identical to the linear walk)" );
+	cm_accelVerify = Cvar_Get ("cm_accelVerify", "0", CVAR_TEMP, "Run every trace with and without cm_accel and report any difference (slow, debugging)" );
 #endif
 	Com_DPrintf( "CM_LoadMap( %s, %i )\n", name, clientload );
 
@@ -742,6 +748,9 @@ static void CM_LoadMap_Actual( const char *name, qboolean clientload, int *check
 	CMod_LoadEntityString (&header.lumps[LUMP_ENTITIES], cm, name);
 	CMod_LoadVisibility( &header.lumps[LUMP_VISIBILITY], cm );
 	CMod_LoadPatches( &header.lumps[LUMP_SURFACES], &header.lumps[LUMP_DRAWVERTS], cm );
+#ifndef BSPC
+	CM_BuildLeafAccel( cm );
+#endif
 
 	TotalSubModels += cm.numSubModels;
 
@@ -1118,3 +1127,234 @@ int CM_ModelContents(  clipHandle_t model, int subBSPIndex )
 
 	return CM_ModelContents_Actual(model, &SubBSP[subBSPIndex]);
 }
+
+
+#ifndef BSPC
+/*
+===============================================================================
+
+PER-LEAF BRUSH HIERARCHY
+
+Maps whose collision is made of very many small brushes that do not split the
+BSP (clip-brush decompositions of meshes) end up with leaves holding thousands
+of brushes. The stock code walks every brush of every leaf a trace touches and
+rejects almost all of them with the brush bounds test. This builds, for each
+such leaf, a bounding volume hierarchy over the leaf's brush list so a trace
+only visits the brushes whose bounds overlap the trace bounds.
+
+The hierarchy only selects candidates. Candidates are then processed in their
+original leaf order by the unmodified brush code, and the selection predicate
+is the same bounds test that code uses to reject a brush, so trace results are
+identical to the linear walk.
+
+===============================================================================
+*/
+
+#include <vector>
+#include <algorithm>
+#include <cfloat>
+#include <cmath>
+
+typedef struct accelBuildItem_s {
+	float	mins[3], maxs[3];
+	float	centre[3];
+	int		k;
+} accelBuildItem_t;
+
+// brush->bounds come from the first six sides (CM_BoundBrush). They are only a valid
+// container for the brush when those sides really are the six axial planes.
+static bool CM_AccelBrushBoundsUsable( const cbrush_t *b ) {
+	static const float expected[6][3] = { {-1,0,0}, {1,0,0}, {0,-1,0}, {0,1,0}, {0,0,-1}, {0,0,1} };
+
+	if ( b->numsides < 6 ) {
+		return false;
+	}
+	for ( int i = 0; i < 6; i++ ) {
+		const cplane_t *pl = b->sides[i].plane;
+		if ( pl->normal[0] != expected[i][0] || pl->normal[1] != expected[i][1] || pl->normal[2] != expected[i][2] ) {
+			return false;
+		}
+	}
+	for ( int i = 0; i < 3; i++ ) {
+		if ( !std::isfinite( b->bounds[0][i] ) || !std::isfinite( b->bounds[1][i] ) ) {
+			return false;
+		}
+	}
+	return true;
+}
+
+static void CM_AccelBuild_r( std::vector<cmAccelNode_t> &nodes, std::vector<int> &items, accelBuildItem_t *it, int n, int self ) {
+	float	mins[3], maxs[3], cmins[3], cmaxs[3];
+
+	for ( int a = 0; a < 3; a++ ) {
+		mins[a] = cmins[a] = FLT_MAX;
+		maxs[a] = cmaxs[a] = -FLT_MAX;
+	}
+	for ( int i = 0; i < n; i++ ) {
+		for ( int a = 0; a < 3; a++ ) {
+			if ( it[i].mins[a] < mins[a] ) mins[a] = it[i].mins[a];
+			if ( it[i].maxs[a] > maxs[a] ) maxs[a] = it[i].maxs[a];
+			if ( it[i].centre[a] < cmins[a] ) cmins[a] = it[i].centre[a];
+			if ( it[i].centre[a] > cmaxs[a] ) cmaxs[a] = it[i].centre[a];
+		}
+	}
+	VectorCopy( mins, nodes[self].mins );
+	VectorCopy( maxs, nodes[self].maxs );
+
+	if ( n <= CM_ACCEL_NODE_ITEMS ) {
+		nodes[self].first = (int)items.size();
+		nodes[self].count = n;
+		for ( int i = 0; i < n; i++ ) {
+			items.push_back( it[i].k );
+		}
+		return;
+	}
+
+	int axis = 0;
+	if ( cmaxs[1] - cmins[1] > cmaxs[axis] - cmins[axis] ) axis = 1;
+	if ( cmaxs[2] - cmins[2] > cmaxs[axis] - cmins[axis] ) axis = 2;
+
+	const int mid = n / 2;
+	std::nth_element( it, it + mid, it + n, [axis]( const accelBuildItem_t &a, const accelBuildItem_t &b ) {
+		if ( a.centre[axis] != b.centre[axis] ) {
+			return a.centre[axis] < b.centre[axis];
+		}
+		return a.k < b.k;
+	} );
+
+	const int child = (int)nodes.size();
+	nodes.resize( nodes.size() + 2 );
+	nodes[self].first = child;
+	nodes[self].count = 0;
+
+	CM_AccelBuild_r( nodes, items, it, mid, child );
+	CM_AccelBuild_r( nodes, items, it + mid, n - mid, child + 1 );
+}
+
+void CM_BuildLeafAccel( clipMap_t &cm ) {
+	std::vector<cmAccelNode_t>		nodes;
+	std::vector<int>				items;
+	std::vector<accelBuildItem_t>	work;
+	int		accelLeafs = 0, unusable = 0, maxBrushes = 0;
+	const int startMs = Sys_Milliseconds();
+
+	cm.numAccelNodes = cm.numAccelItems = 0;
+	cm.accelNodes = NULL;
+	cm.accelItems = NULL;
+
+	for ( int i = 0; i < cm.numBrushes; i++ ) {
+		cm.brushes[i].boundsUsable = CM_AccelBrushBoundsUsable( &cm.brushes[i] ) ? 1 : 0;
+	}
+
+	for ( int l = 0; l < cm.numLeafs; l++ ) {
+		cLeaf_t *leaf = &cm.leafs[l];
+
+		leaf->accelRoot = 0;
+		if ( leaf->numLeafBrushes < CM_ACCEL_MIN_LEAF_BRUSHES ) {
+			continue;
+		}
+		if ( leaf->firstLeafBrush < 0 || leaf->firstLeafBrush + leaf->numLeafBrushes > cm.numLeafBrushes ) {
+			continue;	// malformed leaf, leave it to the stock code
+		}
+
+		work.resize( leaf->numLeafBrushes );
+		for ( int k = 0; k < leaf->numLeafBrushes; k++ ) {
+			const int brushnum = cm.leafbrushes[leaf->firstLeafBrush + k];
+			accelBuildItem_t &w = work[k];
+
+			w.k = k;
+			if ( brushnum < 0 || brushnum >= cm.numBrushes || !cm.brushes[brushnum].boundsUsable ) {
+				// always a candidate
+				for ( int a = 0; a < 3; a++ ) {
+					w.mins[a] = -FLT_MAX;
+					w.maxs[a] = FLT_MAX;
+					w.centre[a] = 0.0f;
+				}
+				unusable++;
+				continue;
+			}
+			const cbrush_t *b = &cm.brushes[brushnum];
+			for ( int a = 0; a < 3; a++ ) {
+				w.mins[a] = b->bounds[0][a];
+				w.maxs[a] = b->bounds[1][a];
+				w.centre[a] = 0.5f * ( b->bounds[0][a] + b->bounds[1][a] );
+			}
+		}
+
+		const int root = (int)nodes.size();
+		nodes.resize( nodes.size() + 1 );
+		CM_AccelBuild_r( nodes, items, work.data(), leaf->numLeafBrushes, root );
+		leaf->accelRoot = root + 1;
+		accelLeafs++;
+		if ( leaf->numLeafBrushes > maxBrushes ) {
+			maxBrushes = leaf->numLeafBrushes;
+		}
+	}
+
+	if ( nodes.empty() ) {
+		return;
+	}
+
+	cm.numAccelNodes = (int)nodes.size();
+	cm.numAccelItems = (int)items.size();
+	cm.accelNodes = (cmAccelNode_t *)Hunk_Alloc( cm.numAccelNodes * sizeof( cmAccelNode_t ), h_high );
+	cm.accelItems = (int *)Hunk_Alloc( ( cm.numAccelItems + 1 ) * sizeof( int ), h_high );
+	memcpy( cm.accelNodes, nodes.data(), cm.numAccelNodes * sizeof( cmAccelNode_t ) );
+	if ( cm.numAccelItems ) {
+		memcpy( cm.accelItems, items.data(), cm.numAccelItems * sizeof( int ) );
+	}
+
+	Com_Printf( "CM_BuildLeafAccel: %i of %i leafs accelerated (largest %i brushes), %i nodes, %i refs, %.1f MB, %i unbounded refs, %i ms\n",
+		accelLeafs, cm.numLeafs, maxBrushes, cm.numAccelNodes, cm.numAccelItems,
+		( cm.numAccelNodes * sizeof( cmAccelNode_t ) + cm.numAccelItems * sizeof( int ) ) / ( 1024.0 * 1024.0 ),
+		unusable, Sys_Milliseconds() - startMs );
+}
+
+/*
+==================
+CM_AccelCollect
+
+Writes to out[] the leaf-list positions of all brushes of the leaf whose bounds overlap
+[mins,maxs] (same inclusive test the brush code uses) and, when sweep is given, whose node
+is reached by the swept trace volume. Returns the count, or -1 when the
+caller should fall back to walking the whole leaf.
+==================
+*/
+int CM_AccelCollect( const clipMap_t *local, const cLeaf_t *leaf, const vec3_t mins, const vec3_t maxs, const cmSweep_t *sweep, int *out, int maxOut ) {
+	int		stack[64];
+	int		sp = 0;
+	int		n = 0;
+
+	stack[sp++] = leaf->accelRoot - 1;
+	while ( sp ) {
+		const cmAccelNode_t *node = &local->accelNodes[stack[--sp]];
+
+		com_prof.cmAccelNodes++;
+
+		if ( mins[0] > node->maxs[0] || mins[1] > node->maxs[1] || mins[2] > node->maxs[2]
+			|| maxs[0] < node->mins[0] || maxs[1] < node->mins[1] || maxs[2] < node->mins[2] ) {
+			continue;
+		}
+		// long diagonal traces have a huge bounding box; also require the swept volume itself to
+		// reach the node (nodes holding an unbounded brush have infinite bounds and always pass)
+		if ( sweep && !CM_SweepTouchesBox( sweep, node->mins, node->maxs ) ) {
+			continue;
+		}
+		if ( node->count ) {
+			if ( n + node->count > maxOut ) {
+				return -1;
+			}
+			for ( int i = 0; i < node->count; i++ ) {
+				out[n++] = local->accelItems[node->first + i];
+			}
+		} else {
+			if ( sp + 2 > (int)ARRAY_LEN( stack ) ) {
+				return -1;
+			}
+			stack[sp++] = node->first + 1;
+			stack[sp++] = node->first;
+		}
+	}
+	return n;
+}
+#endif // !BSPC
