@@ -404,6 +404,15 @@ char *CON_Input( void )
 	int i;
 	int newlinepos = -1;
 
+	// Com_Milliseconds pumps the event queue, so this runs many times per frame and each
+	// GetNumberOfConsoleInputEvents is a system call. Typed input does not need more than
+	// one look per millisecond.
+	static int lastPollMs = -1;
+	const int nowMs = Sys_Milliseconds();
+	if ( nowMs == lastPollMs )
+		return NULL;
+	lastPollMs = nowMs;
+
 	if( !GetNumberOfConsoleInputEvents( qconsole_hin, &events ) )
 		return NULL;
 

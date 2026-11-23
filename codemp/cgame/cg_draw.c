@@ -11951,6 +11951,12 @@ void CG_DrawMiscStaticModels( void ) {
 			}
 		}
 
+		// distance cull first: it is a few multiplies, the PVS query is two BSP descents
+		VectorSubtract( cgs.miscStaticModels[i].org, cg.refdef.vieworg, diff );
+		if ( !( VectorLength( diff ) - ( cgs.miscStaticModels[i].radius ) <= cg.distanceCull ) ) {
+			continue;
+		}
+
 		if( !trap->R_InPVS( cg.refdef.vieworg, cullorg, cg.refdef.areamask ) ) {
 			continue;
 		}
@@ -11964,10 +11970,7 @@ void CG_DrawMiscStaticModels( void ) {
 		}
 		ent.hModel = cgs.miscStaticModels[i].model;
 
-		VectorSubtract(ent.origin, cg.refdef.vieworg, diff);
-		if (VectorLength(diff)-(cgs.miscStaticModels[i].radius) <= cg.distanceCull) {
-			trap->R_AddRefEntityToScene( &ent );
-		}
+		trap->R_AddRefEntityToScene( &ent );
 	}
 }
 

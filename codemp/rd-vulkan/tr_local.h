@@ -1697,7 +1697,7 @@ typedef struct trGlobals_s {
 	VBO_t					*vbos[4069];
 
 	int						numIBOs;
-	IBO_t					*ibos[4069];
+	IBO_t					*ibos[MAX_VBOS];
 
 #ifdef _G2_GORE
 	VBO_t					*goreVBO;

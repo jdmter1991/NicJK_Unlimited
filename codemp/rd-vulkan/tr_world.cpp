@@ -1400,12 +1400,30 @@ static const byte *R_ClusterPVS ( int cluster ) {
 R_inPVS
 =================
 */
+static struct {
+	const void	*world;
+	int			frame;
+	vec3_t		p1;
+	int			cluster;
+} r_inPVSCache;
+
 qboolean R_inPVS( const vec3_t p1, const vec3_t p2, byte *mask ) {
 	int		leafnum;
 	int		cluster;
 
-	leafnum = ri.CM_PointLeafnum (p1);
-	cluster = ri.CM_LeafCluster (leafnum);
+	// callers test many points against the same view origin within a frame; keep its cluster.
+	// Keyed on the world and the frame so a map change can never reuse a stale cluster.
+	if ( r_inPVSCache.world == (const void *)tr.world && r_inPVSCache.frame == tr.frameCount
+		&& r_inPVSCache.p1[0] == p1[0] && r_inPVSCache.p1[1] == p1[1] && r_inPVSCache.p1[2] == p1[2] ) {
+		cluster = r_inPVSCache.cluster;
+	} else {
+		leafnum = ri.CM_PointLeafnum (p1);
+		cluster = ri.CM_LeafCluster (leafnum);
+		r_inPVSCache.world = (const void *)tr.world;
+		r_inPVSCache.frame = tr.frameCount;
+		VectorCopy( p1, r_inPVSCache.p1 );
+		r_inPVSCache.cluster = cluster;
+	}
 
 	//agh, the damn snapshot mask doesn't work for this
 	mask = (byte *) ri.CM_ClusterPVS (cluster);

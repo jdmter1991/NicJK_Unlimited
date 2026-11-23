@@ -1713,10 +1713,144 @@ int Com_TimeVal(int minMsec)
 
 /*
 =================
+Com_Sampler
+
+"com_sampleProfile <ms>": a helper thread samples the main thread's call stack every <ms>
+milliseconds and appends the symbolized stacks to com_samples.log in the working directory.
+Windows x64 only, debugging aid, 0 = off. Summarize with tools/hitch_stacks.py.
+=================
+*/
+#if defined(_WIN32) && defined(_M_X64) && !defined(DEDICATED)
+#include <dbghelp.h>
+#include <unordered_map>
+#include <string>
+#pragma comment( lib, "dbghelp.lib" )
+
+static HANDLE			comSampleMainThread = NULL;
+static volatile LONG	comSampleIntervalMs = 0;
+
+static int Com_SamplerCapture( HANDLE thread, void **pcs, int maxPcs ) {
+	int n = 0;
+	CONTEXT ctx;
+	memset( &ctx, 0, sizeof( ctx ) );
+	ctx.ContextFlags = CONTEXT_FULL;
+	if ( SuspendThread( thread ) == (DWORD)-1 ) {
+		return 0;
+	}
+	__try {
+		if ( GetThreadContext( thread, &ctx ) ) {
+			while ( n < maxPcs && ctx.Rip ) {
+				pcs[n++] = (void *)ctx.Rip;
+				DWORD64 imageBase = 0;
+				PRUNTIME_FUNCTION fn = RtlLookupFunctionEntry( ctx.Rip, &imageBase, NULL );
+				if ( !fn ) {
+					ctx.Rip = *(DWORD64 *)ctx.Rsp;
+					ctx.Rsp += 8;
+					continue;
+				}
+				PVOID handlerData = NULL;
+				DWORD64 establisher = 0;
+				RtlVirtualUnwind( UNW_FLAG_NHANDLER, imageBase, ctx.Rip, fn, &ctx, &handlerData, &establisher, NULL );
+			}
+		}
+	} __except ( EXCEPTION_EXECUTE_HANDLER ) {
+	}
+	ResumeThread( thread );
+	return n;
+}
+
+static DWORD WINAPI Com_SamplerThread( LPVOID ) {
+	const HANDLE proc = GetCurrentProcess();
+	std::unordered_map<void *, std::string> names;
+	FILE *f = NULL;
+	bool symReady = false;
+	int count = 0;
+
+	for ( ;; ) {
+		const LONG interval = comSampleIntervalMs;
+		if ( interval <= 0 ) {
+			Sleep( 100 );
+			continue;
+		}
+		Sleep( interval );
+
+		void *pcs[40];
+		const int n = Com_SamplerCapture( comSampleMainThread, pcs, 40 );
+		if ( !n ) {
+			continue;
+		}
+		if ( !symReady ) {
+			char exe[MAX_PATH], path[MAX_PATH * 4];
+			GetModuleFileNameA( NULL, exe, sizeof( exe ) );
+			char *slash = strrchr( exe, '\\' );
+			if ( slash ) *slash = 0;
+			snprintf( path, sizeof( path ), "%s;%s\\taystjk;%s\\clienthome\\taystjk", exe, exe, exe );
+			SymSetOptions( SYMOPT_UNDNAME | SYMOPT_DEFERRED_LOADS );
+			SymInitialize( proc, path, TRUE );
+			symReady = true;
+			f = fopen( "com_samples.log", "w" );
+		}
+		if ( !f ) {
+			continue;
+		}
+		if ( ( count++ & 255 ) == 0 ) {
+			SymRefreshModuleList( proc );
+		}
+		fprintf( f, "--- sample %d\n", count );
+		for ( int i = 0; i < n; i++ ) {
+			auto it = names.find( pcs[i] );
+			if ( it == names.end() ) {
+				char buf[sizeof( SYMBOL_INFO ) + 256];
+				SYMBOL_INFO *sym = (SYMBOL_INFO *)buf;
+				DWORD64 disp = 0;
+				memset( buf, 0, sizeof( buf ) );
+				sym->SizeOfStruct = sizeof( SYMBOL_INFO );
+				sym->MaxNameLen = 255;
+				IMAGEHLP_MODULE64 mod;
+				memset( &mod, 0, sizeof( mod ) );
+				mod.SizeOfStruct = sizeof( mod );
+				const BOOL haveMod = SymGetModuleInfo64( proc, (DWORD64)pcs[i], &mod );
+				char line[400];
+				if ( SymFromAddr( proc, (DWORD64)pcs[i], &disp, sym ) ) {
+					snprintf( line, sizeof( line ), "%s!%s", haveMod ? mod.ModuleName : "?", sym->Name );
+				} else {
+					snprintf( line, sizeof( line ), "%s!?", haveMod ? mod.ModuleName : "?" );
+				}
+				it = names.emplace( pcs[i], line ).first;
+			}
+			fprintf( f, "  %s\n", it->second.c_str() );
+		}
+		if ( ( count & 63 ) == 0 ) {
+			fflush( f );
+		}
+	}
+	return 0;
+}
+
+static void Com_SamplerUpdate( void ) {
+	static cvar_t *com_sampleProfile = NULL;
+	if ( !com_sampleProfile ) {
+		com_sampleProfile = Cvar_Get( "com_sampleProfile", "0", CVAR_TEMP, "Sample the main thread call stack every N ms into com_samples.log (Windows, 0 = off)" );
+	}
+	if ( com_sampleProfile->integer > 0 && !comSampleMainThread ) {
+		DuplicateHandle( GetCurrentProcess(), GetCurrentThread(), GetCurrentProcess(), &comSampleMainThread,
+			THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT | THREAD_QUERY_INFORMATION, FALSE, 0 );
+		CreateThread( NULL, 0, Com_SamplerThread, NULL, 0, NULL );
+	}
+	comSampleIntervalMs = com_sampleProfile->integer;
+}
+#else
+static void Com_SamplerUpdate( void ) {}
+#endif
+
+/*
+=================
 Com_Frame
 =================
 */
 void Com_Frame( void ) {
+
+	Com_SamplerUpdate();
 
 	try
 	{

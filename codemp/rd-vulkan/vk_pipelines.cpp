@@ -1910,18 +1910,54 @@ VkPipeline vk_gen_pipeline( uint32_t index ) {
     }
 }
 
+// RB_StageIteratorGeneric asks for a pipeline by definition for every stage of every entity
+// and world draw, and the search below is a linear memcmp over all pipelines. Remember the
+// answer per definition. The table only holds results of full searches (base 0), and every
+// hit is checked against the pipeline's stored definition, so a hit is exactly what the search
+// would return. The pipeline list is append-only; if it ever shrinks (renderer restart) the
+// table is cleared.
+#define VK_PIPELINE_LOOKUP_SIZE 4096
+static uint32_t vk_pipeline_lookup[VK_PIPELINE_LOOKUP_SIZE];	// pipeline index + 1, 0 = empty
+static uint32_t vk_pipeline_lookup_count = 0;
+
 uint32_t vk_find_pipeline_ext( uint32_t base, const Vk_Pipeline_Def *def, qboolean use ) {
     const Vk_Pipeline_Def *cur_def;
     uint32_t index;
+    uint32_t hash = 2166136261u;
 
-    for (index = base; index < vk.pipelines_count; index++) {
-        cur_def = &vk.pipelines[index].def;
-        if (memcmp(cur_def, def, sizeof(*def)) == 0) {
+    if ( vk.pipelines_count < vk_pipeline_lookup_count ) {
+        Com_Memset( vk_pipeline_lookup, 0, sizeof( vk_pipeline_lookup ) );
+    }
+    vk_pipeline_lookup_count = vk.pipelines_count;
+
+    if ( base == 0 ) {
+        const byte *bytes = (const byte *)def;
+        for ( size_t i = 0; i < sizeof( *def ); i++ ) {
+            hash = ( hash ^ bytes[i] ) * 16777619u;
+        }
+        hash &= ( VK_PIPELINE_LOOKUP_SIZE - 1 );
+
+        index = vk_pipeline_lookup[hash];
+        if ( index && index - 1 < vk.pipelines_count && memcmp( &vk.pipelines[index - 1].def, def, sizeof( *def ) ) == 0 ) {
+            index--;
             goto found;
         }
     }
 
+    for (index = base; index < vk.pipelines_count; index++) {
+        cur_def = &vk.pipelines[index].def;
+        if (memcmp(cur_def, def, sizeof(*def)) == 0) {
+            goto remember;
+        }
+    }
+
     index = vk_alloc_pipeline(def);
+
+remember:
+    if ( base == 0 ) {
+        vk_pipeline_lookup[hash] = index + 1;
+    }
+    vk_pipeline_lookup_count = vk.pipelines_count;
 
 found:
     if (use)
