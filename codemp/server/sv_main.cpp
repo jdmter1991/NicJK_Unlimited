@@ -1295,6 +1295,100 @@ static DWORD WINAPI SV_WatchdogThread( LPVOID ) {
 	return 0;
 }
 
+// "sv_crashStacks 1": on an access violation (or other fatal exception) append the faulting
+// call stack to sv_crash_stacks.log before the process dies.
+static void SV_SymInit( HANDLE proc ) {
+	static bool done = false;
+	if ( done ) {
+		SymRefreshModuleList( proc );
+		return;
+	}
+	char exe[MAX_PATH], path[MAX_PATH * 3];
+	GetModuleFileNameA( NULL, exe, sizeof( exe ) );
+	char *slash = strrchr( exe, '\\' );
+	if ( slash ) *slash = 0;
+	snprintf( path, sizeof( path ), "%s;%s\\taystjk;%s\\base", exe, exe, exe );
+	SymSetOptions( SYMOPT_UNDNAME | SYMOPT_DEFERRED_LOADS | SYMOPT_LOAD_LINES );
+	SymInitialize( proc, path, TRUE );
+	done = true;
+}
+
+static LONG WINAPI SV_CrashHandler( EXCEPTION_POINTERS *info ) {
+	static volatile LONG inHandler = 0;
+	const DWORD code = info->ExceptionRecord->ExceptionCode;
+
+	if ( code != EXCEPTION_ACCESS_VIOLATION && code != EXCEPTION_STACK_OVERFLOW && code != EXCEPTION_ILLEGAL_INSTRUCTION
+		&& code != EXCEPTION_INT_DIVIDE_BY_ZERO && code != 0xC0000374 /* heap corruption */ && code != 0xC0000409 /* fail fast */ ) {
+		return EXCEPTION_CONTINUE_SEARCH;
+	}
+	if ( InterlockedExchange( &inHandler, 1 ) ) {
+		return EXCEPTION_CONTINUE_SEARCH;
+	}
+	const HANDLE proc = GetCurrentProcess();
+	FILE *f = fopen( "sv_crash_stacks.log", "a" );
+	if ( f ) {
+		CONTEXT ctx = *info->ContextRecord;
+		fprintf( f, "=== exception 0x%08lx at %p, svtime %d", code, info->ExceptionRecord->ExceptionAddress, sv.time );
+		if ( code == EXCEPTION_ACCESS_VIOLATION && info->ExceptionRecord->NumberParameters >= 2 ) {
+			fprintf( f, ", %s address %p", info->ExceptionRecord->ExceptionInformation[0] ? "writing" : "reading",
+				(void *)info->ExceptionRecord->ExceptionInformation[1] );
+		}
+		fprintf( f, "\n" );
+		SV_SymInit( proc );
+#ifdef _M_X64
+		for ( int n = 0; n < 60 && ctx.Rip; n++ ) {
+			char buf[sizeof( SYMBOL_INFO ) + 256];
+			SYMBOL_INFO *sym = (SYMBOL_INFO *)buf;
+			DWORD64 disp = 0;
+			memset( buf, 0, sizeof( buf ) );
+			sym->SizeOfStruct = sizeof( SYMBOL_INFO );
+			sym->MaxNameLen = 255;
+			IMAGEHLP_MODULE64 mod;
+			memset( &mod, 0, sizeof( mod ) );
+			mod.SizeOfStruct = sizeof( mod );
+			const BOOL haveMod = SymGetModuleInfo64( proc, ctx.Rip, &mod );
+			IMAGEHLP_LINE64 line;
+			DWORD ldisp = 0;
+			memset( &line, 0, sizeof( line ) );
+			line.SizeOfStruct = sizeof( line );
+			const BOOL haveLine = SymGetLineFromAddr64( proc, ctx.Rip, &ldisp, &line );
+			if ( SymFromAddr( proc, ctx.Rip, &disp, sym ) ) {
+				fprintf( f, "  %s!%s+0x%llx", haveMod ? mod.ModuleName : "?", sym->Name, (unsigned long long)disp );
+			} else {
+				fprintf( f, "  %s!%p", haveMod ? mod.ModuleName : "?", (void *)ctx.Rip );
+			}
+			if ( haveLine ) {
+				const char *fn = strrchr( line.FileName, '\\' );
+				fprintf( f, "  (%s:%lu)", fn ? fn + 1 : line.FileName, line.LineNumber );
+			}
+			fprintf( f, "\n" );
+
+			DWORD64 imageBase = 0;
+			PRUNTIME_FUNCTION fn = RtlLookupFunctionEntry( ctx.Rip, &imageBase, NULL );
+			if ( !fn ) {
+				if ( IsBadReadPtr( (void *)ctx.Rsp, 8 ) ) break;
+				ctx.Rip = *(DWORD64 *)ctx.Rsp;
+				ctx.Rsp += 8;
+				continue;
+			}
+			PVOID handlerData = NULL;
+			DWORD64 establisher = 0;
+			RtlVirtualUnwind( UNW_FLAG_NHANDLER, imageBase, ctx.Rip, fn, &ctx, &handlerData, &establisher, NULL );
+		}
+#endif
+		fclose( f );
+	}
+	return EXCEPTION_CONTINUE_SEARCH;
+}
+
+static void SV_CrashHandlerInstall( void ) {
+	static bool installed = false;
+	if ( !installed ) {
+		installed = true;
+		AddVectoredExceptionHandler( 1, SV_CrashHandler );
+	}
+}
+
 static void SV_WatchdogFrameBegin( int thresholdMs ) {
 	if ( thresholdMs > 0 && !svWatchMainThread ) {
 		DuplicateHandle( GetCurrentProcess(), GetCurrentThread(), GetCurrentProcess(), &svWatchMainThread,
@@ -1311,6 +1405,7 @@ static void SV_WatchdogFrameEnd( void ) {
 #else
 static void SV_WatchdogFrameBegin( int ) {}
 static void SV_WatchdogFrameEnd( void ) {}
+static void SV_CrashHandlerInstall( void ) {}
 #endif
 
 /*
@@ -1545,6 +1640,13 @@ void SV_Frame( int msec ) {
 	static cvar_t *sv_hitchStacks = NULL;
 	if ( !sv_hitchStacks ) {
 		sv_hitchStacks = Cvar_Get( "sv_hitchStacks", "0", CVAR_TEMP, "Sample the server call stack into sv_hitch_stacks.log while a frame runs longer than N ms (Windows, 0 = off)" );
+	}
+	static cvar_t *sv_crashStacks = NULL;
+	if ( !sv_crashStacks ) {
+		sv_crashStacks = Cvar_Get( "sv_crashStacks", "0", CVAR_TEMP, "Write the call stack of a fatal exception to sv_crash_stacks.log (Windows)" );
+	}
+	if ( sv_crashStacks->integer ) {
+		SV_CrashHandlerInstall();
 	}
 	SV_WatchdogFrameBegin( sv_hitchStacks->integer );
 	const uint64_t profFrameStart = com_prof.enabled ? Com_ProfNowNs() : 0;

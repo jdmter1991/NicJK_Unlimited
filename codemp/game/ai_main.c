@@ -59,6 +59,194 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 
 #define BOT_THINK_TIME	0
 
+int BotAI(int client, float thinktime);
+
+/*
+==============================================================================
+Bot AI profiling
+
+"bot_profile <seconds>" prints, every <seconds>, how long bot thinking took
+(per think: average and worst), and for every function in this file that
+traces: number of traces, total and worst time. 0 = off. The wrappers below
+cost one integer test per trace while profiling is off.
+==============================================================================
+*/
+#ifdef _WIN32
+__declspec(dllimport) int __stdcall QueryPerformanceCounter(long long *lpPerformanceCount);
+__declspec(dllimport) int __stdcall QueryPerformanceFrequency(long long *lpFrequency);
+static double BotProf_NowUs(void) {
+	static double usPerTick = 0.0;
+	long long t;
+	if (usPerTick == 0.0) {
+		long long f;
+		QueryPerformanceFrequency(&f);
+		usPerTick = 1000000.0 / (double)f;
+	}
+	QueryPerformanceCounter(&t);
+	return (double)t * usPerTick;
+}
+#else
+#include <time.h>
+static double BotProf_NowUs(void) {
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return (double)ts.tv_sec * 1000000.0 + (double)ts.tv_nsec / 1000.0;
+}
+#endif
+
+#define BOTPROF_MAX_SITES 160
+
+typedef struct botProfSite_s {
+	const char	*fn;		// __FUNCTION__ of the caller (string literal, compared by address)
+	int			calls;
+	double		us;
+	double		maxUs;
+} botProfSite_t;
+
+typedef struct botProf_s {
+	int				enabled;
+	double			windowStartUs;
+	int				frames;				// BotAIStartFrame calls
+	int				thinks;				// BotAI calls
+	int				skippedFrames;		// frames in which no bot thought
+	double			frameUs, maxFrameUs;
+	double			thinkUs, maxThinkUs;
+	int				maxThinkClient;
+	int				traces;
+	double			traceUs;
+	int				numSites;
+	botProfSite_t	sites[BOTPROF_MAX_SITES];
+	// per think
+	int				thinkTraces, maxThinkTraces;
+} botProf_t;
+
+static botProf_t botProf;
+vmCvar_t bot_profile;
+
+static botProfSite_t *BotProf_Site(const char *fn) {
+	int i;
+	for (i = 0; i < botProf.numSites; i++) {
+		if (botProf.sites[i].fn == fn) {
+			return &botProf.sites[i];
+		}
+	}
+	if (botProf.numSites >= BOTPROF_MAX_SITES) {
+		return &botProf.sites[BOTPROF_MAX_SITES - 1];
+	}
+	botProf.sites[botProf.numSites].fn = fn;
+	return &botProf.sites[botProf.numSites++];
+}
+
+static void BotProf_Account(const char *fn, double us) {
+	botProfSite_t *site = BotProf_Site(fn);
+	site->calls++;
+	site->us += us;
+	if (us > site->maxUs) site->maxUs = us;
+	botProf.traces++;
+	botProf.traceUs += us;
+	botProf.thinkTraces++;
+}
+
+static void BotProf_JPTrace(const char *fn, trace_t *results, const vec3_t start, const vec3_t mins, const vec3_t maxs, const vec3_t end, int passEntityNum, int contentmask, int capsule, int traceFlags, int useLod) {
+	if (botProf.enabled) {
+		const double t0 = BotProf_NowUs();
+		JP_Trace(results, start, mins, maxs, end, passEntityNum, contentmask, capsule, traceFlags, useLod);
+		BotProf_Account(fn, BotProf_NowUs() - t0);
+		return;
+	}
+	JP_Trace(results, start, mins, maxs, end, passEntityNum, contentmask, capsule, traceFlags, useLod);
+}
+
+static void BotProf_RawTrace(const char *fn, trace_t *results, const vec3_t start, const vec3_t mins, const vec3_t maxs, const vec3_t end, int passEntityNum, int contentmask, int capsule, int traceFlags, int useLod) {
+	if (botProf.enabled) {
+		const double t0 = BotProf_NowUs();
+		trap->Trace(results, start, mins, maxs, end, passEntityNum, contentmask, capsule, traceFlags, useLod);
+		BotProf_Account(fn, BotProf_NowUs() - t0);
+		return;
+	}
+	trap->Trace(results, start, mins, maxs, end, passEntityNum, contentmask, capsule, traceFlags, useLod);
+}
+
+static int QDECL BotProf_SiteCompare(const void *a, const void *b) {
+	const double d = ((const botProfSite_t *)b)->us - ((const botProfSite_t *)a)->us;
+	return d > 0 ? 1 : (d < 0 ? -1 : 0);
+}
+
+static void BotProf_Report(double nowUs) {
+	int i;
+	const double frames = botProf.frames > 0 ? botProf.frames : 1;
+	const double thinks = botProf.thinks > 0 ? botProf.thinks : 1;
+
+	trap->Print("BOTPROF window=%.1fs frames=%d (no-think frames %d) thinks=%d  ai ms/frame avg %.3f max %.3f  think us avg %.1f max %.1f (client %d)\n",
+		(nowUs - botProf.windowStartUs) / 1e6, botProf.frames, botProf.skippedFrames, botProf.thinks,
+		botProf.frameUs / frames / 1e3, botProf.maxFrameUs / 1e3, botProf.thinkUs / thinks, botProf.maxThinkUs, botProf.maxThinkClient);
+	trap->Print("BOTPROF traces from ai_main.c: %.1f per think (max %d in one think), %.1f%% of ai time\n",
+		botProf.traces / thinks, botProf.maxThinkTraces, botProf.frameUs > 0 ? 100.0 * botProf.traceUs / botProf.frameUs : 0.0);
+	qsort(botProf.sites, botProf.numSites, sizeof(botProf.sites[0]), BotProf_SiteCompare);
+	for (i = 0; i < botProf.numSites && i < 14; i++) {
+		const botProfSite_t *site = &botProf.sites[i];
+		trap->Print("BOTPROF   %-34s %7d traces  %6.2f per think  %8.1f ms total  %6.1f us avg  %8.1f us max\n",
+			site->fn, site->calls, site->calls / thinks, site->us / 1e3, site->calls ? site->us / site->calls : 0.0, site->maxUs);
+	}
+}
+
+// called at the top of BotAIStartFrame; returns the frame start stamp (0 when off)
+static double BotProf_FrameBegin(void) {
+	trap->Cvar_Update(&bot_profile);
+	if (bot_profile.integer <= 0) {
+		botProf.enabled = 0;
+		return 0.0;
+	}
+	if (!botProf.enabled) {
+		memset(&botProf, 0, sizeof(botProf));
+		botProf.enabled = 1;
+		botProf.windowStartUs = BotProf_NowUs();
+	}
+	return BotProf_NowUs();
+}
+
+static void BotProf_FrameEnd(double startUs, int thinksThisFrame) {
+	double nowUs, us;
+	if (!botProf.enabled || startUs == 0.0) {
+		return;
+	}
+	nowUs = BotProf_NowUs();
+	us = nowUs - startUs;
+	botProf.frames++;
+	botProf.frameUs += us;
+	if (us > botProf.maxFrameUs) botProf.maxFrameUs = us;
+	if (!thinksThisFrame) botProf.skippedFrames++;
+	if (nowUs - botProf.windowStartUs >= (double)bot_profile.integer * 1e6) {
+		BotProf_Report(nowUs);
+		memset(&botProf, 0, sizeof(botProf));
+		botProf.enabled = 1;
+		botProf.windowStartUs = nowUs;
+	}
+}
+
+static void BotProf_Think(int client, float thinktime) {
+	double t0;
+	if (!botProf.enabled) {
+		BotAI(client, thinktime);
+		return;
+	}
+	botProf.thinkTraces = 0;
+	t0 = BotProf_NowUs();
+	BotAI(client, thinktime);
+	t0 = BotProf_NowUs() - t0;
+	botProf.thinks++;
+	botProf.thinkUs += t0;
+	if (t0 > botProf.maxThinkUs) {
+		botProf.maxThinkUs = t0;
+		botProf.maxThinkClient = client;
+	}
+	if (botProf.thinkTraces > botProf.maxThinkTraces) botProf.maxThinkTraces = botProf.thinkTraces;
+}
+
+#define JP_Trace(r, s, mi, ma, e, p, c, cap, tf, lod)		BotProf_JPTrace(__FUNCTION__, r, s, mi, ma, e, p, c, cap, tf, lod)
+#define BOT_RAW_TRACE(r, s, mi, ma, e, p, c, cap, tf, lod)	BotProf_RawTrace(__FUNCTION__, r, s, mi, ma, e, p, c, cap, tf, lod)
+
+
 //bot states
 bot_state_t* botstates[MAX_CLIENTS];
 //number of bots
@@ -1123,6 +1311,17 @@ int OrgVisible(vec3_t org1, vec3_t org2, int ignore)
 
 	return 0;
 }
+
+// same check, but the trace is booked on the calling function in the bot profile
+static int OrgVisibleFrom(const char *caller, vec3_t org1, vec3_t org2, int ignore)
+{
+	trace_t tr;
+
+	BotProf_JPTrace(caller, &tr, org1, NULL, NULL, org2, ignore, MASK_SOLID, qfalse, 0, 0);
+
+	return tr.fraction == 1 ? 1 : 0;
+}
+#define OrgVisible(org1, org2, ignore) OrgVisibleFrom(__FUNCTION__, org1, org2, ignore)
 
 //special waypoint visibility check
 int WPOrgVisible(gentity_t* bot, vec3_t org1, vec3_t org2, int ignore)
@@ -2450,71 +2649,87 @@ int PassLovedOneCheck(bot_state_t* bs, gentity_t* ent)
 qboolean G_ThereIsAMaster(void);
 
 //standard check to find a new enemy.
+//
+// Returns the nearest enemy client that passes the standard checks, is in the field of
+// vision (or can be heard), passes the mind trick / target-stickiness rules and is visible.
+//
+// The original loop traced a line of sight to every candidate that was nearer than the best
+// one found so far, in client-number order, and only afterwards applied the mind trick and
+// stickiness rules. All of those rules are side-effect free, so the same answer is obtained
+// by applying every cheap rule first, sorting what is left by distance and tracing nearest
+// first: the first visible one is the result. A bot that already has an enemy only has to
+// consider clients more than 128 units nearer than that enemy, which is usually nobody.
 int ScanForEnemies(bot_state_t* bs)
 {
 	vec3_t a;
 	float distcheck;
-	float closest;
-	int bestindex;
-	int i;
+	int i, j, k;
 	float hasEnemyDist = 0;
-	qboolean noAttackNonJM = qfalse;
-
-	closest = 999999;
-	i = 0;
-	bestindex = -1;
+	int numCandidates = 0;
+	int candIndex[MAX_CLIENTS];
+	float candDist[MAX_CLIENTS];
 
 	if (bs->currentEnemy)
 	{ //only switch to a new enemy if he's significantly closer
 		hasEnemyDist = bs->frame_Enemy_Len;
 	}
 
-	while (i <= MAX_CLIENTS)
+	// (the original loop ran to i <= MAX_CLIENTS and so also looked at the first non-client entity)
+	for (i = 0; i < MAX_CLIENTS; i++)
 	{
-		if (i != bs->client && g_entities[i].client && !OnSameTeam(&g_entities[bs->client], &g_entities[i]) && PassStandardEnemyChecks(bs, &g_entities[i]) && BotPVSCheck(g_entities[i].client->ps.origin, bs->eye) && PassLovedOneCheck(bs, &g_entities[i]))
+		qboolean tricked;
+
+		if (i == bs->client || !g_entities[i].client || OnSameTeam(&g_entities[bs->client], &g_entities[i]) ||
+			!PassStandardEnemyChecks(bs, &g_entities[i]) || !PassLovedOneCheck(bs, &g_entities[i]))
 		{
-			VectorSubtract(g_entities[i].client->ps.origin, bs->eye, a);
-			distcheck = VectorLength(a);
-			vectoangles(a, a);
-			/*
-						if (g_entities[i].client->ps.isJediMaster)
-						{ //make us think the Jedi Master is close so we'll attack him above all
-							distcheck = 1;
-						}
-			*/
-			if (distcheck < closest && ((InFieldOfVision(bs->viewangles, 90, a) && !BotMindTricked(bs->client, i)) || BotCanHear(bs, &g_entities[i], distcheck)) && OrgVisible(bs->eye, g_entities[i].client->ps.origin, -1))
-			{
-				if (BotMindTricked(bs->client, i))
-				{
-					if (distcheck < 256 || (level.time - g_entities[i].client->dangerTime) < 100)
-					{
-						if (!hasEnemyDist || distcheck < (hasEnemyDist - 128))
-						{ //if we have an enemy, only switch to closer if he is 128+ closer to avoid flipping out
-							if (!noAttackNonJM)	//|| g_entities[i].client->ps.isJediMaster)
-							{
-								closest = distcheck;
-								bestindex = i;
-							}
-						}
-					}
-				}
-				else
-				{
-					if (!hasEnemyDist || distcheck < (hasEnemyDist - 128))
-					{ //if we have an enemy, only switch to closer if he is 128+ closer to avoid flipping out
-						if (!noAttackNonJM)	//|| g_entities[i].client->ps.isJediMaster)
-						{
-							closest = distcheck;
-							bestindex = i;
-						}
-					}
-				}
-			}
+			continue;
 		}
-		i++;
+
+		VectorSubtract(g_entities[i].client->ps.origin, bs->eye, a);
+		distcheck = VectorLength(a);
+		vectoangles(a, a);
+
+		if (!(distcheck < 999999))
+		{
+			continue;
+		}
+		if (hasEnemyDist && !(distcheck < (hasEnemyDist - 128)))
+		{ //if we have an enemy, only switch to closer if he is 128+ closer to avoid flipping out
+			continue;
+		}
+
+		tricked = BotMindTricked(bs->client, i) ? qtrue : qfalse;
+
+		if (!((InFieldOfVision(bs->viewangles, 90, a) && !tricked) || BotCanHear(bs, &g_entities[i], distcheck)))
+		{
+			continue;
+		}
+		if (tricked && !(distcheck < 256 || (level.time - g_entities[i].client->dangerTime) < 100))
+		{
+			continue;
+		}
+
+		// insert sorted by distance; equal distances keep client-number order
+		for (j = numCandidates; j > 0 && candDist[j - 1] > distcheck; j--)
+		{
+			candDist[j] = candDist[j - 1];
+			candIndex[j] = candIndex[j - 1];
+		}
+		candDist[j] = distcheck;
+		candIndex[j] = i;
+		numCandidates++;
 	}
 
-	return bestindex;
+	for (k = 0; k < numCandidates; k++)
+	{
+		i = candIndex[k];
+		if (BotPVSCheck(g_entities[i].client->ps.origin, bs->eye) && OrgVisible(bs->eye, g_entities[i].client->ps.origin, -1))
+		{
+			return i;
+		}
+	}
+
+	return -1;
 }
 
 int WaitingForNow(bot_state_t* bs, vec3_t goalpos)
@@ -6366,6 +6581,28 @@ gentity_t* CheckForFriendInLOF(bot_state_t* bs)
 	vec3_t mins, maxs;
 	gentity_t* trent;
 	trace_t tr;
+	int i;
+	qboolean anyFriend = qfalse;
+
+	// The trace below can only return a teammate (team games) or a bot we "love".
+	// When no such client exists the answer is always NULL, so do not trace.
+	for (i = 0; i < MAX_CLIENTS; i++)
+	{
+		if (i == bs->client || !g_entities[i].inuse || !g_entities[i].client)
+		{
+			continue;
+		}
+		if ((IsTeamplay() && OnSameTeam(&g_entities[bs->client], &g_entities[i])) ||
+			(botstates[i] && GetLoveLevel(bs, botstates[i]) > 1))
+		{
+			anyFriend = qtrue;
+			break;
+		}
+	}
+	if (!anyFriend)
+	{
+		return NULL;
+	}
 
 	mins[0] = -3;
 	mins[1] = -3;
@@ -6385,7 +6622,7 @@ gentity_t* CheckForFriendInLOF(bot_state_t* bs)
 
 	JP_Trace(&tr, trfrom, mins, maxs, trto, bs->client, MASK_PLAYERSOLID, qfalse, 0, 0);
 
-	if (tr.fraction != 1 && tr.entityNum <= MAX_CLIENTS)
+	if (tr.fraction != 1 && tr.entityNum < MAX_CLIENTS) // was <=, which indexed botstates[MAX_CLIENTS] below
 	{
 		trent = &g_entities[tr.entityNum];
 
@@ -9695,7 +9932,7 @@ qboolean Bot_CheckAndInteractWithObstacle(bot_state_t* bs) { // Niksata Edit - F
 	traceEnd[2] += 24;
 
 	// FIXED: Use trace mask that excludes players
-	trap->Trace(&tr, traceStart, NULL, NULL, traceEnd, bs->client,
+	BOT_RAW_TRACE(&tr, traceStart, NULL, NULL, traceEnd, bs->client,
 		MASK_PLAYERSOLID & ~CONTENTS_BODY, qfalse, 0, 0);
 
 	if (tr.entityNum < ENTITYNUM_WORLD && tr.fraction < 1.0f) {
@@ -9781,7 +10018,7 @@ qboolean Bot_CheckAndInteractWithObstacle(bot_state_t* bs) { // Niksata Edit - F
 					VectorMA(jumpStart, 32.0f, forward, jumpEnd);
 					jumpEnd[2] += 48; // Jump destination
 
-					trap->Trace(&jumpTrace, jumpStart, NULL, NULL, jumpEnd, bs->client, MASK_PLAYERSOLID, qfalse, 0, 0);
+					BOT_RAW_TRACE(&jumpTrace, jumpStart, NULL, NULL, jumpEnd, bs->client, MASK_PLAYERSOLID, qfalse, 0, 0);
 
 					// If we can jump over, do it
 					if (jumpTrace.fraction >= 0.8f) {
@@ -9898,7 +10135,7 @@ qboolean Bot_CheckAndInteractWithObstacle(bot_state_t* bs) { // Niksata Edit - F
 			VectorMA(traceStart, 64.0f, forward, traceEnd);
 			traceEnd[2] += 24;
 
-			trap->Trace(&tr, traceStart, NULL, NULL, traceEnd, bs->client, MASK_PLAYERSOLID & ~CONTENTS_BODY, qfalse, 0, 0);
+			BOT_RAW_TRACE(&tr, traceStart, NULL, NULL, traceEnd, bs->client, MASK_PLAYERSOLID & ~CONTENTS_BODY, qfalse, 0, 0);
 			qboolean leftClear = (tr.fraction >= 0.8f);
 
 			// Check right path
@@ -9907,7 +10144,7 @@ qboolean Bot_CheckAndInteractWithObstacle(bot_state_t* bs) { // Niksata Edit - F
 			VectorMA(traceStart, 64.0f, forward, traceEnd);
 			traceEnd[2] += 24;
 
-			trap->Trace(&tr, traceStart, NULL, NULL, traceEnd, bs->client, MASK_PLAYERSOLID & ~CONTENTS_BODY, qfalse, 0, 0);
+			BOT_RAW_TRACE(&tr, traceStart, NULL, NULL, traceEnd, bs->client, MASK_PLAYERSOLID & ~CONTENTS_BODY, qfalse, 0, 0);
 			qboolean rightClear = (tr.fraction >= 0.8f);
 
 			// Choose best avoidance direction
@@ -10049,7 +10286,7 @@ void Bot_ExecuteSaberCombat(bot_state_t* bs) {
 			VectorMA(traceStart, dist, toEnemy, traceEnd);
 			traceEnd[2] += 24;
 
-			trap->Trace(&obstacleTrace, traceStart, NULL, NULL, traceEnd, bs->client,
+			BOT_RAW_TRACE(&obstacleTrace, traceStart, NULL, NULL, traceEnd, bs->client,
 				MASK_PLAYERSOLID & ~CONTENTS_BODY, qfalse, 0, 0);
 
 			// If obstacle detected and it's jumpable
@@ -10066,7 +10303,7 @@ void Bot_ExecuteSaberCombat(bot_state_t* bs) {
 					jumpCheckEnd[2] += 48;
 
 					trace_t jumpTrace;
-					trap->Trace(&jumpTrace, jumpCheckStart, NULL, NULL, jumpCheckEnd, bs->client,
+					BOT_RAW_TRACE(&jumpTrace, jumpCheckStart, NULL, NULL, jumpCheckEnd, bs->client,
 						MASK_PLAYERSOLID, qfalse, 0, 0);
 
 					if (jumpTrace.fraction >= 0.7f) {
@@ -10792,17 +11029,17 @@ qboolean Bot_CheckMovementPaths(bot_state_t* bs) {
 	start[2] += 24;
 	VectorMA(start, 64.0f, forward, end);
 	end[2] += 24;
-	trap->Trace(&tr, start, NULL, NULL, end, bs->client, MASK_PLAYERSOLID, qfalse, 0, 0);
+	BOT_RAW_TRACE(&tr, start, NULL, NULL, end, bs->client, MASK_PLAYERSOLID, qfalse, 0, 0);
 	if (tr.fraction < 0.8f) frontBlocked = qtrue;
 
 	// Check left path
 	VectorMA(start, 32.0f, left, end);
-	trap->Trace(&tr, start, NULL, NULL, end, bs->client, MASK_PLAYERSOLID, qfalse, 0, 0);
+	BOT_RAW_TRACE(&tr, start, NULL, NULL, end, bs->client, MASK_PLAYERSOLID, qfalse, 0, 0);
 	if (tr.fraction < 0.8f) leftBlocked = qtrue;
 
 	// Check right path
 	VectorMA(start, 32.0f, right, end);
-	trap->Trace(&tr, start, NULL, NULL, end, bs->client, MASK_PLAYERSOLID, qfalse, 0, 0);
+	BOT_RAW_TRACE(&tr, start, NULL, NULL, end, bs->client, MASK_PLAYERSOLID, qfalse, 0, 0);
 	if (tr.fraction < 0.8f) rightBlocked = qtrue;
 
 	// ENHANCED: Intelligent path selection (BALANCED JUMP USAGE)
@@ -10901,7 +11138,7 @@ void NewBotAI_GetMovement(bot_state_t* bs) {
 			VectorMA(start, 32.0f, forward, end);
 			end[2] += 24;
 
-			trap->Trace(&tr, start, NULL, NULL, end, bs->client, MASK_PLAYERSOLID, qfalse, 0, 0);
+			BOT_RAW_TRACE(&tr, start, NULL, NULL, end, bs->client, MASK_PLAYERSOLID, qfalse, 0, 0);
 
 			if (tr.fraction >= 0.8f) {
 				trap->EA_MoveForward(bs->client);
@@ -10924,7 +11161,7 @@ void NewBotAI_GetMovement(bot_state_t* bs) {
 			VectorMA(start, -32.0f, forward, end);
 			end[2] += 24;
 
-			trap->Trace(&tr, start, NULL, NULL, end, bs->client, MASK_PLAYERSOLID, qfalse, 0, 0);
+			BOT_RAW_TRACE(&tr, start, NULL, NULL, end, bs->client, MASK_PLAYERSOLID, qfalse, 0, 0);
 
 			if (tr.fraction >= 0.8f) {
 				trap->EA_MoveBack(bs->client);
@@ -11048,7 +11285,7 @@ void NewBotAI_GetMovement(bot_state_t* bs) {
 		VectorMA(start, -32.0f, forward, end);
 		end[2] += 24;
 
-		trap->Trace(&tr, start, NULL, NULL, end, bs->client, MASK_PLAYERSOLID, qfalse, 0, 0);
+		BOT_RAW_TRACE(&tr, start, NULL, NULL, end, bs->client, MASK_PLAYERSOLID, qfalse, 0, 0);
 
 		if (tr.fraction >= 0.8f) {
 			trap->EA_MoveBack(bs->client);
@@ -11075,7 +11312,7 @@ void NewBotAI_GetMovement(bot_state_t* bs) {
 		VectorMA(start, 32.0f, forward, end);
 		end[2] += 24;
 
-		trap->Trace(&tr, start, NULL, NULL, end, bs->client, MASK_PLAYERSOLID, qfalse, 0, 0);
+		BOT_RAW_TRACE(&tr, start, NULL, NULL, end, bs->client, MASK_PLAYERSOLID, qfalse, 0, 0);
 
 		if (tr.fraction >= 0.8f) {
 			trap->EA_MoveForward(bs->client);
@@ -11177,7 +11414,7 @@ void NewBotAI_GetMovement(bot_state_t* bs) {
 			VectorMA(start, 16.0f, forward, end);
 			end[2] += 24;
 
-			trap->Trace(&tr, start, NULL, NULL, end, bs->client, MASK_PLAYERSOLID, qfalse, 0, 0);
+			BOT_RAW_TRACE(&tr, start, NULL, NULL, end, bs->client, MASK_PLAYERSOLID, qfalse, 0, 0);
 
 			if (tr.fraction >= 0.8f) {
 				trap->EA_MoveForward(bs->client);
@@ -11195,7 +11432,7 @@ void NewBotAI_GetMovement(bot_state_t* bs) {
 			VectorMA(start, -16.0f, forward, end);
 			end[2] += 24;
 
-			trap->Trace(&tr, start, NULL, NULL, end, bs->client, MASK_PLAYERSOLID, qfalse, 0, 0);
+			BOT_RAW_TRACE(&tr, start, NULL, NULL, end, bs->client, MASK_PLAYERSOLID, qfalse, 0, 0);
 
 			if (tr.fraction >= 0.8f) {
 				trap->EA_MoveBack(bs->client);
@@ -14912,16 +15149,12 @@ BotAIStartFrame
 */
 int BotAIStartFrame(int time) {
 	int i;
+	int profThinks = 0;
+	const double profStart = BotProf_FrameBegin();
 
-	// ADD TIMEOUT PROTECTION:
-	static int last_frame_time = 0;
-	int current_time = trap->Milliseconds();
-
-	if (current_time - last_frame_time > 100) {  // 100ms timeout
-		BotAI_Print(PRT_WARNING, "BotAIStartFrame: Frame timeout\n");
-		last_frame_time = current_time;
-		return qtrue;  // Continue but skip this frame
-	}
+	// (A "timeout protection" block used to live here. It compared the clock against a stamp that
+	// was only refreshed when the check fired, so it fired about every 100 ms and dropped that whole
+	// bot frame: no thinking and no usercmd for any bot, roughly one server frame in five at sv_fps 40.)
 
 	for (i = 0; i < MAX_CLIENTS; i++) {
 		// BOUNDS CHECK:
@@ -14998,7 +15231,8 @@ int BotAIStartFrame(int time) {
 			botstates[i]->botthink_residual -= thinktime;
 
 			if (g_entities[i].client->pers.connected == CON_CONNECTED) {
-				BotAI(i, (float)thinktime / 1000);
+				BotProf_Think(i, (float)thinktime / 1000);
+				profThinks++;
 			}
 		}
 	}
@@ -15015,6 +15249,8 @@ int BotAIStartFrame(int time) {
 		BotUpdateInput(botstates[i], time, elapsed_time);
 		trap->BotUserCommand(botstates[i]->client, &botstates[i]->lastucmd);
 	}
+
+	BotProf_FrameEnd(profStart, profThinks);
 
 	return qtrue;
 }
@@ -15039,6 +15275,7 @@ int BotAISetup(int restart) {
 	trap->Cvar_Register(&bot_debugmessages, "bot_debugmessages", "0", CVAR_CHEAT);
 #endif
 
+	trap->Cvar_Register(&bot_profile, "bot_profile", "0", 0);
 	trap->Cvar_Register(&bot_attachments, "bot_attachments", "1", 0);
 	trap->Cvar_Register(&bot_camp, "bot_camp", "1", 0);
 
