@@ -62,6 +62,7 @@ typedef struct {
 } twMaterial_t;				// 80 bytes
 
 #define TWMAT_BLEND		1		// drawn in the blended pass
+// flags bits 1-3: animation (0 none, 1 water ripples, 2 vegetation sway, 3 cloth); the instanced path only.
 // flags bits 8-15: opacity * 255 (0 = opaque); bits 16-31: detail texture repeats per unit of UV (0 = none).
 // The detail texture is the image of the material shader's second stage.
 
@@ -110,6 +111,7 @@ typedef struct {
 	int				lodFirstSub[TWORLD_MAX_LODS];
 	int				lodNumSubs[TWORLD_MAX_LODS];
 	int				lodPassMask[TWORLD_MAX_LODS];	// bit 0: has opaque ranges, bit 1: has blended ranges
+	float			zmin, zmax;		// vertical extent in mesh space (animation reference heights)
 } tworldMesh_t;
 
 typedef struct {
@@ -136,6 +138,7 @@ typedef struct tworld_s {
 	vec3_t			*tints;			// one per material
 	float			*alphas;		// one per material: opacity for the instanced path
 	float			*details;		// one per material: detail repeats per unit of UV, 0 = none
+	byte			*anims;			// one per material: animation type
 
 	// instanced path, per-frame scratch
 	int				*visInst;		// visible placement indexes
@@ -304,8 +307,11 @@ void R_LoadTWorld( const char *bspName )
 		tw->alphas[i] = a ? a / 255.0f : 1.0f;
 	}
 	tw->details = (float *)ri.Hunk_Alloc( sizeof( float ) * ( h->numMaterials + 1 ), h_low );
-	for ( i = 0; i < h->numMaterials; i++ )
+	tw->anims = (byte *)ri.Hunk_Alloc( h->numMaterials + 1, h_low );
+	for ( i = 0; i < h->numMaterials; i++ ) {
 		tw->details[i] = (float)( ( fmat[i].flags >> 16 ) & 0xffff );
+		tw->anims[i] = (byte)( ( fmat[i].flags >> 1 ) & 7 );
+	}
 
 	// the far plane and the cull distance must cover the cooked world, whatever the BSP's worldspawn says
 	{
@@ -313,7 +319,7 @@ void R_LoadTWorld( const char *bspName )
 		float need;
 		VectorSubtract( h->maxs, h->mins, size );
 		need = VectorLength( size ) / 1.732f;
-		if ( need < 1.0e6f && tr.distanceCull < need )
+		if ( need < 8.0e6f && tr.distanceCull < need )
 			tr.distanceCull = need;
 	}
 	tw->visInst = (int *)ri.Hunk_Alloc( sizeof( int ) * ( h->numInstances + 1 ), h_low );
@@ -335,9 +341,12 @@ void R_LoadTWorld( const char *bspName )
 		VBO_t *vbo;
 		IBO_t *ibo;
 
+		tw->meshes[i].zmin = tw->meshes[i].zmax = fvert[m->firstVert].xyz[2];
 		for ( j = 0; j < m->numVerts; j++, p += stride ) {
 			const twVertex_t *v = &fvert[m->firstVert + j];
 			float *out = (float *)p;
+			if ( v->xyz[2] < tw->meshes[i].zmin ) tw->meshes[i].zmin = v->xyz[2];
+			if ( v->xyz[2] > tw->meshes[i].zmax ) tw->meshes[i].zmax = v->xyz[2];
 			out[0] = v->xyz[0]; out[1] = v->xyz[1]; out[2] = v->xyz[2]; out[3] = 0.0f;
 			out[4] = v->normal[0]; out[5] = v->normal[1]; out[6] = v->normal[2]; out[7] = 0.0f;
 			out[8] = v->st[0]; out[9] = v->st[1];
@@ -531,6 +540,7 @@ static qboolean RB_TWorldInstanced( tworld_t *tw, const int pass )
 
 	data = (twInstData_t *)vk_reserve_uniform( (size_t)total * sizeof( twInstData_t ), &bufOffset );
 	VectorScale( tw->ambientColor, light, u.ambientLight );
+	u.ambientLight[3] = (float)backEnd.refdef.floatTime;		// animation time
 	VectorScale( tw->sunColor, light, u.directedLight );
 	VectorCopy( tw->sunDir, u.localLightOrigin );
 	// light scale for pre-compressed textures, the same curve R_LightScaleTexture bakes into uncompressed ones
@@ -579,7 +589,8 @@ static qboolean RB_TWorldInstanced( tworld_t *tw, const int pass )
 			out->tint[3] = tw->alphas[sub->tintIndex];
 			out->params[0] = tw->details[sub->tintIndex];
 			out->params[1] = sub->texNoScale;
-			out->params[2] = out->params[3] = 0.0f;
+			out->params[2] = (float)tw->anims[sub->tintIndex];
+			out->params[3] = ( tw->anims[sub->tintIndex] == 3 ) ? mesh->zmax : mesh->zmin;
 		}
 	}
 
@@ -623,7 +634,7 @@ static qboolean RB_TWorldInstanced( tworld_t *tw, const int pass )
 		vk_bind_pipeline( sub->pipeline[mirror] - 1 );
 		vk_update_descriptor( VK_DESC_TEXTURE0, image->descriptor_set );
 		{
-			const shaderStage_t *ds = ( tw->details[sub->tintIndex] > 0.0f ) ? sub->shader->stages[1] : NULL;
+			const shaderStage_t *ds = ( tw->details[sub->tintIndex] > 0.0f || tw->anims[sub->tintIndex] == 1 ) ? sub->shader->stages[1] : NULL;
 			image_t *detail = ( ds && ds->bundle[0].image[0] ) ? ds->bundle[0].image[0] : tr.whiteImage;
 			vk_update_descriptor( VK_DESC_TEXTURE0 + 1, detail->descriptor_set );
 		}
