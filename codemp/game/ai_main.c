@@ -169,16 +169,28 @@ vmCvar_t bot_abTest;
 //       blocked it looks for an open direction to either side (or jumps a low obstacle) instead
 //       of backing off and picking a new random spot, and its random exploration is biased
 //       toward a far roam goal (one of the map's spawn areas) so bots travel between areas.
+// 256 = defensive reactions: get out of the way of an enemy's kata, jump attack or other special
+//       (they cannot be blocked), step out of a heavy swing when hurt, break off and heal or
+//       shield when badly hurt. Reaction is delayed by skill.
 #define BOTF_SPECIALS	32
 #define BOTF_AGGRO		64
 #define BOTF_NAV		128
+#define BOTF_DEFENSE	256
+
+#define BOTINTENT_EVADE		8	// applied whatever the buttons are, and releases attack
+
+static int botEvalEvades, botEvalDisengages, botEvalDefForce;
 
 static int botEvalNavSteers, botEvalNavJumps, botEvalNavGoals;
 
 #define BOTSEQ_JUMPATTACK	1
 #define BOTSEQ_LUNGE		2
+#define BOTSEQ_ROLLSTAB		3
+#define BOTSEQ_BACKATTACK	4
+#define BOTSEQ_STABDOWN		5
+#define BOTSEQ_MAX			6
 
-static int botEvalSeqTried[3], botEvalSeqStarted[3];	// indexed by BOTSEQ_*
+static int botEvalSeqTried[BOTSEQ_MAX], botEvalSeqStarted[BOTSEQ_MAX];	// indexed by BOTSEQ_*
 
 static int botEvalStyleSwitches;	// styles reached through the targeted selection
 
@@ -263,6 +275,10 @@ static void BotEval_Report(void) {
 	trap->Print("BOTEVAL navigation: steered around obstacles %d, jumped low obstacles %d, roam goals reached %d\n", botEvalNavSteers, botEvalNavJumps, botEvalNavGoals);
 	trap->Print("BOTEVAL jump attacks tried %d started %d; lunges / crouch specials tried %d started %d\n",
 		botEvalSeqTried[BOTSEQ_JUMPATTACK], botEvalSeqStarted[BOTSEQ_JUMPATTACK], botEvalSeqTried[BOTSEQ_LUNGE], botEvalSeqStarted[BOTSEQ_LUNGE]);
+	trap->Print("BOTEVAL roll stabs tried %d started %d; back attacks tried %d started %d; stab-downs tried %d started %d\n",
+		botEvalSeqTried[BOTSEQ_ROLLSTAB], botEvalSeqStarted[BOTSEQ_ROLLSTAB], botEvalSeqTried[BOTSEQ_BACKATTACK], botEvalSeqStarted[BOTSEQ_BACKATTACK],
+		botEvalSeqTried[BOTSEQ_STABDOWN], botEvalSeqStarted[BOTSEQ_STABDOWN]);
+	trap->Print("BOTEVAL defence: evasions %d, disengages when hurt %d, defensive force uses %d\n", botEvalEvades, botEvalDisengages, botEvalDefForce);
 	if (bot_abTest.integer) {
 		trap->Print("BOTEVAL baseline: bots %d kills %d deaths %d | features %d: bots %d kills %d deaths %d\n",
 			bots[0], kills[0], deaths[0], bot_features.integer, bots[1], kills[1], deaths[1]);
@@ -986,26 +1002,61 @@ void BotInputToUserCommand(bot_state_t* bs, bot_input_t* bi, usercmd_t* ucmd, in
 	if (bs->seqType && g_entities[bs->client].client) {
 		const playerState_t *sps = &g_entities[bs->client].client->ps;
 
-		if (BG_SaberInSpecial(sps->saberMove)) {
+		const qboolean inFwdRoll = (sps->legsAnim == BOTH_ROLL_F) ? qtrue : qfalse;
+		const int maxFrames = (bs->seqType == BOTSEQ_ROLLSTAB) ? 44 : 9;
+		qboolean started;
+
+		switch (bs->seqType) {
+		case BOTSEQ_ROLLSTAB:	started = (sps->saberMove == LS_ROLL_STAB) ? qtrue : qfalse; break;
+		case BOTSEQ_BACKATTACK:	started = (sps->saberMove == LS_A_BACK || sps->saberMove == LS_A_BACK_CR || sps->saberMove == LS_A_BACKSTAB) ? qtrue : qfalse; break;
+		default:				started = BG_SaberInSpecial(sps->saberMove); break;
+		}
+		if (started) {
 			botEvalSeqStarted[bs->seqType]++;
 			bs->seqType = 0;
-		} else if (bs->seqFrame > 9 || sps->stats[STAT_HEALTH] <= 0 || sps->weapon != WP_SABER) {
+		} else if (bs->seqFrame > maxFrames || sps->stats[STAT_HEALTH] <= 0 || sps->weapon != WP_SABER
+			|| (bs->seqType == BOTSEQ_ROLLSTAB && bs->seqFrame > 5 && !inFwdRoll)) {
 			bs->seqType = 0;
 		} else {
 			ucmd->rightmove = 0;
 			ucmd->forwardmove = 127;
+			ucmd->upmove = 0;
 			ucmd->buttons &= ~(BUTTON_ATTACK | BUTTON_ALT_ATTACK);
-			if (bs->seqType == BOTSEQ_JUMPATTACK) {
+			switch (bs->seqType) {
+			case BOTSEQ_JUMPATTACK:
 				ucmd->upmove = (bs->seqFrame >= 1) ? 127 : 0;
 				if (bs->seqFrame >= 2) ucmd->buttons |= BUTTON_ATTACK;
-			} else {
+				break;
+			case BOTSEQ_LUNGE:
 				ucmd->upmove = -127;
 				if (bs->seqFrame < 3) ucmd->forwardmove = 0;
 				else ucmd->buttons |= BUTTON_ATTACK;
+				break;
+			case BOTSEQ_ROLLSTAB:
+				// run forward and crouch to roll; attack only in the last 250 ms of the roll
+				if (!inFwdRoll) {
+					ucmd->upmove = (bs->seqFrame >= 1) ? -127 : 0;
+				} else if (sps->legsTimer <= 250) {
+					ucmd->buttons |= BUTTON_ATTACK;
+				}
+				break;
+			case BOTSEQ_BACKATTACK:
+				// back with no strafe + attack; crouched on the later frames for the crouch back slash
+				ucmd->forwardmove = -127;
+				if (bs->seqFrame >= 1) ucmd->buttons |= BUTTON_ATTACK;
+				break;
+			case BOTSEQ_STABDOWN:
+				if (bs->seqFrame >= 1) ucmd->buttons |= BUTTON_ATTACK;
+				break;
 			}
 			bs->seqFrame++;
 			return;		// the sequence owns this usercmd
 		}
+	}
+
+	// waiting for the saber to return to ready so a special can start: let go of attack
+	if (bs->seqPrepUntil > level.time) {
+		ucmd->buttons &= ~(BUTTON_ATTACK | BUTTON_ALT_ATTACK);
 	}
 
 	// combat input intent (see bot_state_t): last word on the movement keys for this frame
@@ -1013,7 +1064,9 @@ void BotInputToUserCommand(bot_state_t* bs, bot_input_t* bi, usercmd_t* ucmd, in
 		const playerState_t *ps = &g_entities[bs->client].client->ps;
 		qboolean apply = qtrue;
 
-		if (bs->intentFlags & BOTINTENT_KATA) {
+		if (bs->intentFlags & BOTINTENT_EVADE) {
+			ucmd->buttons &= ~(BUTTON_ATTACK | BUTTON_ALT_ATTACK);
+		} else if (bs->intentFlags & BOTINTENT_KATA) {
 			if (BG_SaberInKata(ps->saberMove)) {
 				botEvalKataStarted[1]++;
 				bs->intentFlags = 0;	// it started; let go of the keys
@@ -5913,6 +5966,42 @@ static void BotNav_RoamGoal(bot_state_t* bs, vec3_t goal) {
 			}
 		}
 	}
+	// A bot with nobody in sight goes looking for a fight. Saber combat is loud, so head for the
+	// nearest opponent within earshot (this only chooses a direction to walk in; seeing and
+	// targeting an enemy still needs line of sight). Re-picked every few seconds.
+	{
+		static int huntUntil[MAX_CLIENTS];
+		static vec3_t huntGoal[MAX_CLIENTS];
+
+		if (huntUntil[bs->client] <= level.time) {
+			float best = 3000.0f * 3000.0f;
+			int bestClient = -1;
+			for (i = 0; i < MAX_CLIENTS; i++) {
+				gentity_t *o = &g_entities[i];
+				float d2;
+				if (i == bs->client || !o->inuse || !o->client || o->health <= 0
+					|| o->client->sess.sessionTeam == TEAM_SPECTATOR || OnSameTeam(&g_entities[bs->client], o)) {
+					continue;
+				}
+				d2 = DistanceSquared(bs->origin, o->client->ps.origin);
+				if (d2 < best) {
+					best = d2;
+					bestClient = i;
+				}
+			}
+			huntUntil[bs->client] = level.time + Q_irand(2500, 4000);
+			if (bestClient >= 0) {
+				VectorCopy(g_entities[bestClient].client->ps.origin, huntGoal[bs->client]);
+			} else {
+				VectorClear(huntGoal[bs->client]);
+			}
+		}
+		if (huntGoal[bs->client][0] != 0 || huntGoal[bs->client][1] != 0) {
+			VectorCopy(huntGoal[bs->client], goal);
+			return;
+		}
+	}
+
 	if (roamGoalUntil[bs->client] > level.time && Distance(bs->origin, roamGoal[bs->client]) > 300) {
 		VectorCopy(roamGoal[bs->client], goal);
 		return;
@@ -10772,6 +10861,120 @@ qboolean Bot_CheckAndInteractWithObstacle(bot_state_t* bs) { // Niksata Edit - F
 } // Niksata Edit - FIXED VERSION: No player detection, no jump spam
 
 // Enhanced saber combat execution // Niksata Edit
+/*
+==============
+Bot_DefensiveReaction  (bot_features 256)
+
+Returns qtrue when the bot is busy getting out of the way this think.
+==============
+*/
+static qboolean BotNav_PathClear(bot_state_t* bs, vec3_t dir, float dist, float raise);
+
+static qboolean Bot_StartEvade(bot_state_t* bs, qboolean sideways, int ms) {
+	// candidate key combinations (forward, right), most wanted first; take the first that does not
+	// run into something or off a ledge
+	static const int backFirst[5][2] = { { -1, 0 }, { -1, 1 }, { -1, -1 }, { 0, 1 }, { 0, -1 } };
+	static const int sideFirst[5][2] = { { 0, 1 }, { 0, -1 }, { -1, 1 }, { -1, -1 }, { -1, 0 } };
+	const int (*cand)[2] = sideways ? sideFirst : backFirst;
+	const int flip = Q_irand(0, 1) ? 1 : -1;
+	vec3_t angles, fw, rt, dir;
+	int i;
+
+	VectorSet(angles, 0, bs->viewangles[YAW], 0);
+	AngleVectors(angles, fw, rt, NULL);
+	for (i = 0; i < 5; i++) {
+		const int f = cand[i][0], r = cand[i][1] * flip;
+		VectorScale(fw, (float)f, dir);
+		VectorMA(dir, (float)r, rt, dir);
+		if (VectorNormalize(dir) < 0.01f || !BotNav_PathClear(bs, dir, 64, 0)) {
+			continue;
+		}
+		bs->intentFlags = BOTINTENT_MOVE | BOTINTENT_EVADE;
+		bs->intentForward = f * 127;
+		bs->intentRight = r * 127;
+		bs->intentButtons = 0;
+		bs->intentUntil = level.time + ms;
+		bs->defEvadeUntil = level.time + ms;
+		return qtrue;
+	}
+	return qfalse;
+}
+
+static qboolean Bot_DefensiveReaction(bot_state_t* bs) {
+	gclient_t *cl = g_entities[bs->client].client;
+	gclient_t *en;
+	int dist, skill, delay, myHealth;
+	qboolean enemySpecial, enemyHeavySwing;
+
+	if (!cl || !bs->currentEnemy || !bs->currentEnemy->client || cl->ps.stats[STAT_HEALTH] <= 0) {
+		return qfalse;
+	}
+	if (bs->defEvadeUntil > level.time) {
+		return qtrue;	// still moving out of the way
+	}
+	if (bs->seqType || (bs->intentFlags & BOTINTENT_KATA) || BG_SaberInSpecial(cl->ps.saberMove) || BG_SaberInKata(cl->ps.saberMove)) {
+		return qfalse;	// committed to our own move
+	}
+	en = bs->currentEnemy->client;
+	dist = bs->frame_Enemy_Len;
+	myHealth = g_entities[bs->client].health;
+	skill = (int)bs->settings.skill;
+	if (skill < 1) skill = 1;
+	if (skill > 5) skill = 5;
+	delay = (6 - skill) * 70;		// 70 ms at skill 5 ... 350 ms at skill 1
+
+	// katas and special attacks cannot be blocked and lock the attacker into the move
+	enemySpecial = (bs->frame_Enemy_Vis && dist < 190 && (BG_SaberInKata(en->ps.saberMove) || BG_SaberInSpecial(en->ps.saberMove))) ? qtrue : qfalse;
+	// a strong-style swing coming in while we are hurt and not already swinging ourselves
+	enemyHeavySwing = (bs->frame_Enemy_Vis && dist < 90 && myHealth < 50 && BG_SaberInAttack(en->ps.saberMove)
+		&& (en->ps.fd.saberAnimLevel == SS_STRONG || en->ps.fd.saberAnimLevel == SS_DESANN)
+		&& !BG_SaberInAttack(cl->ps.saberMove)) ? qtrue : qfalse;
+
+	if (enemySpecial || enemyHeavySwing) {
+		if (!bs->defThreatTime) {
+			bs->defThreatTime = level.time;		// noticed now, react after the delay
+		}
+		if (level.time - bs->defThreatTime >= delay) {
+			// a jump attack comes down along the attacker's facing: step aside; otherwise back off
+			const qboolean sideways = (en->ps.saberMove == LS_A_JUMP_T__B_ || en->ps.saberMove == LS_A_FLIP_STAB || en->ps.saberMove == LS_A_FLIP_SLASH) ? qtrue : qfalse;
+			if (Bot_StartEvade(bs, sideways, enemySpecial ? 550 : 300)) {
+				botEvalEvades++;
+				bs->defThreatTime = 0;
+				return qtrue;
+			}
+		}
+	} else {
+		bs->defThreatTime = 0;
+	}
+
+	// badly hurt and the enemy is not: break off, and use what we have to recover or soak damage
+	if (myHealth > 0 && myHealth < 30 && bs->currentEnemy->health > myHealth + 15 && dist < 220 && bs->frame_Enemy_Vis) {
+		if (level.time >= bs->defNextHealTime) {
+			int cmd = 0;
+			if ((cl->ps.fd.forcePowersKnown & (1 << FP_HEAL)) && cl->ps.fd.forcePower >= 50 && dist > 100) {
+				cmd = GENCMD_FORCE_HEAL;
+			} else if ((cl->ps.fd.forcePowersKnown & (1 << FP_PROTECT)) && cl->ps.fd.forcePower >= 50 && !(cl->ps.fd.forcePowersActive & (1 << FP_PROTECT))) {
+				cmd = GENCMD_FORCE_PROTECT;
+			} else if ((cl->ps.fd.forcePowersKnown & (1 << FP_SPEED)) && cl->ps.fd.forcePower >= 50 && !(cl->ps.fd.forcePowersActive & (1 << FP_SPEED))) {
+				cmd = GENCMD_FORCE_SPEED;	// to get away
+			}
+			if (cmd && Bot_SendGenCmd(bs, cmd, 300)) {
+				botEvalDefForce++;
+				bs->defNextHealTime = level.time + 4000;
+			}
+		}
+		{
+			static int nextDisengage[MAX_CLIENTS];
+			if (dist < 150 && level.time >= nextDisengage[bs->client] && Bot_StartEvade(bs, qfalse, 600)) {
+				nextDisengage[bs->client] = level.time + Q_irand(3500, 6000);
+				botEvalDisengages++;
+				return qtrue;
+			}
+		}
+	}
+	return qfalse;
+}
+
 void Bot_ExecuteSaberCombat(bot_state_t* bs) {
 	int dist = bs->frame_Enemy_Len;
 	vec3_t dir, moveDir;
@@ -10782,6 +10985,10 @@ void Bot_ExecuteSaberCombat(bot_state_t* bs) {
 
 	VectorSubtract(bs->currentEnemy->client->ps.origin, bs->eye, dir);
 	vectoangles(dir, bs->ideal_viewangles);
+
+	if ((bs->features & BOTF_DEFENSE) && Bot_DefensiveReaction(bs)) {
+		return;	// getting out of the way this think
+	}
 
 	// ================================
 	// WALL DETECTION SYSTEM
@@ -11115,6 +11322,92 @@ void Bot_ExecuteSaberCombat(bot_state_t* bs) {
 	// SPECIAL ATTACKS - WITH STATE MANAGEMENT (NO OBSTACLE CHECKS)
 	// ================================
 
+	// ---- special moves with real inputs (bot_features 32), ahead of everything else ----
+	if (bs->features & BOTF_SPECIALS) {
+		const playerState_t *sp = &g_entities[bs->client].client->ps;
+		const playerState_t *ep = &bs->currentEnemy->client->ps;
+		const int style = sp->fd.saberAnimLevel;
+		const qboolean secondary = ((sp->fd.saberAnimLevelBase == SS_STAFF || sp->fd.saberAnimLevelBase == SS_DUAL) && style != sp->fd.saberAnimLevelBase) ? qtrue : qfalse;
+		const qboolean usable = (sp->weapon == WP_SABER && !sp->saberHolstered && !sp->saberInFlight
+			&& sp->groundEntityNum != ENTITYNUM_NONE && sp->forceHandExtend == HANDEXTEND_NONE && !bs->seqType) ? qtrue : qfalse;
+		const qboolean ready = (usable && sp->saberMove == LS_READY && sp->weaponTime <= 0) ? qtrue : qfalse;
+		const qboolean enemyDown = BG_InKnockDown(ep->legsAnim) ? qtrue : qfalse;
+		int want = 0;
+
+		if (usable) {
+			if (enemyDown && dist <= 140 && sp->fd.forcePower >= 25 && level.time >= bs->seqBackCooldown) {
+				want = BOTSEQ_STABDOWN;			// finish an enemy lying on the ground
+			}
+			else if (level.time >= bs->seqBackCooldown) {
+				// someone right behind us: back attack
+				vec3_t fw, to;
+				int i;
+				AngleVectors(bs->viewangles, fw, NULL, NULL);
+				fw[2] = 0;
+				VectorNormalize(fw);
+				for (i = 0; i < MAX_CLIENTS && !want; i++) {
+					gentity_t *o = &g_entities[i];
+					float d;
+					if (i == bs->client || !o->inuse || !o->client || o->health <= 0 || o->client->sess.sessionTeam == TEAM_SPECTATOR
+						|| OnSameTeam(&g_entities[bs->client], o)) {
+						continue;
+					}
+					VectorSubtract(o->client->ps.origin, bs->origin, to);
+					if (fabs(to[2]) > 40) {
+						continue;
+					}
+					to[2] = 0;
+					d = VectorNormalize(to);
+					if (d < 110 && DotProduct(to, fw) < -0.8f) {
+						want = BOTSEQ_BACKATTACK;
+					}
+				}
+			}
+			if (!want && !secondary && sp->fd.forcePower >= 25 && Q_irand(1, 100) <= (specialChance + 5)) {
+				const qboolean jumpStyle = (style == SS_MEDIUM || style == SS_STRONG || style == SS_DUAL || style == SS_STAFF) ? qtrue : qfalse;
+				const qboolean crouchStyle = (style == SS_FAST || style == SS_DUAL || style == SS_STAFF) ? qtrue : qfalse;
+				const float speed2 = sp->velocity[0] * sp->velocity[0] + sp->velocity[1] * sp->velocity[1];
+
+				if (crouchStyle && dist >= 45 && dist <= 120 && level.time >= bs->seqLungeCooldown && (!jumpStyle || Q_irand(0, 1))) {
+					want = BOTSEQ_LUNGE;
+				} else if (jumpStyle && dist >= 70 && dist <= 190 && level.time >= bs->seqJumpCooldown) {
+					want = BOTSEQ_JUMPATTACK;
+				} else if (dist >= 130 && dist <= 260 && speed2 >= 200.0f * 200.0f && level.time >= bs->seqRollCooldown) {
+					want = BOTSEQ_ROLLSTAB;		// running at the enemy: roll in and stab
+				} else if (crouchStyle && dist >= 45 && dist <= 120 && level.time >= bs->seqLungeCooldown) {
+					want = BOTSEQ_LUNGE;
+				}
+			}
+		}
+		if (want && !ready && want != BOTSEQ_ROLLSTAB) {
+			// the saber is mid-swing: stop pressing attack for a moment so it returns to ready
+			bs->seqPrepType = want;
+			bs->seqPrepUntil = level.time + 450;
+			return;
+		}
+		if (want && want == BOTSEQ_ROLLSTAB && (BG_SaberInAttack(sp->saberMove) || sp->weaponTime > 0)) {
+			bs->seqPrepType = want;
+			bs->seqPrepUntil = level.time + 450;
+			return;
+		}
+		if (want) {
+			bs->seqPrepUntil = 0;
+			bs->seqType = want;
+			bs->seqFrame = 0;
+			botEvalSeqTried[want]++;
+			bs->currentSpecial = SPECIAL_DFA;
+			bs->specialDuration = (want == BOTSEQ_ROLLSTAB) ? 1300 : 1000;
+			bs->lastSpecialTime = level.time;
+			switch (want) {
+			case BOTSEQ_JUMPATTACK:	bs->seqJumpCooldown = level.time + Q_irand(2500, 5000); break;
+			case BOTSEQ_LUNGE:		bs->seqLungeCooldown = level.time + Q_irand(2500, 5000); break;
+			case BOTSEQ_ROLLSTAB:	bs->seqRollCooldown = level.time + Q_irand(5000, 9000); break;
+			default:				bs->seqBackCooldown = level.time + Q_irand(1500, 3000); break;
+			}
+			return;
+		}
+	}
+
 	// KATA ATTACK (45% + priority) - DYNAMIC RANGE
 	if (bs->features & BOTF_KATA) {
 		// Deliberate kata: only when the engine would accept it (PM_CanDoKata: grounded, saber not
@@ -11184,42 +11477,8 @@ void Bot_ExecuteSaberCombat(bot_state_t* bs) {
 		return;
 	}
 
-	// Real jump attack and crouch special (bot_features 32): start the input sequence only from
-	// the state the engine needs; when it is not possible fall through without a lockout.
 	if (bs->features & BOTF_SPECIALS) {
-		const playerState_t *sp = &g_entities[bs->client].client->ps;
-		const int style = sp->fd.saberAnimLevel;
-		const qboolean secondary = ((sp->fd.saberAnimLevelBase == SS_STAFF || sp->fd.saberAnimLevelBase == SS_DUAL) && style != sp->fd.saberAnimLevelBase) ? qtrue : qfalse;
-		const qboolean canStart = (sp->weapon == WP_SABER && !sp->saberHolstered && !sp->saberInFlight
-			&& sp->groundEntityNum != ENTITYNUM_NONE && sp->saberMove == LS_READY && sp->weaponTime <= 0
-			&& sp->forceHandExtend == HANDEXTEND_NONE && sp->fd.forcePower >= 25 && !secondary && !bs->seqType) ? qtrue : qfalse;
-
-		if (canStart && dist >= 70 && dist <= 190 && level.time >= bs->seqJumpCooldown
-			&& (style == SS_MEDIUM || style == SS_STRONG || style == SS_DUAL || style == SS_STAFF)
-			&& Q_irand(1, 100) <= (specialChance + 5))
-		{
-			bs->currentSpecial = SPECIAL_DFA;
-			bs->specialDuration = 1000;
-			bs->lastSpecialTime = level.time;
-			bs->seqJumpCooldown = level.time + Q_irand(4000, 8000);
-			bs->seqType = BOTSEQ_JUMPATTACK;
-			bs->seqFrame = 0;
-			botEvalSeqTried[BOTSEQ_JUMPATTACK]++;
-			return;
-		}
-		if (canStart && dist >= 45 && dist <= 120 && level.time >= bs->seqLungeCooldown
-			&& (style == SS_FAST || style == SS_DUAL || style == SS_STAFF)
-			&& Q_irand(1, 100) <= (specialChance + 5))
-		{
-			bs->currentSpecial = SPECIAL_CROUCHLUNGE;
-			bs->specialDuration = 1000;
-			bs->lastSpecialTime = level.time;
-			bs->seqLungeCooldown = level.time + Q_irand(3500, 7000);
-			bs->seqType = BOTSEQ_LUNGE;
-			bs->seqFrame = 0;
-			botEvalSeqTried[BOTSEQ_LUNGE]++;
-			return;
-		}
+		// handled at the top of the ladder
 	}
 	else
 	// DFA ATTACK (40% + priority) - REDUCED GATING
@@ -15951,7 +16210,7 @@ int BotAISetup(int restart) {
 
 	trap->Cvar_Register(&bot_profile, "bot_profile", "0", 0);
 	trap->Cvar_Register(&bot_fixes, "bot_fixes", "1", CVAR_ARCHIVE);
-	trap->Cvar_Register(&bot_features, "bot_features", "239", CVAR_ARCHIVE);	// everything except 16 (targeted style), which did not help in A/B
+	trap->Cvar_Register(&bot_features, "bot_features", "495", CVAR_ARCHIVE);	// everything except 16 (targeted style), which did not help in A/B
 	trap->Cvar_Register(&bot_abTest, "bot_abTest", "0", 0);
 	trap->Cvar_Register(&bot_attachments, "bot_attachments", "1", 0);
 	trap->Cvar_Register(&bot_camp, "bot_camp", "1", 0);

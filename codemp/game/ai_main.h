@@ -484,6 +484,13 @@ typedef struct bot_state_s
 	int seqFrame;				// usercmds built since the sequence started
 	int seqJumpCooldown;		// earliest level.time for the next jump attack
 	int seqLungeCooldown;		// earliest level.time for the next lunge / crouch special
+	int seqRollCooldown;		// earliest level.time for the next roll stab
+	int seqBackCooldown;		// earliest level.time for the next back attack / stab-down
+	int seqPrepType;			// special the bot is waiting to start (saber must return to ready)
+	int seqPrepUntil;			// until then attack is released so the saber can return to ready
+	int defThreatTime;			// level.time a threatening enemy move was first noticed, 0 = none
+	int defEvadeUntil;			// an evasive move is in progress until this time
+	int defNextHealTime;
 } bot_state_t;
 
 // ================================// Niksata Edit
