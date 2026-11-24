@@ -187,12 +187,19 @@ vmCvar_t bot_abTest;
 #define BOTF_PRO		512
 // 1024: fight in melee with strafe swings from side to side, crouched where the guide says so
 #define BOTF_COUNTERS	1024
+// 2048: predict the enemy's blade a few frames ahead from where it is and how it is moving, and
+//       get out of its way; reaction time comes from the bot's skill (none at skill 5)
+#define BOTF_MACHINE	2048
+// 4096: learn from results which swing direction pays in which situation, keep it on disk
+#define BOTF_LEARN		4096
 
 #define BOTINTENT_EVADE		8	// applied whatever the buttons are, and releases attack
 #define BOTINTENT_WORLD		16	// move along bs->intentWorldDir (navigation jump / unstick), always applied
 
 static int botEvalNavHighJumps, botEvalNavGapJumps, botEvalIdleKicks, botEvalStuckJumps, botEvalStuckSuicides;
 static int botEvalStuckInSolid, botEvalLedgeHops;
+static int botEvalPredThreats, botEvalPredEvades, botEvalLearnSamples, botEvalLearnOverrides, botEvalLearnExplore;
+static int Bot_LearnTotal(void);
 static int botEvalProPunish, botEvalProHoldOff, botEvalProCounterFrames, botEvalProCrouchFrames;
 static int botEvalMoveSteers, botEvalMoveJumps, botEvalNavDoorTargets, botEvalNavOpenTargets;
 static int botEvalLungeFail[5];	// why a crouch special did not start: not ducked, rolling, saber busy, in air, other
@@ -295,6 +302,8 @@ static void BotEval_Report(void) {
 	trap->Print("BOTEVAL navigation: force jumps over high obstacles %d, jumps across gaps %d, idle bots set moving %d, stuck jump-outs %d, stuck suicides %d\n",
 		botEvalNavHighJumps, botEvalNavGapJumps, botEvalIdleKicks, botEvalStuckJumps, botEvalStuckSuicides);
 	trap->Print("BOTEVAL bots found standing inside solid geometry and respawned: %d; hops over low ledges while moving: %d\n", botEvalStuckInSolid, botEvalLedgeHops);
+	trap->Print("BOTEVAL machine: predicted blade hits %d, evaded %d; learning: results recorded %d, swing choices changed by what was learned %d, exploratory choices %d, table holds %d results\n",
+		botEvalPredThreats, botEvalPredEvades, botEvalLearnSamples, botEvalLearnOverrides, botEvalLearnExplore, Bot_LearnTotal());
 	trap->Print("BOTEVAL pro tactics: punishes of a rooted enemy %d, evasions skipped to punish or strike at the end %d, frames of strafe-swing combos %d of which crouched %d\n",
 		botEvalProPunish, botEvalProHoldOff, botEvalProCounterFrames, botEvalProCrouchFrames);
 	trap->Print("BOTEVAL movement: steered round an obstacle while moving %d, jumped one %d; exploration targets through doors %d, toward open space %d\n",
@@ -1340,6 +1349,160 @@ void Bot_HoldButtons(bot_state_t* bs, int buttons, int ms) {
 }
 
 static vmCvar_t bot_abBase;
+
+/*
+==============
+Swing learning (bot_features 4096)
+
+Every time a bot commits to a swing direction the situation is noted: its style, the distance, what
+the enemy was doing and what he fights with. 700 ms later the result is scored as damage dealt
+minus damage taken and averaged into a table shared by all bots. Once two directions have enough
+results in a situation and one is clearly better than the one the ordinary logic picked, the
+better one is used. A few choices are random so every direction keeps being tried. The table is
+written to botlearn.dat and read back at start, so what was learned carries over between matches.
+==============
+*/
+#define BL_STYLES	8
+#define BL_DIST		4
+#define BL_ESTATE	4
+#define BL_ECLASS	3
+#define BL_ACTIONS	8
+#define BL_MAGIC	0x314c4254	// "TBL1"
+typedef struct blCell_s { float q; int n; } blCell_t;
+static blCell_t botLearn[BL_STYLES][BL_DIST][BL_ESTATE][BL_ECLASS][BL_ACTIONS];
+static struct { int time, action, enemyNum, myHp, enHp; blCell_t *cells; } blPend[MAX_CLIENTS];
+static qboolean botLearnDirty;
+static int botLearnSaveTime;
+
+static int Bot_LearnTotal(void) {
+	const blCell_t *c = &botLearn[0][0][0][0][0];
+	const int count = BL_STYLES * BL_DIST * BL_ESTATE * BL_ECLASS * BL_ACTIONS;
+	int i, total = 0;
+	for (i = 0; i < count; i++) total += c[i].n;
+	return total;
+}
+
+static void Bot_LearnLoad(void) {
+	fileHandle_t f;
+	int hdr[6];
+	const int len = trap->FS_Open("botlearn.dat", &f, FS_READ);
+
+	memset(botLearn, 0, sizeof(botLearn));
+	memset(blPend, 0, sizeof(blPend));
+	botLearnDirty = qfalse;
+	if (!f) {
+		return;
+	}
+	if (len == (int)(sizeof(hdr) + sizeof(botLearn))) {
+		trap->FS_Read(hdr, sizeof(hdr), f);
+		if (hdr[0] == BL_MAGIC && hdr[1] == BL_STYLES && hdr[2] == BL_DIST && hdr[3] == BL_ESTATE && hdr[4] == BL_ECLASS && hdr[5] == BL_ACTIONS) {
+			trap->FS_Read(botLearn, sizeof(botLearn), f);
+		}
+	}
+	trap->FS_Close(f);
+	trap->Print("Bot learning: %d results loaded from botlearn.dat\n", Bot_LearnTotal());
+}
+
+static void Bot_LearnSave(void) {
+	fileHandle_t f;
+	int hdr[6] = { BL_MAGIC, BL_STYLES, BL_DIST, BL_ESTATE, BL_ECLASS, BL_ACTIONS };
+
+	if (!botLearnDirty) {
+		return;
+	}
+	trap->FS_Open("botlearn.dat", &f, FS_WRITE);
+	if (!f) {
+		return;
+	}
+	trap->FS_Write(hdr, sizeof(hdr), f);
+	trap->FS_Write(botLearn, sizeof(botLearn), f);
+	trap->FS_Close(f);
+	botLearnDirty = qfalse;
+}
+
+static int Bot_LearnHealth(const gentity_t *e) {
+	return (e->health > 0 ? e->health : 0) + ((e->client && e->health > 0) ? e->client->ps.stats[STAT_ARMOR] : 0);
+}
+
+// score the last noted swing once its result is in
+static void Bot_LearnResolve(bot_state_t* bs) {
+	const int c = bs->client;
+	gentity_t *me = &g_entities[c];
+
+	if (level.time - botLearnSaveTime > 120000 || botLearnSaveTime > level.time) {
+		botLearnSaveTime = level.time;
+		Bot_LearnSave();
+	}
+	if (!blPend[c].cells || !me->client) {
+		return;
+	}
+	if (level.time - blPend[c].time >= 700 || me->health <= 0) {
+		gentity_t *en = &g_entities[blPend[c].enemyNum];
+		const int myNow = Bot_LearnHealth(me);
+		const int enNow = (en->inuse && en->client) ? Bot_LearnHealth(en) : 0;
+		float dealt = (float)(blPend[c].enHp - enNow), taken = (float)(blPend[c].myHp - myNow), r;
+		blCell_t *cell = &blPend[c].cells[blPend[c].action];
+
+		if (dealt < 0) dealt = 0;		// he healed or respawned
+		if (taken < 0) taken = 0;
+		if (dealt > 100) dealt = 100;
+		if (taken > 100) taken = 100;
+		r = dealt - taken;
+		cell->n++;
+		cell->q += (r - cell->q) / (float)(cell->n > 3000 ? 3000 : cell->n);
+		blPend[c].cells = NULL;
+		botLearnDirty = qtrue;
+		botEvalLearnSamples++;
+	}
+}
+
+// the ordinary logic wants to swing in direction "quad": note the situation, and return the
+// direction to use
+static int Bot_LearnPickQuad(bot_state_t* bs, int quad) {
+	const int c = bs->client;
+	gentity_t *me = &g_entities[c];
+	gentity_t *en = bs->currentEnemy;
+	blCell_t *cells;
+	int style, db, es, ec, i, best = -1, skill;
+
+	if (quad < 0 || quad >= BL_ACTIONS || !en || !en->client || !me->client || !bs->frame_Enemy_Vis || bs->frame_Enemy_Len > 160) {
+		return quad;
+	}
+	style = me->client->ps.fd.saberAnimLevel;
+	if (style < 0 || style >= BL_STYLES) style = 0;
+	db = (bs->frame_Enemy_Len < 50) ? 0 : (bs->frame_Enemy_Len < 80) ? 1 : (bs->frame_Enemy_Len < 110) ? 2 : 3;
+	if (BG_InKnockDown(en->client->ps.legsAnim) || BG_SaberInKata(en->client->ps.saberMove)) es = 3;
+	else if (BG_SaberInAttack(en->client->ps.saberMove) || BG_SaberInSpecial(en->client->ps.saberMove)) es = 1;
+	else if (en->client->ps.weaponTime > 0) es = 2;
+	else es = 0;
+	ec = (en->client->ps.fd.saberAnimLevelBase == SS_DUAL) ? 1 : (en->client->ps.fd.saberAnimLevelBase == SS_STAFF) ? 2 : 0;
+	cells = botLearn[style][db][es][ec];
+
+	// use what has been learned: better with skill, not at all below skill 3
+	skill = (int)bs->settings.skill;
+	if (skill >= 3 && cells[quad].n >= 25) {
+		for (i = 0; i < BL_ACTIONS; i++) {
+			if (cells[i].n >= 25 && (best < 0 || cells[i].q > cells[best].q)) best = i;
+		}
+		if (best >= 0 && best != quad && cells[best].q > cells[quad].q + 1.5f) {
+			quad = best;
+			botEvalLearnOverrides++;
+		}
+	}
+	if (Q_irand(1, 100) <= 2) {
+		quad = Q_irand(0, BL_ACTIONS - 1);
+		botEvalLearnExplore++;
+	}
+	if (!blPend[c].cells) {
+		blPend[c].cells = cells;
+		blPend[c].action = quad;
+		blPend[c].time = level.time;
+		blPend[c].enemyNum = en->s.number;
+		blPend[c].myHp = Bot_LearnHealth(me);
+		blPend[c].enHp = Bot_LearnHealth(en);
+	}
+	return quad;
+}
 static int BotFeaturesFor(int client) {
 	if (bot_abTest.integer > 0 && (client < bot_abTest.integer || client >= 2 * bot_abTest.integer)) {
 		return bot_abBase.integer;	// baseline group
@@ -1645,6 +1808,9 @@ int BotAI(int client, float thinktime) {
 
 	BotContextualTaunts(bs);
 	BotAntiIdle(bs);
+	if (bs->features & BOTF_LEARN) {
+		Bot_LearnResolve(bs);
+	}
 #ifdef _DEBUG
 	end = trap->Milliseconds();
 
@@ -10221,6 +10387,9 @@ void TAB_MoveforAttackQuad(bot_state_t* bs, vec3_t moveDir, int Quad)
 	// direction is held through the start of the swing instead of changing every frame.
 	if ((bs->features & BOTF_SWINGDIR) && !(bs->intentFlags && level.time <= bs->intentUntil)) {
 		int f = 0, r = 0;
+		if (bs->features & BOTF_LEARN) {
+			Quad = Bot_LearnPickQuad(bs, Quad);
+		}
 		switch (Quad)
 		{
 		case Q_B:   f = 127; break;
@@ -11502,6 +11671,79 @@ Returns qtrue when the bot is busy getting out of the way this think.
 */
 static qboolean BotNav_PathClear(bot_state_t* bs, vec3_t dir, float dist, float raise);
 
+/*
+==============
+BotPred_BladeThreat  (bot_features 2048)
+
+Where will the enemy's blade be over the next "horizonMs"? Each blade is a segment from its base
+to its tip; both ends are known for this frame and the last one, so their motion per frame is
+known, and carrying it forward gives the blade's path. The bot's body is a vertical segment
+carried forward by its own velocity. Returns the time in ms until the blade comes within body
+radius, or -1. Everything used here is on screen for a human player too; the difference is that
+the bot measures it exactly and every frame.
+==============
+*/
+static int BotPred_BladeThreat(bot_state_t* bs, gentity_t* enemy, int horizonMs) {
+	gclient_t *en = enemy->client;
+	gclient_t *cl = g_entities[bs->client].client;
+	int dt = level.time - level.previousTime;
+	int frames, s, b, k, j;
+
+	if (!en || !cl || en->ps.weapon != WP_SABER || en->ps.saberHolstered >= 2 || en->ps.saberInFlight) {
+		return -1;
+	}
+	if (!BG_SaberInAttack(en->ps.saberMove) && !BG_SaberInSpecial(en->ps.saberMove) && !BG_SaberInKata(en->ps.saberMove)) {
+		return -1;	// a blade that is not in a swing does no swing damage
+	}
+	if (dt < 8) dt = 8;
+	if (dt > 100) dt = 100;
+	frames = horizonMs / dt;
+	if (frames > 16) frames = 16;
+
+	for (s = 0; s < MAX_SABERS; s++) {
+		if (s == 1 && en->ps.saberHolstered == 1) {
+			continue;
+		}
+		for (b = 0; b < en->saber[s].numBlades && b < MAX_BLADES; b++) {
+			const bladeInfo_t *bl = &en->saber[s].blade[b];
+			vec3_t tip, tipOld, vBase, vTip;
+
+			if (bl->lengthMax < 8.0f) {
+				continue;
+			}
+			VectorMA(bl->muzzlePoint, bl->lengthMax, bl->muzzleDir, tip);
+			VectorMA(bl->muzzlePointOld, bl->lengthMax, bl->muzzleDirOld, tipOld);
+			VectorSubtract(bl->muzzlePoint, bl->muzzlePointOld, vBase);
+			VectorSubtract(tip, tipOld, vTip);
+			if (VectorLengthSquared(vTip) < 4.0f || VectorLengthSquared(vTip) > 200.0f * 200.0f) {
+				continue;	// not moving, or a teleport / respawn jump
+			}
+			for (k = 0; k <= frames; k++) {
+				vec3_t bk, tk, body;
+				const float secs = (float)(k * dt) * 0.001f;
+
+				VectorMA(bl->muzzlePoint, (float)k, vBase, bk);
+				VectorMA(tip, (float)k, vTip, tk);
+				VectorMA(bs->origin, secs, cl->ps.velocity, body);
+				// five points along the blade against the body's vertical axis (feet -24 .. head +40)
+				for (j = 1; j <= 5; j++) {
+					vec3_t pt;
+					float dx, dy, dz;
+					VectorSubtract(tk, bk, pt);
+					VectorMA(bk, (float)j * 0.2f, pt, pt);
+					dx = pt[0] - body[0];
+					dy = pt[1] - body[1];
+					dz = pt[2] - body[2];
+					if (dz > -28.0f && dz < 44.0f && dx * dx + dy * dy < 20.0f * 20.0f) {
+						return k * dt;
+					}
+				}
+			}
+		}
+	}
+	return -1;
+}
+
 static qboolean Bot_StartEvade(bot_state_t* bs, qboolean sideways, int ms) {
 	// candidate key combinations (forward, right), most wanted first; take the first that does not
 	// run into something or off a ledge
@@ -11562,6 +11804,21 @@ static qboolean Bot_DefensiveReaction(bot_state_t* bs) {
 		&& (en->ps.fd.saberAnimLevel == SS_STRONG || en->ps.fd.saberAnimLevel == SS_DESANN)
 		&& !BG_SaberInAttack(cl->ps.saberMove)) ? qtrue : qfalse;
 
+	if ((bs->features & BOTF_MACHINE) && bs->frame_Enemy_Vis && dist < 150 && !BG_SaberInAttack(cl->ps.saberMove)) {
+		// A blade is on its way to this bot's body. Skill 5 sees it 320 ms out and acts at once;
+		// each skill level below sees less far and needs 90 ms more to react, so at low skill only
+		// the slowest swings are avoided.
+		const int reaction = (5 - skill) * 90;
+		const int t = BotPred_BladeThreat(bs, bs->currentEnemy, 120 + skill * 40);
+		if (t >= 0) {
+			botEvalPredThreats++;
+			if (t >= reaction && Bot_StartEvade(bs, qfalse, t + 160)) {
+				botEvalPredEvades++;
+				bs->defThreatTime = 0;
+				return qtrue;
+			}
+		}
+	}
 	if (enemySpecial && (bs->features & BOTF_PRO)) {
 		// A kata, a lunge or a crouch spin roots the enemy to the spot. With the fast style (lunge)
 		// or a staff (butterfly) that is the moment to hit, not to step back; with anything else
@@ -16896,6 +17153,7 @@ BotAISetup
 ==============
 */
 int BotAISetup(int restart) {
+	Bot_LearnLoad();
 	//rww - new bot cvars..
 	trap->Cvar_Register(&bot_forcepowers, "bot_forcepowers", "1", CVAR_CHEAT);
 	trap->Cvar_Register(&bot_forgimmick, "bot_forgimmick", "0", CVAR_CHEAT);
@@ -16913,7 +17171,7 @@ int BotAISetup(int restart) {
 	trap->Cvar_Register(&bot_profile, "bot_profile", "0", 0);
 	trap->Cvar_Register(&bot_fixes, "bot_fixes", "1", CVAR_ARCHIVE);
 	trap->Cvar_Register(&bot_abBase, "bot_abBase", "0", 0);	// features of the baseline group in an A/B test
-	trap->Cvar_Register(&bot_features, "bot_features", "495", CVAR_ARCHIVE);	// 512 and 1024 (guide tactics) are off: they did not win their A/B tests against bots	// everything except 16 (targeted style), which did not help in A/B
+	trap->Cvar_Register(&bot_features, "bot_features", "6639", CVAR_ARCHIVE);	// 495 + 2048 (blade prediction) + 4096 (learning); 16, 512, 1024 lost their A/B tests
 	trap->Cvar_Register(&bot_abTest, "bot_abTest", "0", 0);
 	trap->Cvar_Register(&bot_attachments, "bot_attachments", "1", 0);
 	trap->Cvar_Register(&bot_camp, "bot_camp", "1", 0);
@@ -16951,6 +17209,8 @@ BotAIShutdown
 int BotAIShutdown(int restart) {
 
 	int i;
+
+	Bot_LearnSave();
 
 	//if the game is restarted for a tournament
 	if (restart) {
