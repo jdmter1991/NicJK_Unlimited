@@ -11946,7 +11946,9 @@ void CG_DrawMiscStaticModels( void ) {
 			cullorg[2] += cgs.miscStaticModels[i].zoffset;
 		}
 		if( cgs.miscStaticModels[i].radius ) {
-			if( CG_CullPointAndRadius( cullorg, cgs.miscStaticModels[i].radius ) ) {
+			// radius is measured from the model origin, but cullorg is moved up by zoffset:
+			// grow the sphere by that shift so a model is never culled while part of it is on screen
+			if( CG_CullPointAndRadius( cullorg, cgs.miscStaticModels[i].radius + fabsf( cgs.miscStaticModels[i].zoffset ) + 1.0f ) ) {
  				continue;
 			}
 		}
@@ -11957,8 +11959,19 @@ void CG_DrawMiscStaticModels( void ) {
 			continue;
 		}
 
+		// One test point is not enough for a model that spans several vis clusters: it vanished
+		// whenever that single point's cluster was not visible. Try the origin and a point half a
+		// radius up as well before giving up on it.
 		if( !trap->R_InPVS( cg.refdef.vieworg, cullorg, cg.refdef.areamask ) ) {
-			continue;
+			vec3_t alt;
+
+			VectorCopy( cgs.miscStaticModels[i].org, alt );
+			if( !trap->R_InPVS( cg.refdef.vieworg, alt, cg.refdef.areamask ) ) {
+				alt[2] += 0.5f * cgs.miscStaticModels[i].radius;
+				if( !trap->R_InPVS( cg.refdef.vieworg, alt, cg.refdef.areamask ) ) {
+					continue;
+				}
+			}
 		}
 
 		VectorCopy( cgs.miscStaticModels[i].org, ent.origin );

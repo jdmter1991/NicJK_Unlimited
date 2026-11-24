@@ -196,16 +196,24 @@ static void CON_Show( void )
 	if( !GetConsoleWindow() )
 		return;
 
-	GetConsoleScreenBufferInfo( qconsole_hout, &binfo );
+	// This call fails when the output handle is not a real console screen buffer (output
+	// redirected, hidden or detached console). binfo is then uninitialized stack memory, and
+	// the code below used its srWindow.Right to offset into line[], reading far outside the
+	// array and crashing the server at random.
+	if( !GetConsoleScreenBufferInfo( qconsole_hout, &binfo ) )
+		return;
 
 	// if we're in the middle of printf, don't bother writing the buffer
 	if( !qconsole_drawinput )
 		return;
 
+	if( binfo.srWindow.Right < 0 )
+		binfo.srWindow.Right = 0;
+
 	writeArea.Left = 0;
 	writeArea.Top = binfo.dwCursorPosition.Y;
 	writeArea.Bottom = binfo.dwCursorPosition.Y;
-	writeArea.Right = MAX_EDIT_LINE;
+	writeArea.Right = MAX_EDIT_LINE - 1;	// inclusive; was MAX_EDIT_LINE, one cell more than line[] holds
 
 	// set color to white
 	attrib = CON_ColorCharToAttrib( COLOR_WHITE );
@@ -228,9 +236,17 @@ static void CON_Show( void )
 
 	if( qconsole_linelen > binfo.srWindow.Right )
 	{
-		WriteConsoleOutput( qconsole_hout,
-			line + (qconsole_linelen - binfo.srWindow.Right ),
-			writeSize, writePos, &writeArea );
+		// scrolled view of a long input line: only the cells from the offset to the end of
+		// line[] exist, so shrink the source size and target area to match
+		const int offset = qconsole_linelen - binfo.srWindow.Right;
+
+		writeSize.X = MAX_EDIT_LINE - offset;
+		writeArea.Right = writeSize.X - 1;
+		if( writeSize.X > 0 )
+		{
+			WriteConsoleOutput( qconsole_hout, line + offset,
+				writeSize, writePos, &writeArea );
+		}
 	}
 	else
 	{

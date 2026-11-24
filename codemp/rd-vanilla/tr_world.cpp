@@ -1577,6 +1577,12 @@ qboolean R_inPVS( const vec3_t p1, const vec3_t p2, byte *mask ) {
 
 	leafnum = ri.CM_PointLeafnum (p2);
 	cluster = ri.CM_LeafCluster (leafnum);
+
+	// A point inside solid has cluster -1. Indexing the PVS row with it read the byte before
+	// the row, so such points were visible or hidden at random as the viewer changed cluster.
+	// Models are often placed with their origin in the ground: treat them as visible.
+	if ( cluster < 0 )
+		return qtrue;
 	if ( mask && (!(mask[cluster>>3] & (1<<(cluster&7)) ) ) )
 		return qfalse;
 
