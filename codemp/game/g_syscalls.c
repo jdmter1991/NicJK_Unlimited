@@ -163,7 +163,7 @@ static QINLINE void BeginHack(int entityNum)
 			}
 		}
 	} 
-	else if (g_entities[entityNum].client && g_entities[entityNum].client->sess.raceMode) { //Have to check all entities because swoops can be racemode too :/
+	else if (entityNum >= 0 && entityNum < MAX_GENTITIES && g_entities[entityNum].client && g_entities[entityNum].client->sess.raceMode) { //Have to check all entities because swoops can be racemode too :/
 		int i;
 		for (i = 0; i < level.num_entities; i++) { ////This is numentities not max_clients because of NPCS
 			if (i != entityNum) {
@@ -185,9 +185,10 @@ static QINLINE void BeginHack(int entityNum)
 	}
 	else { // we are not dueling but make those that are nonsolid
 		int i;
-		if (g_entities[entityNum].inuse) {//Saber
+		// (traces are also made with entityNum -1 = "ignore nothing"; that indexed g_entities[-1])
+		if (entityNum >= 0 && entityNum < MAX_GENTITIES && g_entities[entityNum].inuse) {//Saber
 			const int saberOwner = g_entities[entityNum].r.ownerNum;//Saberowner
-			if (g_entities[saberOwner].client && g_entities[saberOwner].client->ps.duelInProgress) {
+			if (saberOwner >= 0 && saberOwner < MAX_GENTITIES && g_entities[saberOwner].client && g_entities[saberOwner].client->ps.duelInProgress) {
 				return;
 			}
 		}
@@ -222,7 +223,7 @@ static QINLINE void EndHack(int entityNum) { //Should be inline?
 			}
 		}
 	}
-	else if (g_entities[entityNum].client && g_entities[entityNum].client->sess.raceMode) {
+	else if (entityNum >= 0 && entityNum < MAX_GENTITIES && g_entities[entityNum].client && g_entities[entityNum].client->sess.raceMode) {
 		int i;
 		for (i = 0; i < level.num_entities; i++) {
 			if (i != entityNum) {
@@ -239,9 +240,10 @@ static QINLINE void EndHack(int entityNum) { //Should be inline?
 	}
 	else {
 		int i;
-		if (g_entities[entityNum].inuse) {//Saber
+		// (traces are also made with entityNum -1 = "ignore nothing"; that indexed g_entities[-1])
+		if (entityNum >= 0 && entityNum < MAX_GENTITIES && g_entities[entityNum].inuse) {//Saber
 			const int saberOwner = g_entities[entityNum].r.ownerNum;//Saberowner
-			if (g_entities[saberOwner].client && g_entities[saberOwner].client->ps.duelInProgress) {
+			if (saberOwner >= 0 && saberOwner < MAX_GENTITIES && g_entities[saberOwner].client && g_entities[saberOwner].client->ps.duelInProgress) {
 				return;
 			}
 		}

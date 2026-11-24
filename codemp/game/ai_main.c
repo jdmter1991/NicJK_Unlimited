@@ -123,6 +123,14 @@ typedef struct botProf_s {
 static botProf_t botProf;
 vmCvar_t bot_profile;
 
+// Behaviour-changing corrections, switchable so they can be compared in game:
+//   1 = fallback navigation probes the walls to the bot's left and right (the probes used to be
+//       aimed at a point next to the map origin)
+//   2 = stuck / back-up detection keeps its state per bot (it was one set shared by all bots)
+vmCvar_t bot_fixes;
+#define BOT_FIX_SIDE_PROBES		1
+#define BOT_FIX_PER_BOT_STUCK	2
+
 static botProfSite_t *BotProf_Site(const char *fn) {
 	int i;
 	for (i = 0; i < botProf.numSites; i++) {
@@ -193,6 +201,7 @@ static void BotProf_Report(double nowUs) {
 // called at the top of BotAIStartFrame; returns the frame start stamp (0 when off)
 static double BotProf_FrameBegin(void) {
 	trap->Cvar_Update(&bot_profile);
+	trap->Cvar_Update(&bot_fixes);
 	if (bot_profile.integer <= 0) {
 		botProf.enabled = 0;
 		return 0.0;
@@ -1094,8 +1103,10 @@ int BotAISetupClient(int client, struct bot_settings_s* settings, qboolean resta
 		return qfalse;
 	}
 
-	// Now allocate new memory
-	botstates[client] = (bot_state_t*)B_Alloc(sizeof(bot_state_t));
+	// Allocate the state block once per client slot and reuse it. BotAIShutdownClient clears the
+	// block but keeps the pointer, so allocating here on every connect leaked one block each time.
+	if (!botstates[client])
+		botstates[client] = (bot_state_t*)B_Alloc(sizeof(bot_state_t));
 	if (!botstates[client]) {
 		BotAI_Print(PRT_FATAL, "BotAISetupClient: Failed to allocate memory for bot %d\n", client);
 		return qfalse;
@@ -5635,11 +5646,20 @@ int BotFallbackNavigation(bot_state_t* bs) {
 		if (lastWallHitTime[bs->client] < level.time) {
 			// Smart turn away from danger
 			vec3_t leftDir, rightDir;
-			VectorMA(forward, 32, right, end);
+			// "forward" is a direction, so VectorMA(forward, ...) gave an end point next to the map
+			// origin and both probes were long traces across the map. With bot_fixes 1 they start
+			// from the bot and reach 32 units to each side, as the distances below assume.
+			if (bot_fixes.integer & BOT_FIX_SIDE_PROBES)
+				VectorMA(bs->origin, 32, right, end);
+			else
+				VectorMA(forward, 32, right, end);
 			JP_Trace(&tr, bs->origin, mins, maxs, end, bs->client, MASK_PLAYERSOLID, qfalse, 0, 0);
 			float rightDistance = tr.fraction * 32;
 
-			VectorMA(forward, -32, right, end);
+			if (bot_fixes.integer & BOT_FIX_SIDE_PROBES)
+				VectorMA(bs->origin, -32, right, end);
+			else
+				VectorMA(forward, -32, right, end);
 			JP_Trace(&tr, bs->origin, mins, maxs, end, bs->client, MASK_PLAYERSOLID, qfalse, 0, 0);
 			float leftDistance = tr.fraction * 32;
 
@@ -7058,7 +7078,7 @@ void NewBotAI_GetAim(bot_state_t* bs)
 	*/
 	//Well we should loop through every client and see if they are saberthrowing.  Then get the closest saber to us and aim at that if its close enough.
 	if (!g_entities[bs->client].client->ps.saberInFlight) {
-		while (i <= MAX_CLIENTS)
+		while (i < MAX_CLIENTS)
 		{
 			if (i != bs->client && g_entities[i].client && g_entities[i].client->ps.saberInFlight && !OnSameTeam(&g_entities[bs->client], &g_entities[i]) && PassStandardEnemyChecks(bs, &g_entities[i])
 				&& PassLovedOneCheck(bs, &g_entities[i]))
@@ -8311,7 +8331,8 @@ void BotPredictEnemyPosition(bot_state_t* bs, vec3_t predictedPos)
 	int patternType;
 
 	if (!bs->currentEnemy || !bs->currentEnemy->client) {
-		VectorCopy(bs->currentEnemy->client->ps.origin, predictedPos);
+		// no enemy to predict (this used to dereference the missing enemy)
+		VectorCopy(bs->origin, predictedPos);
 		return;
 	}
 
@@ -13587,12 +13608,16 @@ void StandardBotAI(bot_state_t* bs, float thinktime)
 	int detSelect = 0;
 	vec3_t preFrameGAngles;
 
-	static vec3_t lastStuckCheckPos;
-	static int lastStuckCheckTime = 0;
-	static int stuckCounter = 0;
-	static vec3_t lastUnstuckDirection;
-	static int lastBackupTime = 0;
-	static int consecutiveBackups = 0;
+	// Stuck / back-up bookkeeping. These were plain function statics, i.e. one set shared by every
+	// bot, so one bot's position was compared with another's. Slot 0 keeps that shared behaviour;
+	// with bot_fixes 2 each bot uses its own slot.
+	static vec3_t lastStuckCheckPos[MAX_CLIENTS + 1];
+	static int lastStuckCheckTime[MAX_CLIENTS + 1];
+	static int stuckCounter[MAX_CLIENTS + 1];
+	static vec3_t lastUnstuckDirection[MAX_CLIENTS + 1];
+	static int lastBackupTime[MAX_CLIENTS + 1];
+	static int consecutiveBackups[MAX_CLIENTS + 1];
+	const int stuckSlot = (bot_fixes.integer & BOT_FIX_PER_BOT_STUCK) ? 1 + bs->client : 0;
 
 	if (gDeactivated)
 	{
@@ -14716,20 +14741,18 @@ void StandardBotAI(bot_state_t* bs, float thinktime)
 		if (wallDistance < 16) // Niksata Edit
 		{
 			// SHIP WING BACKUP FIX - Don't back up if we've been backing up recently
-			static int lastBackupTime = 0;
-			static int consecutiveBackups = 0;
 
-			if (level.time - lastBackupTime < 2000) // If we haven't backed up recently
+			if (level.time - lastBackupTime[stuckSlot] < 2000) // If we haven't backed up recently
 			{
-				consecutiveBackups = 0; // Reset counter
+				consecutiveBackups[stuckSlot] = 0; // Reset counter
 			}
 			else
 			{
-				consecutiveBackups++; // Increment consecutive backups
+				consecutiveBackups[stuckSlot]++; // Increment consecutive backups
 			}
 
 			// PREVENT INFINITE BACKUPS - Max 3 consecutive backups
-			if (consecutiveBackups >= 3)
+			if (consecutiveBackups[stuckSlot] >= 3)
 			{
 				// Try alternative: jump and turn 90 degrees
 				if (bs->jumpTime < level.time)
@@ -14742,8 +14765,8 @@ void StandardBotAI(bot_state_t* bs, float thinktime)
 				bs->ideal_viewangles[YAW] += 90;
 				MoveTowardIdealAngles(bs);
 
-				consecutiveBackups = 0; // Reset after trying alternative
-				lastBackupTime = level.time + 3000; // Cooldown period
+				consecutiveBackups[stuckSlot] = 0; // Reset after trying alternative
+				lastBackupTime[stuckSlot] = level.time + 3000; // Cooldown period
 				return; // Skip normal backup logic
 			}
 
@@ -14761,23 +14784,23 @@ void StandardBotAI(bot_state_t* bs, float thinktime)
 				bs->ideal_viewangles[YAW] += Q_irand(-45, 45);
 			}
 
-			lastBackupTime = level.time;
+			lastBackupTime[stuckSlot] = level.time;
 			bs->beStill = level.time + 300;
 			goto skip_movement;
 		} // Niksata Edit
 
 		// ENHANCED STUCK DETECTION AND RECOVERY // Niksata Edit
 
-		if (level.time - lastStuckCheckTime > 1000) // Check every second
+		if (level.time - lastStuckCheckTime[stuckSlot] > 1000) // Check every second
 		{
-			float movedDistance = Distance(bs->origin, lastStuckCheckPos);
+			float movedDistance = Distance(bs->origin, lastStuckCheckPos[stuckSlot]);
 
 			if (movedDistance < 16) // Reduced threshold for better detection
 			{
-				stuckCounter++;
+				stuckCounter[stuckSlot]++;
 
 				// If stuck for 3+ seconds, try aggressive recovery
-				if (stuckCounter >= 3)
+				if (stuckCounter[stuckSlot] >= 3)
 				{
 					// AGGRESSIVE UNSTUCK MANEUVERS
 					if (bs->jumpTime < level.time)
@@ -14804,10 +14827,10 @@ void StandardBotAI(bot_state_t* bs, float thinktime)
 						}
 					}
 
-					stuckCounter = 0;
-					lastStuckCheckTime = level.time + 2000;
+					stuckCounter[stuckSlot] = 0;
+					lastStuckCheckTime[stuckSlot] = level.time + 2000;
 				}
-				else if (stuckCounter >= 2)
+				else if (stuckCounter[stuckSlot] >= 2)
 				{
 					// MODERATE RECOVERY - Try 180-degree turn
 					bs->ideal_viewangles[YAW] += 180;
@@ -14822,11 +14845,11 @@ void StandardBotAI(bot_state_t* bs, float thinktime)
 			}
 			else
 			{
-				stuckCounter = 0;
+				stuckCounter[stuckSlot] = 0;
 			}
 
-			VectorCopy(bs->origin, lastStuckCheckPos);
-			lastStuckCheckTime = level.time;
+			VectorCopy(bs->origin, lastStuckCheckPos[stuckSlot]);
+			lastStuckCheckTime[stuckSlot] = level.time;
 		} // Niksata Edit
 
 		VectorSubtract(bs->goalPosition, bs->origin, bs->goalMovedir);
@@ -15276,6 +15299,7 @@ int BotAISetup(int restart) {
 #endif
 
 	trap->Cvar_Register(&bot_profile, "bot_profile", "0", 0);
+	trap->Cvar_Register(&bot_fixes, "bot_fixes", "1", CVAR_ARCHIVE);
 	trap->Cvar_Register(&bot_attachments, "bot_attachments", "1", 0);
 	trap->Cvar_Register(&bot_camp, "bot_camp", "1", 0);
 
