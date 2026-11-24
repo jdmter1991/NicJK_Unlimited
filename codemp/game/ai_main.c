@@ -131,6 +131,20 @@ vmCvar_t bot_fixes;
 #define BOT_FIX_SIDE_PROBES		1
 #define BOT_FIX_PER_BOT_STUCK	2
 
+// New bot abilities, one bit each, so every one can be switched and compared in game.
+//   1 = send the selected force power in the usercmd like a real client. Without it Pmove resets a
+//       bot's selection to Heal every frame (forcesel 0), so a bot that knows Heal could not
+//       reliably use the power it had just picked.
+//   2 = contextual taunts (taunt / gloat / flourish / bow after a kill when nothing threatens)
+// bot_abTest N (N > 0) splits the bots into blocks of N client slots: slots 0..N-1 are the baseline
+// group (no features), slots N..2N-1 get bot_features, later slots are baseline and not counted.
+// Add the same N bot characters twice, in the same order, and both groups hold identical characters.
+// BOTEVAL lines (printed with bot_profile) give kills and deaths per group.
+vmCvar_t bot_features;
+vmCvar_t bot_abTest;
+#define BOTF_FORCESEL	1
+#define BOTF_TAUNTS		2
+
 static botProfSite_t *BotProf_Site(const char *fn) {
 	int i;
 	for (i = 0; i < botProf.numSites; i++) {
@@ -180,6 +194,36 @@ static int QDECL BotProf_SiteCompare(const void *a, const void *b) {
 	return d > 0 ? 1 : (d < 0 ? -1 : 0);
 }
 
+extern bot_state_t* botstates[MAX_CLIENTS];
+
+// kills and deaths per feature group since the map started (persistant[] counters)
+static void BotEval_Report(void) {
+	int g, i;
+	int bots[2] = { 0, 0 }, kills[2] = { 0, 0 }, deaths[2] = { 0, 0 };
+
+	for (i = 0; i < MAX_CLIENTS; i++) {
+		if (!botstates[i] || !botstates[i]->inuse || !g_entities[i].client) {
+			continue;
+		}
+		g = 1;
+		if (bot_abTest.integer > 0) {
+			if (i >= 2 * bot_abTest.integer) {
+				continue;	// outside the two compared blocks
+			}
+			g = (i < bot_abTest.integer) ? 0 : 1;
+		}
+		bots[g]++;
+		kills[g] += g_entities[i].client->ps.persistant[PERS_SCORE];
+		deaths[g] += g_entities[i].client->ps.persistant[PERS_KILLED];
+	}
+	if (bot_abTest.integer) {
+		trap->Print("BOTEVAL baseline: bots %d kills %d deaths %d | features %d: bots %d kills %d deaths %d\n",
+			bots[0], kills[0], deaths[0], bot_features.integer, bots[1], kills[1], deaths[1]);
+	} else {
+		trap->Print("BOTEVAL all bots: features %d bots %d kills %d deaths %d\n", bot_features.integer, bots[1], kills[1], deaths[1]);
+	}
+}
+
 static void BotProf_Report(double nowUs) {
 	int i;
 	const double frames = botProf.frames > 0 ? botProf.frames : 1;
@@ -190,6 +234,7 @@ static void BotProf_Report(double nowUs) {
 		botProf.frameUs / frames / 1e3, botProf.maxFrameUs / 1e3, botProf.thinkUs / thinks, botProf.maxThinkUs, botProf.maxThinkClient);
 	trap->Print("BOTPROF traces from ai_main.c: %.1f per think (max %d in one think), %.1f%% of ai time\n",
 		botProf.traces / thinks, botProf.maxThinkTraces, botProf.frameUs > 0 ? 100.0 * botProf.traceUs / botProf.frameUs : 0.0);
+	BotEval_Report();
 	qsort(botProf.sites, botProf.numSites, sizeof(botProf.sites[0]), BotProf_SiteCompare);
 	for (i = 0; i < botProf.numSites && i < 14; i++) {
 		const botProfSite_t *site = &botProf.sites[i];
@@ -202,6 +247,8 @@ static void BotProf_Report(double nowUs) {
 static double BotProf_FrameBegin(void) {
 	trap->Cvar_Update(&bot_profile);
 	trap->Cvar_Update(&bot_fixes);
+	trap->Cvar_Update(&bot_features);
+	trap->Cvar_Update(&bot_abTest);
 	if (bot_profile.integer <= 0) {
 		botProf.enabled = 0;
 		return 0.0;
@@ -755,7 +802,7 @@ void BotChangeViewAngles(bot_state_t* bs, float thinktime) {
 BotInputToUserCommand
 ==============
 */
-void BotInputToUserCommand(bot_input_t* bi, usercmd_t* ucmd, int delta_angles[3], int time, int useTime) {
+void BotInputToUserCommand(bot_state_t* bs, bot_input_t* bi, usercmd_t* ucmd, int delta_angles[3], int time, int useTime) {
 	vec3_t angles, forward, right;
 	short temp;
 	int j;
@@ -782,6 +829,25 @@ void BotInputToUserCommand(bot_input_t* bi, usercmd_t* ucmd, int delta_angles[3]
 	if (bi->actionflags & ACTION_FORCEPOWER) ucmd->buttons |= BUTTON_FORCEPOWER;
 
 	if (bi->actionflags & ACTION_SKI) ucmd->buttons |= BUTTON_DASH;
+
+	// Inputs the botlib action flags cannot express: dedicated buttons held for a while
+	// (BUTTON_FORCEGRIP, BUTTON_FORCE_LIGHTNING, BUTTON_FORCE_DRAIN, ...) and one-shot generic
+	// commands (saber style cycle, taunts, direct force powers), as a human client sends them.
+	if (bs->inputHoldButtons) {
+		if (level.time < bs->inputHoldUntil) {
+			ucmd->buttons |= bs->inputHoldButtons;
+		} else {
+			bs->inputHoldButtons = 0;
+		}
+	}
+	if (bs->inputGenCmd) {
+		ucmd->generic_cmd = (byte)bs->inputGenCmd;
+		bs->inputGenCmd = 0;
+	}
+	if ((bs->features & BOTF_FORCESEL) && g_entities[bs->client].client) {
+		// a real client always sends its selected power; 0 (= FP_HEAL) made Pmove select Heal
+		ucmd->forcesel = (byte)g_entities[bs->client].client->ps.fd.forcePowerSelected;
+	}
 
 	if (useTime < level.time && Q_irand(1, 10) < 5)
 	{ //for now just hit use randomly in case there's something useable around
@@ -888,7 +954,7 @@ void BotUpdateInput(bot_state_t* bs, int time, int elapsed_time) {
 		if (bs->lastucmd.buttons & BUTTON_ATTACK) bi.actionflags &= ~(ACTION_RESPAWN | ACTION_ATTACK);
 	}
 	//convert the bot input to a usercmd
-	BotInputToUserCommand(&bi, &bs->lastucmd, bs->cur_ps.delta_angles, time, bs->noUseTime);
+	BotInputToUserCommand(bs, &bi, &bs->lastucmd, bs->cur_ps.delta_angles, time, bs->noUseTime);
 	//subtract the delta angles
 	for (j = 0; j < 3; j++) {
 		bs->viewangles[j] = AngleMod(bs->viewangles[j] - SHORT2ANGLE(bs->cur_ps.delta_angles[j]));
@@ -928,6 +994,86 @@ void RemoveColorEscapeSequences(char* text) {
 	text[l] = '\0';
 }
 
+
+/*
+==============
+Extended bot input helpers
+==============
+*/
+// queue a generic command for the next usercmd; returns qfalse while the debounce is running
+qboolean Bot_SendGenCmd(bot_state_t* bs, int genCmd, int debounceMs) {
+	if (level.time < bs->inputGenCmdTime || bs->inputGenCmd) {
+		return qfalse;
+	}
+	bs->inputGenCmd = genCmd;
+	bs->inputGenCmdTime = level.time + debounceMs;
+	return qtrue;
+}
+
+// hold extra usercmd buttons (BUTTON_FORCEGRIP etc.) for the given time
+void Bot_HoldButtons(bot_state_t* bs, int buttons, int ms) {
+	bs->inputHoldButtons = buttons;
+	bs->inputHoldUntil = level.time + ms;
+}
+
+static int BotFeaturesFor(int client) {
+	if (bot_abTest.integer > 0 && (client < bot_abTest.integer || client >= 2 * bot_abTest.integer)) {
+		return 0;	// baseline group
+	}
+	return bot_features.integer;
+}
+
+/*
+==============
+BotContextualTaunts
+
+After a kill a player often taunts. Queue one a moment after our score goes up and perform it
+only if, at that moment, we are alive, on the ground, not in a saber move and have no enemy.
+==============
+*/
+static void BotContextualTaunts(bot_state_t* bs) {
+	gclient_t *cl = g_entities[bs->client].client;
+	int score;
+
+	if (!cl) {
+		return;
+	}
+	score = cl->ps.persistant[PERS_SCORE];
+	if (!(bs->features & BOTF_TAUNTS)) {
+		bs->evalLastScore = score;
+		bs->tauntTime = 0;
+		return;
+	}
+
+	if (score > bs->evalLastScore && level.time >= bs->nextTauntAllowed && !bs->tauntTime) {
+		// not every kill: more talkative personalities taunt more often
+		const int chance = 35 + (bs->chatFrequency > 0 ? 15 : 0);
+		if (Q_irand(1, 100) <= chance) {
+			static const int taunts[] = { GENCMD_TAUNT, GENCMD_TAUNT, GENCMD_GLOAT, GENCMD_FLOURISH, GENCMD_BOW };
+			bs->tauntCmd = taunts[Q_irand(0, (int)ARRAY_LEN(taunts) - 1)];
+			bs->tauntTime = level.time + Q_irand(500, 1100);
+		}
+	}
+	bs->evalLastScore = score;
+
+	if (bs->tauntTime && level.time >= bs->tauntTime) {
+		if (level.time - bs->tauntTime > 2500) {
+			bs->tauntTime = 0;	// the moment has passed
+		}
+		else if (cl->ps.stats[STAT_HEALTH] > 0 && !bs->currentEnemy
+			&& cl->ps.groundEntityNum != ENTITYNUM_NONE
+			&& !cl->ps.saberInFlight && cl->ps.weaponTime <= 0
+			&& !BG_SaberInAttack(cl->ps.saberMove) && !BG_InRoll(&cl->ps, cl->ps.legsAnim)
+			&& cl->ps.forceHandExtend == HANDEXTEND_NONE)
+		{
+			if (Bot_SendGenCmd(bs, bs->tauntCmd, 1200)) {
+				bs->tauntTime = 0;
+				bs->nextTauntAllowed = level.time + Q_irand(8000, 20000);
+				bs->beStill = level.time + 900;	// the flourish / bow / gloat anims need us standing
+			}
+		}
+	}
+}
 
 /*
 ==============
@@ -1014,10 +1160,14 @@ int BotAI(int client, float thinktime) {
 #ifdef _DEBUG
 	start = trap->Milliseconds();
 #endif
+	bs->features = BotFeaturesFor(client);
+
 	if (g_newBotAI.integer)
 		NewBotAI(bs, thinktime);
 	else
 		StandardBotAI(bs, thinktime);
+
+	BotContextualTaunts(bs);
 #ifdef _DEBUG
 	end = trap->Milliseconds();
 
@@ -15300,6 +15450,8 @@ int BotAISetup(int restart) {
 
 	trap->Cvar_Register(&bot_profile, "bot_profile", "0", 0);
 	trap->Cvar_Register(&bot_fixes, "bot_fixes", "1", CVAR_ARCHIVE);
+	trap->Cvar_Register(&bot_features, "bot_features", "3", CVAR_ARCHIVE);
+	trap->Cvar_Register(&bot_abTest, "bot_abTest", "0", 0);
 	trap->Cvar_Register(&bot_attachments, "bot_attachments", "1", 0);
 	trap->Cvar_Register(&bot_camp, "bot_camp", "1", 0);
 

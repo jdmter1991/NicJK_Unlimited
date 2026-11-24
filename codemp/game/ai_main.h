@@ -455,6 +455,17 @@ typedef struct bot_state_s
 	int jumpReleaseTime;
 	int lastObstacleTime;
 	int noRetreatTime;
+
+	// ---- extended input path and feature switches (see bot_features in ai_main.c) ----
+	int features;				// BOTF_* bits active for this bot this frame
+	int inputGenCmd;			// one-shot usercmd generic command (GENCMD_*), 0 = none
+	int inputGenCmdTime;		// earliest level.time the next generic command may be sent
+	int inputHoldButtons;		// extra usercmd buttons held until inputHoldUntil
+	int inputHoldUntil;
+	int evalLastScore;			// score seen last think, to notice our own kills
+	int tauntTime;				// level.time at which a queued taunt is performed, 0 = none
+	int tauntCmd;				// GENCMD_* of the queued taunt
+	int nextTauntAllowed;
 } bot_state_t;
 
 // ================================// Niksata Edit
