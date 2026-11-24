@@ -149,6 +149,18 @@ void SV_AddServerCommand( client_t *client, const char *cmd ) {
 		return;
 	}
 
+	// A client that is still loading the map (gamestate sent, not yet in the game) cannot
+	// acknowledge anything. On a big map with many bots the transient per-event commands sent
+	// during a long load (kill / duel / chat lines, and the game's "kls", "ircg" and "kg2"
+	// model-state events, hundreds per minute with 31 bots) filled its queue and the server
+	// dropped it with "Server command overflow". They describe moments the loading client never
+	// saw, so they are not queued for it; configstring updates and everything else still are.
+	if ( client->state == CS_PRIMED && client->netchan.remoteAddress.type != NA_BOT
+		&& ( !Q_strncmp( cmd, "print", 5 ) || !Q_strncmp( cmd, "chat", 4 ) || !Q_strncmp( cmd, "cp ", 3 )
+			|| !Q_strncmp( cmd, "kls ", 4 ) || !Q_strncmp( cmd, "ircg ", 5 ) || !Q_strncmp( cmd, "kg2 ", 4 ) ) ) {
+		return;
+	}
+
 	client->reliableSequence++;
 	// if we would be losing an old command that hasn't been acknowledged,
 	// we must drop the connection
