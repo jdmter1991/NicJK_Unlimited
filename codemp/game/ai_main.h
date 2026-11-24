@@ -492,6 +492,10 @@ typedef struct bot_state_s
 	int defEvadeUntil;			// an evasive move is in progress until this time
 	int defNextHealTime;
 	int seqNextSpecialTime;		// earliest level.time for any further special move (gap between specials)
+	vec3_t intentWorldDir;		// BOTINTENT_WORLD: flat world direction to move in, whatever the view yaw
+	int inputHoldUpUntil;		// jump is held until this time (force jump height comes from the hold)
+	int idleCheckTime;			// anti-idle watchdog
+	vec3_t idleCheckPos;
 } bot_state_t;
 
 // ================================// Niksata Edit

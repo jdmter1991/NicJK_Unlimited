@@ -182,6 +182,11 @@ vmCvar_t bot_abTest;
 #define BOTF_DEFENSE	256
 
 #define BOTINTENT_EVADE		8	// applied whatever the buttons are, and releases attack
+#define BOTINTENT_WORLD		16	// move along bs->intentWorldDir (navigation jump / unstick), always applied
+
+static int botEvalNavHighJumps, botEvalNavGapJumps, botEvalIdleKicks;
+static int botEvalLungeFail[5];	// why a crouch special did not start: not ducked, rolling, saber busy, in air, other
+static int botEvalStyleCount[8];	// thinks spent in each saber style by bots with the specials feature
 
 static int botEvalEvades, botEvalDisengages, botEvalDefForce;
 
@@ -277,12 +282,18 @@ static void BotEval_Report(void) {
 	}
 	trap->Print("BOTEVAL kata rolls: old logic %d, new logic %d of which started %d; targeted style changes completed %d\n", botEvalKataTried[0], botEvalKataTried[1], botEvalKataStarted[1], botEvalStyleSwitches);
 	trap->Print("BOTEVAL navigation: steered around obstacles %d, jumped low obstacles %d, roam goals reached %d\n", botEvalNavSteers, botEvalNavJumps, botEvalNavGoals);
+	trap->Print("BOTEVAL navigation: force jumps over high obstacles %d, jumps across gaps %d, idle bots set moving %d\n", botEvalNavHighJumps, botEvalNavGapJumps, botEvalIdleKicks);
 	trap->Print("BOTEVAL jump attacks tried %d started %d; lunges / crouch specials tried %d started %d\n",
 		botEvalSeqTried[BOTSEQ_JUMPATTACK], botEvalSeqStarted[BOTSEQ_JUMPATTACK], botEvalSeqTried[BOTSEQ_LUNGE], botEvalSeqStarted[BOTSEQ_LUNGE]);
 	trap->Print("BOTEVAL roll stabs tried %d started %d; back attacks tried %d started %d; stab-downs tried %d started %d\n",
 		botEvalSeqTried[BOTSEQ_ROLLSTAB], botEvalSeqStarted[BOTSEQ_ROLLSTAB], botEvalSeqTried[BOTSEQ_BACKATTACK], botEvalSeqStarted[BOTSEQ_BACKATTACK],
 		botEvalSeqTried[BOTSEQ_STABDOWN], botEvalSeqStarted[BOTSEQ_STABDOWN]);
 	trap->Print("BOTEVAL defence: evasions %d, disengages when hurt %d, defensive force uses %d\n", botEvalEvades, botEvalDisengages, botEvalDefForce);
+	trap->Print("BOTEVAL crouch special failures: not ducked %d, rolling %d, saber busy %d, in air %d, other %d\n",
+		botEvalLungeFail[0], botEvalLungeFail[1], botEvalLungeFail[2], botEvalLungeFail[3], botEvalLungeFail[4]);
+	trap->Print("BOTEVAL combat thinks by style: fast %d medium %d strong %d desann %d tavion %d dual %d staff %d\n",
+		botEvalStyleCount[SS_FAST], botEvalStyleCount[SS_MEDIUM], botEvalStyleCount[SS_STRONG], botEvalStyleCount[SS_DESANN],
+		botEvalStyleCount[SS_TAVION], botEvalStyleCount[SS_DUAL], botEvalStyleCount[SS_STAFF]);
 	if (bot_abTest.integer) {
 		trap->Print("BOTEVAL baseline: bots %d kills %d deaths %d | features %d: bots %d kills %d deaths %d\n",
 			bots[0], kills[0], deaths[0], bot_features.integer, bots[1], kills[1], deaths[1]);
@@ -1020,12 +1031,22 @@ void BotInputToUserCommand(bot_state_t* bs, bot_input_t* bi, usercmd_t* ucmd, in
 			bs->seqType = 0;
 		} else if (bs->seqFrame > maxFrames || sps->stats[STAT_HEALTH] <= 0 || sps->weapon != WP_SABER
 			|| (bs->seqType == BOTSEQ_ROLLSTAB && bs->seqFrame > 5 && !inFwdRoll)) {
+			if (bs->seqType == BOTSEQ_LUNGE) {
+				if (BG_InRoll((playerState_t *)sps, sps->legsAnim)) botEvalLungeFail[1]++;
+				else if (sps->groundEntityNum == ENTITYNUM_NONE) botEvalLungeFail[3]++;
+				else if (!(sps->pm_flags & PMF_DUCKED)) botEvalLungeFail[0]++;
+				else if (sps->saberMove != LS_READY || sps->weaponTime > 0) botEvalLungeFail[2]++;
+				else botEvalLungeFail[4]++;
+			}
 			bs->seqType = 0;
 		} else {
 			ucmd->rightmove = 0;
 			ucmd->forwardmove = 127;
 			ucmd->upmove = 0;
-			ucmd->buttons &= ~(BUTTON_ATTACK | BUTTON_ALT_ATTACK);
+			// nothing else may be pressed: a force power started now (hand extended for grip or
+			// lightning) stops the saber move from beginning
+			ucmd->buttons &= ~(BUTTON_ATTACK | BUTTON_ALT_ATTACK | BUTTON_FORCEPOWER | BUTTON_FORCEGRIP | BUTTON_FORCE_LIGHTNING | BUTTON_FORCE_DRAIN);
+			ucmd->generic_cmd = 0;
 			switch (bs->seqType) {
 			case BOTSEQ_JUMPATTACK:
 				ucmd->upmove = (bs->seqFrame >= 1) ? 127 : 0;
@@ -1058,9 +1079,22 @@ void BotInputToUserCommand(bot_state_t* bs, bot_input_t* bi, usercmd_t* ucmd, in
 		}
 	}
 
+	// navigation jump: keep jump held (the height of a force jump comes from how long it is held)
+	if (bs->inputHoldUpUntil > level.time) {
+		ucmd->upmove = 127;
+	}
+	if ((bs->intentFlags & BOTINTENT_WORLD) && level.time <= bs->intentUntil) {
+		vec3_t a, fw, rt;
+		VectorSet(a, 0, bi->viewangles[YAW], 0);
+		AngleVectors(a, fw, rt, NULL);
+		ucmd->forwardmove = (signed char)(DotProduct(fw, bs->intentWorldDir) * 127.0f);
+		ucmd->rightmove = (signed char)(DotProduct(rt, bs->intentWorldDir) * 127.0f);
+		return;
+	}
+
 	// waiting for the saber to return to ready so a special can start: let go of attack
 	if (bs->seqPrepUntil > level.time) {
-		ucmd->buttons &= ~(BUTTON_ATTACK | BUTTON_ALT_ATTACK);
+		ucmd->buttons &= ~(BUTTON_ATTACK | BUTTON_ALT_ATTACK | BUTTON_FORCEPOWER | BUTTON_FORCEGRIP | BUTTON_FORCE_LIGHTNING | BUTTON_FORCE_DRAIN);
 	}
 
 	// combat input intent (see bot_state_t): last word on the movement keys for this frame
@@ -1089,6 +1123,11 @@ void BotInputToUserCommand(bot_state_t* bs, bot_input_t* bi, usercmd_t* ucmd, in
 			}
 			if ((bs->intentFlags & BOTINTENT_NOJUMP) && ucmd->upmove > 0) {
 				ucmd->upmove = 0;
+			}
+			if (bs->intentFlags & BOTINTENT_KATA) {
+				// as for the other specials: no force power may start while the kata is being entered
+				ucmd->buttons &= ~(BUTTON_FORCEPOWER | BUTTON_FORCEGRIP | BUTTON_FORCE_LIGHTNING | BUTTON_FORCE_DRAIN);
+				ucmd->generic_cmd = 0;
 			}
 			ucmd->buttons |= bs->intentButtons;
 		}
@@ -1186,6 +1225,75 @@ static int BotFeaturesFor(int client) {
 		return 0;	// baseline group
 	}
 	return bot_features.integer;
+}
+
+/*
+==============
+BotAntiIdle  (bot_features 128)
+
+A bot with no enemy that has barely moved for a few seconds is doing nothing useful, whatever
+the reason. Make it pick an open direction (jumping if every direction is blocked) and go, so it
+keeps looking for a target.
+==============
+*/
+static qboolean BotNav_PathClear(bot_state_t* bs, vec3_t dir, float dist, float raise);
+static void BotNav_Jump(bot_state_t* bs, vec3_t dir, int holdMs, int moveMs);
+
+static void BotAntiIdle(bot_state_t* bs) {
+	gclient_t *cl = g_entities[bs->client].client;
+	vec3_t a, dir;
+	int i, start;
+
+	if (!(bs->features & BOTF_NAV) || !cl || cl->ps.stats[STAT_HEALTH] <= 0 || cl->sess.sessionTeam == TEAM_SPECTATOR) {
+		bs->idleCheckTime = 0;
+		return;
+	}
+	if (bs->currentEnemy || bs->tauntTime || cl->ps.groundEntityNum == ENTITYNUM_NONE
+		|| BG_InKnockDown(cl->ps.legsAnim) || (bs->intentFlags & BOTINTENT_WORLD)) {
+		bs->idleCheckTime = level.time;
+		VectorCopy(bs->origin, bs->idleCheckPos);
+		return;
+	}
+	if (!bs->idleCheckTime || bs->idleCheckTime > level.time) {
+		bs->idleCheckTime = level.time;
+		VectorCopy(bs->origin, bs->idleCheckPos);
+		return;
+	}
+	if (level.time - bs->idleCheckTime < 2500) {
+		return;
+	}
+	if (Distance(bs->origin, bs->idleCheckPos) > 48.0f) {
+		bs->idleCheckTime = level.time;
+		VectorCopy(bs->origin, bs->idleCheckPos);
+		return;
+	}
+
+	// idle: try the eight compass directions from a random start
+	start = Q_irand(0, 7);
+	for (i = 0; i < 8; i++) {
+		VectorSet(a, 0, (float)(((start + i) & 7) * 45), 0);
+		AngleVectors(a, dir, NULL, NULL);
+		if (BotNav_PathClear(bs, dir, 96, 0)) {
+			bs->intentFlags = BOTINTENT_WORLD;
+			VectorCopy(dir, bs->intentWorldDir);
+			bs->intentButtons = 0;
+			bs->intentUntil = level.time + 1400;
+			VectorCopy(a, bs->goalAngles);
+			VectorCopy(a, bs->ideal_viewangles);
+			bs->beStill = 0;
+			botEvalIdleKicks++;
+			bs->idleCheckTime = level.time;
+			VectorCopy(bs->origin, bs->idleCheckPos);
+			return;
+		}
+	}
+	// boxed in on all sides: jump out the way we are facing
+	VectorSet(a, 0, bs->viewangles[YAW], 0);
+	AngleVectors(a, dir, NULL, NULL);
+	BotNav_Jump(bs, dir, 500, 1200);
+	botEvalIdleKicks++;
+	bs->idleCheckTime = level.time;
+	VectorCopy(bs->origin, bs->idleCheckPos);
 }
 
 /*
@@ -1333,6 +1441,7 @@ int BotAI(int client, float thinktime) {
 		StandardBotAI(bs, thinktime);
 
 	BotContextualTaunts(bs);
+	BotAntiIdle(bs);
 #ifdef _DEBUG
 	end = trap->Milliseconds();
 
@@ -5900,10 +6009,87 @@ static qboolean BotNav_PathClear(bot_state_t* bs, vec3_t dir, float dist, float 
 	return (tr.fraction < 1.0f) ? qtrue : qfalse;
 }
 
-// Find a direction to walk in when "wantDir" is blocked: straight on, over a low obstacle with a
-// jump, or the nearest open direction to one side. The chosen side is kept for a while so the bot
-// goes round an obstacle instead of dithering in front of it.
-static qboolean BotNav_Steer(bot_state_t* bs, vec3_t wantDir, vec3_t outDir, qboolean *jump) {
+// Start a jump along the flat direction "dir": jump held for holdMs (0 = a tap), and the bot keeps
+// moving in that direction for moveMs so it does not steer away in mid-air.
+static void BotNav_Jump(bot_state_t* bs, vec3_t dir, int holdMs, int moveMs) {
+	bs->jumpTime = level.time + moveMs + 300;
+	bs->inputHoldUpUntil = level.time + (holdMs > 60 ? holdMs : 60);
+	bs->intentFlags = BOTINTENT_WORLD;
+	VectorCopy(dir, bs->intentWorldDir);
+	bs->intentButtons = 0;
+	bs->intentUntil = level.time + moveMs;
+	vectoangles(dir, bs->goalAngles);
+	bs->goalAngles[PITCH] = 0;
+	bs->goalAngles[ROLL] = 0;
+	VectorCopy(bs->goalAngles, bs->ideal_viewangles);
+}
+
+// Highest point a jump can reach above the floor by force jump level (hold height + the coast
+// after release): none 32, level 1 128, level 2 224, level 3 416.
+static float BotNav_MaxApex(bot_state_t* bs) {
+	static const float apex[4] = { 32.0f, 128.0f, 224.0f, 416.0f };
+	int lev = g_entities[bs->client].client ? g_entities[bs->client].client->ps.fd.forcePowerLevel[FP_LEVITATION] : 0;
+	if (lev < 0) lev = 0;
+	if (lev > 3) lev = 3;
+	if (lev > 0 && g_entities[bs->client].client->ps.fd.forcePower < 20) lev = 0;
+	return apex[lev];
+}
+
+// A drop is ahead: is there ground to land on further along "dir" that a jump can reach?
+// Running speed is 250 u/s and gravity 800, so a jump whose apex is h stays in the air for
+// about 2*sqrt(2h/800) seconds; crossing d units needs an apex of about 100*(d/250)^2.
+static qboolean BotNav_TryGapJump(bot_state_t* bs, vec3_t dir) {
+	static const float dists[] = { 110.0f, 150.0f, 200.0f, 260.0f, 330.0f, 410.0f, 500.0f };
+	const float floorZ = bs->origin[2] - 24.0f;
+	const float maxApex = BotNav_MaxApex(bs);
+	vec3_t mins, maxs, start, end, top, down;
+	trace_t tr;
+	int i;
+
+	if (!g_entities[bs->client].client || g_entities[bs->client].client->ps.groundEntityNum == ENTITYNUM_NONE || bs->jumpTime > level.time) {
+		return qfalse;
+	}
+	VectorSet(mins, -15, -15, -8);
+	VectorSet(maxs, 15, 15, 32);
+	for (i = 0; i < (int)ARRAY_LEN(dists); i++) {
+		const float t = dists[i] * 1.12f / 250.0f;
+		float need = 100.0f * t * t;
+		float rise;
+
+		VectorMA(bs->origin, dists[i], dir, top);
+		top[2] += 48;
+		VectorCopy(top, down);
+		down[2] -= 48 + 24 + 220;
+		JP_Trace(&tr, top, NULL, NULL, down, bs->client, MASK_SOLID, qfalse, 0, 0);
+		if (tr.startsolid || tr.fraction >= 1.0f || tr.plane.normal[2] < 0.7f) {
+			continue;	// nothing to stand on there
+		}
+		rise = tr.endpos[2] - floorZ;
+		if (rise > 0) need += rise;
+		if (need < 32.0f) need = 32.0f;
+		if (need > maxApex) {
+			return qfalse;	// further spots only need more
+		}
+		// the way there must be open at about the height of the arc
+		VectorCopy(bs->origin, start);
+		start[2] += (need > 64.0f ? 64.0f : need);
+		VectorMA(start, dists[i], dir, end);
+		JP_Trace(&tr, start, mins, maxs, end, bs->client, MASK_PLAYERSOLID, qfalse, 0, 0);
+		if (tr.startsolid || tr.fraction < 1.0f) {
+			return qfalse;
+		}
+		// hold long enough to rise to the apex (a held force jump climbs at about jump speed)
+		BotNav_Jump(bs, dir, (need <= 34.0f) ? 0 : (int)((need - 32.0f) * 1000.0f / 225.0f) + 120, (int)(t * 1000.0f) + 350);
+		botEvalNavGapJumps++;
+		return qtrue;
+	}
+	return qfalse;
+}
+
+// Find a direction to walk in when "wantDir" is blocked: straight on, over an obstacle with a
+// jump or force jump, or the nearest open direction to one side. The chosen side is kept for a
+// while so the bot goes round an obstacle instead of dithering in front of it.
+static qboolean BotNav_Steer(bot_state_t* bs, vec3_t wantDir, vec3_t outDir, qboolean *jump, int *jumpHoldMs) {
 	static int steerSide[MAX_CLIENTS];
 	static int steerSideUntil[MAX_CLIENTS];
 	static const float offsets[] = { 35.0f, 70.0f, 105.0f };
@@ -5911,6 +6097,7 @@ static qboolean BotNav_Steer(bot_state_t* bs, vec3_t wantDir, vec3_t outDir, qbo
 	int i, s;
 
 	*jump = qfalse;
+	*jumpHoldMs = 0;
 	VectorCopy(wantDir, dir);
 	dir[2] = 0;
 	if (VectorNormalize(dir) < 0.01f) {
@@ -5920,12 +6107,23 @@ static qboolean BotNav_Steer(bot_state_t* bs, vec3_t wantDir, vec3_t outDir, qbo
 		VectorCopy(dir, outDir);
 		return qtrue;
 	}
-	// low obstacle (crate, ledge up to about jump height): clear when raised
-	if (g_entities[bs->client].client && g_entities[bs->client].client->ps.groundEntityNum != ENTITYNUM_NONE
-		&& BotNav_PathClear(bs, dir, 56, 40)) {
-		VectorCopy(dir, outDir);
-		*jump = qtrue;
-		return qtrue;
+	// Obstacle that can be jumped: the way is clear, with something to land on, when the bot is
+	// raised by this much. Step up through what the bot's jump can reach: a plain jump clears
+	// about 28 units, force jump level 1 about 100, level 2 about 190, level 3 about 380.
+	if (g_entities[bs->client].client && g_entities[bs->client].client->ps.groundEntityNum != ENTITYNUM_NONE) {
+		static const float raises[] = { 28.0f, 60.0f, 100.0f, 190.0f, 300.0f, 380.0f };
+		const float maxApex = BotNav_MaxApex(bs);
+		for (i = 0; i < (int)ARRAY_LEN(raises); i++) {
+			if (raises[i] + 28.0f > maxApex && i > 0) {
+				break;
+			}
+			if (BotNav_PathClear(bs, dir, 56, raises[i])) {
+				VectorCopy(dir, outDir);
+				*jump = qtrue;
+				*jumpHoldMs = (raises[i] <= 30.0f) ? 0 : (int)(raises[i] * 1000.0f / 225.0f) + 150;
+				return qtrue;
+			}
+		}
 	}
 	if (steerSideUntil[bs->client] < level.time || !steerSide[bs->client]) {
 		steerSide[bs->client] = Q_irand(0, 1) ? 1 : -1;
@@ -6139,6 +6337,20 @@ int BotFallbackNavigation(bot_state_t* bs) {
 	// LEDGE DETECTION - if no ground within reasonable distance
 	qboolean isLedgeAhead = (tr.fraction >= 1.0f) || (ledgeCheck[2] - tr.endpos[2] > 120);
 
+	// A drop ahead: jump across when there is somewhere to land within reach (bot_features 128)
+	if ((bs->features & BOTF_NAV) && isLedgeAhead) {
+		vec3_t flat;
+		if (explorationTarget[bs->client][0] != 0 || explorationTarget[bs->client][1] != 0) {
+			VectorSubtract(explorationTarget[bs->client], bs->origin, flat);
+		} else {
+			VectorCopy(forward, flat);
+		}
+		flat[2] = 0;
+		if (VectorNormalize(flat) > 0.01f && BotNav_TryGapJump(bs, flat)) {
+			return 1;
+		}
+	}
+
 	// Blocked by something that is not a drop: go round it or over it (bot_features 128)
 	if ((bs->features & BOTF_NAV) && wallDistance < 20 && !isLedgeAhead) {
 		vec3_t want, steer;
@@ -6149,11 +6361,12 @@ int BotFallbackNavigation(bot_state_t* bs) {
 		} else {
 			VectorCopy(forward, want);
 		}
-		if (BotNav_Steer(bs, want, steer, &jump)) {
+		int holdMs;
+		if (BotNav_Steer(bs, want, steer, &jump, &holdMs)) {
 			if (jump && bs->jumpTime < level.time) {
-				bs->jumpTime = level.time + 600;
-				trap->EA_Jump(bs->client);
-				botEvalNavJumps++;
+				BotNav_Jump(bs, steer, holdMs, 450 + holdMs);
+				if (holdMs > 0) botEvalNavHighJumps++; else botEvalNavJumps++;
+				return 1;
 			} else {
 				botEvalNavSteers++;
 			}
@@ -6294,11 +6507,12 @@ int BotFallbackNavigation(bot_state_t* bs) {
 	if (hasTarget && (bs->features & BOTF_NAV)) {
 		vec3_t steer;
 		qboolean jump;
-		if (BotNav_Steer(bs, moveDir, steer, &jump)) {
+		int holdMs;
+		if (BotNav_Steer(bs, moveDir, steer, &jump, &holdMs)) {
 			if (jump && bs->jumpTime < level.time) {
-				bs->jumpTime = level.time + 600;
-				trap->EA_Jump(bs->client);
-				botEvalNavJumps++;
+				BotNav_Jump(bs, steer, holdMs, 450 + holdMs);
+				if (holdMs > 0) botEvalNavHighJumps++; else botEvalNavJumps++;
+				return 1;
 			} else if (DotProduct(steer, moveDir) < 0.99f) {
 				botEvalNavSteers++;
 			}
@@ -10942,7 +11156,7 @@ static qboolean Bot_DefensiveReaction(bot_state_t* bs) {
 		if (level.time - bs->defThreatTime >= delay) {
 			// a jump attack comes down along the attacker's facing: step aside; otherwise back off
 			const qboolean sideways = (en->ps.saberMove == LS_A_JUMP_T__B_ || en->ps.saberMove == LS_A_FLIP_STAB || en->ps.saberMove == LS_A_FLIP_SLASH) ? qtrue : qfalse;
-			if (Bot_StartEvade(bs, sideways, enemySpecial ? 550 : 300)) {
+			if (Bot_StartEvade(bs, sideways, enemySpecial ? 420 : 250)) {
 				botEvalEvades++;
 				bs->defThreatTime = 0;
 				return qtrue;
@@ -11339,6 +11553,8 @@ void Bot_ExecuteSaberCombat(bot_state_t* bs) {
 		const qboolean enemyDown = BG_InKnockDown(ep->legsAnim) ? qtrue : qfalse;
 		int want = 0;
 
+		if (style >= 0 && style < 8) botEvalStyleCount[style]++;
+
 		if (usable) {
 			if (enemyDown && dist <= 140 && sp->fd.forcePower >= 25 && level.time >= bs->seqBackCooldown) {
 				want = BOTSEQ_STABDOWN;			// finish an enemy lying on the ground
@@ -11391,7 +11607,7 @@ void Bot_ExecuteSaberCombat(bot_state_t* bs) {
 				roll = Q_irand(1, 100);
 
 				if (crouchStyle && dist >= 50 && dist <= 110 && level.time >= bs->seqLungeCooldown
-					&& roll <= (opening ? 70 : 8)) {
+					&& roll <= (opening ? 85 : 30)) {
 					want = BOTSEQ_LUNGE;			// quick punish at close range
 				} else if (jumpStyle && dist >= 100 && dist <= 190 && level.time >= bs->seqJumpCooldown
 					&& !(enemySwinging && enemyFacingMe)
@@ -11406,12 +11622,12 @@ void Bot_ExecuteSaberCombat(bot_state_t* bs) {
 		if (want && !ready && want != BOTSEQ_ROLLSTAB) {
 			// the saber is mid-swing: stop pressing attack for a moment so it returns to ready
 			bs->seqPrepType = want;
-			bs->seqPrepUntil = level.time + 450;
+			bs->seqPrepUntil = level.time + 300;
 			return;
 		}
 		if (want && want == BOTSEQ_ROLLSTAB && (BG_SaberInAttack(sp->saberMove) || sp->weaponTime > 0)) {
 			bs->seqPrepType = want;
-			bs->seqPrepUntil = level.time + 450;
+			bs->seqPrepUntil = level.time + 300;
 			return;
 		}
 		if (want) {
@@ -11424,12 +11640,12 @@ void Bot_ExecuteSaberCombat(bot_state_t* bs) {
 			bs->lastSpecialTime = level.time;
 			switch (want) {
 			case BOTSEQ_JUMPATTACK:	bs->seqJumpCooldown = level.time + Q_irand(6000, 10000); break;
-			case BOTSEQ_LUNGE:		bs->seqLungeCooldown = level.time + Q_irand(5000, 9000); break;
+			case BOTSEQ_LUNGE:		bs->seqLungeCooldown = level.time + Q_irand(3000, 5500); break;
 			case BOTSEQ_ROLLSTAB:	bs->seqRollCooldown = level.time + Q_irand(9000, 14000); break;
 			default:				bs->seqBackCooldown = level.time + Q_irand(1500, 3000); break;
 			}
 			if (want == BOTSEQ_JUMPATTACK || want == BOTSEQ_LUNGE || want == BOTSEQ_ROLLSTAB) {
-				bs->seqNextSpecialTime = level.time + Q_irand(3000, 4500);
+				bs->seqNextSpecialTime = level.time + Q_irand(2200, 3400);
 			}
 			return;
 		}
