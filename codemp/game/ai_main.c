@@ -185,7 +185,7 @@ vmCvar_t bot_abTest;
 #define BOTINTENT_WORLD		16	// move along bs->intentWorldDir (navigation jump / unstick), always applied
 
 static int botEvalNavHighJumps, botEvalNavGapJumps, botEvalIdleKicks, botEvalStuckJumps, botEvalStuckSuicides;
-static int botEvalStuckInSolid;
+static int botEvalStuckInSolid, botEvalLedgeHops;
 static int botEvalMoveSteers, botEvalMoveJumps, botEvalNavDoorTargets, botEvalNavOpenTargets;
 static int botEvalLungeFail[5];	// why a crouch special did not start: not ducked, rolling, saber busy, in air, other
 static int botEvalStyleCount[8];	// thinks spent in each saber style by bots with the specials feature
@@ -286,7 +286,7 @@ static void BotEval_Report(void) {
 	trap->Print("BOTEVAL navigation: steered around obstacles %d, jumped low obstacles %d, roam goals reached %d\n", botEvalNavSteers, botEvalNavJumps, botEvalNavGoals);
 	trap->Print("BOTEVAL navigation: force jumps over high obstacles %d, jumps across gaps %d, idle bots set moving %d, stuck jump-outs %d, stuck suicides %d\n",
 		botEvalNavHighJumps, botEvalNavGapJumps, botEvalIdleKicks, botEvalStuckJumps, botEvalStuckSuicides);
-	trap->Print("BOTEVAL bots found standing inside solid geometry and respawned: %d\n", botEvalStuckInSolid);
+	trap->Print("BOTEVAL bots found standing inside solid geometry and respawned: %d; hops over low ledges while moving: %d\n", botEvalStuckInSolid, botEvalLedgeHops);
 	trap->Print("BOTEVAL movement: steered round an obstacle while moving %d, jumped one %d; exploration targets through doors %d, toward open space %d\n",
 		botEvalMoveSteers, botEvalMoveJumps, botEvalNavDoorTargets, botEvalNavOpenTargets);
 	trap->Print("BOTEVAL jump attacks tried %d started %d; lunges / crouch specials tried %d started %d\n",
@@ -1045,9 +1045,12 @@ void BotInputToUserCommand(bot_state_t* bs, bot_input_t* bi, usercmd_t* ucmd, in
 				int holdMs;
 				if (BotNav_Steer(bs, dir, steer, &jump, &holdMs)) {
 					if (jump) {
-						if (bs->jumpTime < level.time && !(bs->currentEnemy && bs->frame_Enemy_Vis && bs->frame_Enemy_Len < 300)) {
+						const qboolean enemyClose = (bs->currentEnemy && bs->currentEnemy->client && bs->frame_Enemy_Vis && bs->frame_Enemy_Len < 300) ? qtrue : qfalse;
+						if (bs->jumpTime < level.time && (!enemyClose || holdMs <= 450
+							|| bs->currentEnemy->client->ps.origin[2] > bs->origin[2] + 32.0f)) {
 							BotNav_Jump(bs, steer, holdMs, 400 + holdMs);
 							botEvalMoveJumps++;
+							if (holdMs <= 450) botEvalLedgeHops++;
 						}
 					} else {
 						ucmd->forwardmove = (signed char)(DotProduct(fw, steer) * 127.0f);
@@ -6258,7 +6261,7 @@ static qboolean BotNav_Steer(bot_state_t* bs, vec3_t wantDir, vec3_t outDir, qbo
 			if (BotNav_PathClear(bs, dir, 56, raises[i])) {
 				VectorCopy(dir, outDir);
 				*jump = qtrue;
-				*jumpHoldMs = (raises[i] <= 30.0f) ? 0 : (int)(raises[i] * 1000.0f / 225.0f) + 150;
+				*jumpHoldMs = (raises[i] <= 30.0f) ? ((maxApex > 40.0f) ? 140 : 0) : (int)(raises[i] * 1000.0f / 225.0f) + 150;
 				return qtrue;
 			}
 		}
