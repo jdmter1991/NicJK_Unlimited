@@ -466,6 +466,15 @@ typedef struct bot_state_s
 	int tauntTime;				// level.time at which a queued taunt is performed, 0 = none
 	int tauntCmd;				// GENCMD_* of the queued taunt
 	int nextTauntAllowed;
+
+	// combat input intent: applied to the usercmd after navigation has written its movement,
+	// so a deliberately chosen swing direction or special-move input is not overwritten
+	int intentUntil;			// level.time until which the intent is applied
+	int intentFlags;			// BOTINTENT_* bits
+	int intentForward;			// -127 / 0 / 127 when BOTINTENT_MOVE
+	int intentRight;
+	int intentButtons;			// extra buttons pressed with the intent
+	int kataCooldownTime;		// earliest level.time for the next deliberate kata
 } bot_state_t;
 
 // ================================// Niksata Edit

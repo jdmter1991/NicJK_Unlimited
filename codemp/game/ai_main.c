@@ -142,8 +142,23 @@ vmCvar_t bot_fixes;
 // BOTEVAL lines (printed with bot_profile) give kills and deaths per group.
 vmCvar_t bot_features;
 vmCvar_t bot_abTest;
+//   4 = the saber swing direction chosen by the combat code reaches the game: the movement keys
+//       of the chosen attack quadrant are pressed on the frames where a swing can start or chain
+//       (navigation used to overwrite them, so the direction was a by-product of movement)
+//   8 = katas are attempted only when one can start (grounded, saber ready, 50 force, enemy in
+//       reach, cooldown) and with the input a kata needs (attack + alt attack, no movement keys).
+//       Without it the kata roll wins at least 75 % of the time and costs a 1.2 s special lockout
+//       whether or not anything happened.
 #define BOTF_FORCESEL	1
 #define BOTF_TAUNTS		2
+#define BOTF_SWINGDIR	4
+#define BOTF_KATA		8
+
+#define BOTINTENT_MOVE		1	// override forwardmove / rightmove
+#define BOTINTENT_NOJUMP	2	// drop a jump from this usercmd
+#define BOTINTENT_KATA		4	// stop as soon as the kata has started
+
+static int botEvalKataTried[2], botEvalKataStarted[2];	// [baseline group, feature group]
 
 static botProfSite_t *BotProf_Site(const char *fn) {
 	int i;
@@ -216,6 +231,7 @@ static void BotEval_Report(void) {
 		kills[g] += g_entities[i].client->ps.persistant[PERS_SCORE];
 		deaths[g] += g_entities[i].client->ps.persistant[PERS_KILLED];
 	}
+	trap->Print("BOTEVAL kata rolls: old logic %d, new logic %d of which started %d\n", botEvalKataTried[0], botEvalKataTried[1], botEvalKataStarted[1]);
 	if (bot_abTest.integer) {
 		trap->Print("BOTEVAL baseline: bots %d kills %d deaths %d | features %d: bots %d kills %d deaths %d\n",
 			bots[0], kills[0], deaths[0], bot_features.integer, bots[1], kills[1], deaths[1]);
@@ -929,6 +945,37 @@ void BotInputToUserCommand(bot_state_t* bs, bot_input_t* bi, usercmd_t* ucmd, in
 	//crouch/movedown
 	if (bi->actionflags & ACTION_CROUCH) {
 		ucmd->upmove = -127;
+	}
+
+	// combat input intent (see bot_state_t): last word on the movement keys for this frame
+	if (bs->intentFlags && level.time <= bs->intentUntil && g_entities[bs->client].client) {
+		const playerState_t *ps = &g_entities[bs->client].client->ps;
+		qboolean apply = qtrue;
+
+		if (bs->intentFlags & BOTINTENT_KATA) {
+			if (BG_SaberInKata(ps->saberMove)) {
+				botEvalKataStarted[1]++;
+				bs->intentFlags = 0;	// it started; let go of the keys
+				apply = qfalse;
+			}
+		} else if (bs->intentFlags & BOTINTENT_MOVE) {
+			// a swing direction only matters when a swing can start or chain, and only with attack held
+			if (!(ucmd->buttons & BUTTON_ATTACK) || (BG_SaberInAttack(ps->saberMove) && ps->weaponTime > 150)) {
+				apply = qfalse;
+			}
+		}
+		if (apply) {
+			if (bs->intentFlags & BOTINTENT_MOVE) {
+				ucmd->forwardmove = bs->intentForward;
+				ucmd->rightmove = bs->intentRight;
+			}
+			if ((bs->intentFlags & BOTINTENT_NOJUMP) && ucmd->upmove > 0) {
+				ucmd->upmove = 0;
+			}
+			ucmd->buttons |= bs->intentButtons;
+		}
+	} else {
+		bs->intentFlags = 0;
 	}
 }
 
@@ -9185,6 +9232,29 @@ void TAB_MoveforAttackQuad(bot_state_t* bs, vec3_t moveDir, int Quad)
 	vec3_t forward, right, temp;
 	AngleVectors(bs->viewangles, forward, right, NULL);
 
+	// Remember the quadrant as movement keys for the usercmd. One choice is kept for 300 ms so the
+	// direction is held through the start of the swing instead of changing every frame.
+	if ((bs->features & BOTF_SWINGDIR) && !(bs->intentFlags && level.time <= bs->intentUntil)) {
+		int f = 0, r = 0;
+		switch (Quad)
+		{
+		case Q_B:   f = 127; break;
+		case Q_BR:  f = 127; r = 127; break;
+		case Q_R:   r = 127; break;
+		case Q_TR:  f = -127; r = 127; break;
+		case Q_T:   f = -127; break;
+		case Q_TL:  f = -127; r = -127; break;
+		case Q_L:   r = -127; break;
+		case Q_BL:  f = 127; r = -127; break;
+		default:    f = 127; break;
+		}
+		bs->intentFlags = BOTINTENT_MOVE;
+		bs->intentForward = f;
+		bs->intentRight = r;
+		bs->intentButtons = 0;
+		bs->intentUntil = level.time + 300;
+	}
+
 	switch (Quad)
 	{
 	case Q_B:   VectorCopy(forward, moveDir); break;               // Down
@@ -10692,13 +10762,48 @@ void Bot_ExecuteSaberCombat(bot_state_t* bs) {
 	// ================================
 
 	// KATA ATTACK (45% + priority) - DYNAMIC RANGE
-	if (dist <= SPECIAL_RANGE && Q_irand(1, 100) <= (specialChance + 10)) { // Increased from 35% to 45%, bonus from 7 to 10
+	if (bs->features & BOTF_KATA) {
+		// Deliberate kata: only when the engine would accept it (PM_CanDoKata: grounded, saber not
+		// thrown and not mid-move, 50 force) and it has a chance to connect, then hold exactly the
+		// input a kata needs until it starts. If it cannot start, fall through to the other moves
+		// without taking the special lockout.
+		const playerState_t *kps = &g_entities[bs->client].client->ps;
+		if (dist >= 40 && dist <= 120
+			&& level.time >= bs->kataCooldownTime
+			&& kps->weapon == WP_SABER && !kps->saberHolstered && !kps->saberInFlight
+			&& kps->fd.forcePower >= 50
+			&& kps->groundEntityNum != ENTITYNUM_NONE
+			&& kps->saberMove == LS_READY	// PM_SaberMoveOkayForKata
+			&& !((kps->fd.saberAnimLevelBase == SS_STAFF || kps->fd.saberAnimLevelBase == SS_DUAL) && kps->fd.saberAnimLevel != kps->fd.saberAnimLevelBase)	// PM_InSecondaryStyle
+			&& kps->forceHandExtend == HANDEXTEND_NONE
+			&& (enemyVulnerable || enemyRecovering || !enemySwinging)
+			&& Q_irand(1, 100) <= (specialChance + 10))
+		{
+			bs->currentSpecial = SPECIAL_KATA;
+			bs->specialDuration = 1200;
+			bs->lastSpecialTime = level.time;
+			bs->kataCooldownTime = level.time + Q_irand(5000, 9000);
+
+			bs->intentFlags = BOTINTENT_MOVE | BOTINTENT_NOJUMP | BOTINTENT_KATA;
+			bs->intentForward = 0;
+			bs->intentRight = 0;
+			bs->intentButtons = BUTTON_ATTACK | BUTTON_ALT_ATTACK;
+			bs->intentUntil = level.time + 250;
+
+			bs->lastKataTime = level.time;
+			bs->kataStreak++;
+			botEvalKataTried[1]++;
+			return;
+		}
+	}
+	else if (dist <= SPECIAL_RANGE && Q_irand(1, 100) <= (specialChance + 10)) { // Increased from 35% to 45%, bonus from 7 to 10
 		// Set state and execute
 		bs->currentSpecial = SPECIAL_KATA;
 		bs->specialDuration = 1200; // 1.2 seconds
 		bs->lastSpecialTime = level.time;
 
 		// FIXED: Removed obstacle check
+		botEvalKataTried[0]++;
 		Bot_ExecuteKataAttack(bs);
 		return;
 	}
@@ -15450,7 +15555,7 @@ int BotAISetup(int restart) {
 
 	trap->Cvar_Register(&bot_profile, "bot_profile", "0", 0);
 	trap->Cvar_Register(&bot_fixes, "bot_fixes", "1", CVAR_ARCHIVE);
-	trap->Cvar_Register(&bot_features, "bot_features", "3", CVAR_ARCHIVE);
+	trap->Cvar_Register(&bot_features, "bot_features", "11", CVAR_ARCHIVE);	// 1 + 2 + 8; 4 (swing direction) is still being evaluated
 	trap->Cvar_Register(&bot_abTest, "bot_abTest", "0", 0);
 	trap->Cvar_Register(&bot_attachments, "bot_attachments", "1", 0);
 	trap->Cvar_Register(&bot_camp, "bot_camp", "1", 0);
