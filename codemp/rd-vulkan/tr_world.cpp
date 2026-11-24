@@ -1557,6 +1557,9 @@ void R_AddWorldSurfaces ( void ) {
 
 	R_RecursiveWorldNode( tr.world->nodes, 15, ( 1 << tr.refdef.num_dlights ) - 1 );
 
+	// cooked static world: one draw surface, culled and drawn in the back end
+	R_AddTWorldSurface();
+
 #ifdef USE_PMLIGHT
 	// "transform" all the dlights so that dl->transformed is actually populated
 	// (even though HERE it's == dl->origin) so we can always use R_LightCullBounds

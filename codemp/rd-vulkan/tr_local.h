@@ -877,6 +877,7 @@ typedef enum surfaceType_e {
 	SF_ENTITY,				// beams, rails, lightning, etc that can be determined by entity
 	SF_VBO_MDVMESH,
 	SF_SPRITES,
+	SF_TWORLD,				// cooked static world (tr_tworld.cpp)
 
 	SF_NUM_SURFACE_TYPES,
 
@@ -1988,6 +1989,14 @@ void		R_AddMD3Surfaces( trRefEntity_t *e );
 void		R_AddPolygonSurfaces( void );
 void		R_DecomposeSort( unsigned sort, int *entityNum, shader_t **shader, int *fogNum, int *dlightMap );
 void		R_AddDrawSurf( surfaceType_t *surface, shader_t *shader, int fogIndex, int dlightMap );
+
+// tr_tworld.cpp: cooked static world drawn next to the BSP
+void		R_LoadTWorld( const char *bspName );
+void		R_AddTWorldSurface( void );
+void		RB_SurfaceTWorld( void *surface );
+#ifdef USE_VBO_MDV
+void		RB_SurfaceVBOMDVMesh( srfVBOMDVMesh_t *surf );
+#endif
 #ifdef USE_PMLIGHT
 void		R_DecomposeLitSort( unsigned sort, int* entityNum, shader_t** shader, int* fogNum );
 void		R_AddLitSurf( surfaceType_t* surface, shader_t* shader, int fogIndex );

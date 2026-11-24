@@ -2409,6 +2409,9 @@ void RE_LoadWorldMap_Actual( const char *name, world_t &worldData, int index )
 		// only set tr.world now that we know the entire level has loaded properly
 		tr.world = &worldData;
 
+		// optional cooked static world next to the BSP (maps/<name>.tworld)
+		R_LoadTWorld( name );
+
 		tr.mapLoading = qfalse;
 	}
 

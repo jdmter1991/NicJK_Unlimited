@@ -88,11 +88,13 @@ void RB_EndSurface( void ) {
 		return;
 	}
 
-	if (input->numIndexes > SHADER_MAX_INDEXES) {
+	// model vertex buffers are drawn straight from the GPU and never touch the tess arrays,
+	// so the array size limits only apply to the CPU path
+	if (input->numIndexes > SHADER_MAX_INDEXES && !tess.vbo_model) {
 		ri.Error(ERR_DROP, "RB_EndSurface() - SHADER_MAX_INDEXES hit");
 	}
 
-	if (input->numVertexes > SHADER_MAX_VERTEXES) {
+	if (input->numVertexes > SHADER_MAX_VERTEXES && !tess.vbo_model) {
 		ri.Error(ERR_DROP, "RB_EndSurface() - SHADER_MAX_VERTEXES hit");
 	}
 

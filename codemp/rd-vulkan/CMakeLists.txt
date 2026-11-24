@@ -70,6 +70,7 @@ set(MPVulkanRendererFiles
 	"${MPDir}/rd-vulkan/tr_surface.cpp"
 	"${MPDir}/rd-vulkan/tr_surfacesprites.cpp"
 	"${MPDir}/rd-vulkan/tr_world.cpp"
+	"${MPDir}/rd-vulkan/tr_tworld.cpp"
 	"${MPDir}/rd-vulkan/tr_WorldEffects.cpp"
 	"${MPDir}/rd-vulkan/tr_WorldEffects.h"
 	"${MPDir}/rd-vulkan/vk_attachments.cpp"
