@@ -11800,6 +11800,24 @@ void CG_DrawPlayerSphere(centity_t *cent, vec3_t origin, float scale, int shader
 	trap->R_AddRefEntityToScene( &ent );
 }
 
+// rate limit for per-player force effects that are restarted while a power is held
+static int cg_forceFxNextTime[MAX_GENTITIES];
+
+static qboolean CG_ForceFxDue(int entityNum)
+{
+	if (cg_forceFxInterval.integer <= 0 || entityNum < 0 || entityNum >= MAX_GENTITIES)
+	{
+		return qtrue;
+	}
+	// (the second test recovers from cg.time going backwards, e.g. after a map restart)
+	if (cg.time < cg_forceFxNextTime[entityNum] && cg_forceFxNextTime[entityNum] - cg.time <= 1000)
+	{
+		return qfalse;
+	}
+	cg_forceFxNextTime[entityNum] = cg.time + cg_forceFxInterval.integer;
+	return qtrue;
+}
+
 void CG_AddLightningBeam(vec3_t start, vec3_t end)
 {
 	vec3_t	dir, chaos,
@@ -15188,7 +15206,15 @@ skipTrail:
 		ci->frame = cent->pe.torso.frame;
 	}
 
-	if (cent->currentState.activeForcePass > FORCE_LEVEL_3
+	// The lightning / drain effect used to be started on every rendered frame. Each start spawns
+	// bolts with collision traces, impact effects, an emitter and several dynamic lights that live
+	// 50-80 ms, so the number alive at once (and the cost) grew with the frame rate. Start it at
+	// most once every cg_forceFxInterval ms per player instead (16 ms = what a 60 fps client shows).
+	if (cent->currentState.activeForcePass && !CG_ForceFxDue(cent->currentState.number))
+	{
+		// not time for a new burst yet; the bursts already playing keep animating
+	}
+	else if (cent->currentState.activeForcePass > FORCE_LEVEL_3
 		&& cent->currentState.NPC_class != CLASS_VEHICLE)
 	{
 		matrix3_t axis;

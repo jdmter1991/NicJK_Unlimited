@@ -229,6 +229,7 @@ XCVAR_DEF( cg_strafeTrailPlums,					"0",	NULL,					CVAR_ARCHIVE )
 XCVAR_DEF( cg_spotIconPlums,					"0",	NULL,					CVAR_ARCHIVE )
 
 XCVAR_DEF( cg_drainFX,							"1",	NULL,					CVAR_NONE ) // Niksata Edit
+XCVAR_DEF( cg_forceFxInterval,					"16",	NULL,					CVAR_ARCHIVE ) // min ms between force lightning/drain effect spawns per player, 0 = every frame
 //Make maxpackets userinfo maybe idk
 
 #if 1
