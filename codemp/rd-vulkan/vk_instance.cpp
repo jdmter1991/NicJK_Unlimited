@@ -724,6 +724,11 @@ static qboolean vk_create_device( VkPhysicalDevice physical_device, int device_i
 		Com_Memset(&features, 0, sizeof(features));
 		features.fillModeNonSolid = VK_TRUE;
 
+		// block-compressed textures (run-time BC3 and pre-compressed DDS files)
+		if ( device_features.textureCompressionBC ) {
+			features.textureCompressionBC = VK_TRUE;
+		}
+
 #ifdef _DEBUG
 		if ( device_features.shaderInt64 ) {
 			features.shaderInt64 = VK_TRUE;

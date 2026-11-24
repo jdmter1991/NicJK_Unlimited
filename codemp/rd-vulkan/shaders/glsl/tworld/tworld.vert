@@ -13,7 +13,7 @@ layout(set = 0, binding = 2) uniform Entity {
 	vec4 ambientLight;
 	vec4 directedLight;
 	vec4 localLightOrigin;	// xyz: unit vector towards the sun
-	vec4 localViewOrigin;
+	vec4 localViewOrigin;	// reused: x intensity, y 1/gamma, z overbright scale for textures that were not light-scaled
 	mat4 modelMatrix;
 } u_entity;
 
@@ -26,11 +26,13 @@ layout(location = 4) in vec4 in_row1;
 layout(location = 5) in vec4 in_row2;
 layout(location = 6) in vec4 in_tint;		// rgb tint, a opacity
 layout(location = 7) in vec4 in_params;		// x: detail texture repeats per unit of UV (0 = no detail layer)
+											// y: 1 = the base texture is pre-compressed and still needs the light scale
 
 layout(location = 0) out vec2 frag_tex_coord;
 layout(location = 1) out vec4 frag_color;
 layout(location = 2) out vec2 frag_detail_coord;
 layout(location = 3) flat out float frag_detail;
+layout(location = 4) flat out vec4 frag_texscale;	// x intensity, y 1/gamma, z overbright scale, w 1 = apply
 
 out gl_PerVertex {
 	vec4 gl_Position;
@@ -49,5 +51,6 @@ void main() {
 	frag_tex_coord = in_tex_coord;
 	frag_detail_coord = in_tex_coord * in_params.x;
 	frag_detail = in_params.x;
+	frag_texscale = vec4( u_entity.localViewOrigin.xyz, in_params.y );
 	gl_Position = mvp * vec4( world, 1.0 );
 }

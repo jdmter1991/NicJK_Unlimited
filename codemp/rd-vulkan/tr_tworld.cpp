@@ -101,6 +101,7 @@ typedef struct {
 	int				tintIndex;		// index into tworld_t::tints
 	int				pass;			// 0 opaque, 1 blended
 	uint32_t		pipeline[2];	// instanced pipeline index + 1 (normal view, mirror view); 0 = not created yet
+	float			texNoScale;		// 1 = base texture is a pre-compressed image without the upload light scale
 	srfVBOMDVMesh_t	surf;
 } tworldSub_t;
 
@@ -364,6 +365,11 @@ void R_LoadTWorld( const char *bspName )
 				out->shader = shaders[s->material];
 				out->tintIndex = s->material;
 				out->pass = ( fmat[s->material].flags & TWMAT_BLEND ) ? 1 : 0;
+				{
+					const shaderStage_t *st0 = out->shader->stages[0];
+					const image_t *im0 = st0 ? st0->bundle[0].image[0] : NULL;
+					out->texNoScale = ( im0 && ( im0->flags & IMGFLAG_NOLIGHTSCALE ) ) ? 1.0f : 0.0f;
+				}
 				tw->meshes[i].lodPassMask[l] |= 1 << out->pass;
 				out->surf.surfaceType = SF_VBO_MDVMESH;
 				out->surf.vbo = vbo;
@@ -527,6 +533,15 @@ static qboolean RB_TWorldInstanced( tworld_t *tw, const int pass )
 	VectorScale( tw->ambientColor, light, u.ambientLight );
 	VectorScale( tw->sunColor, light, u.directedLight );
 	VectorCopy( tw->sunDir, u.localLightOrigin );
+	// light scale for pre-compressed textures, the same curve R_LightScaleTexture bakes into uncompressed ones
+	u.localViewOrigin[0] = r_intensity->value;
+	if ( !glConfig.deviceSupportsGamma && !vk.fboActive ) {
+		u.localViewOrigin[1] = 1.0f / r_gamma->value;
+		u.localViewOrigin[2] = (float)( 1 << tr.overbrightBits );
+	} else {
+		u.localViewOrigin[1] = 1.0f;
+		u.localViewOrigin[2] = 1.0f;
+	}
 	uboOffset = data ? vk_append_uniform( &u, sizeof( u ), vk.uniform_entity_item_size ) : ~0U;
 
 	if ( !data || uboOffset == ~0U ) {
@@ -563,7 +578,8 @@ static qboolean RB_TWorldInstanced( tworld_t *tw, const int pass )
 			VectorCopy( tw->tints[sub->tintIndex], out->tint );
 			out->tint[3] = tw->alphas[sub->tintIndex];
 			out->params[0] = tw->details[sub->tintIndex];
-			out->params[1] = out->params[2] = out->params[3] = 0.0f;
+			out->params[1] = sub->texNoScale;
+			out->params[2] = out->params[3] = 0.0f;
 		}
 	}
 

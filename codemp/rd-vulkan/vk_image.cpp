@@ -996,12 +996,28 @@ static byte *vk_resample_image_data( const int target_format, byte *data, const 
 
 //static int batch_by_format = 0;
 
+// bytes per 4x4 block for the block-compressed formats the renderer can upload, 0 for anything else
+static int vk_bc_block_bytes( int format )
+{
+	switch ( format ) {
+		case VK_FORMAT_BC1_RGB_UNORM_BLOCK:
+		case VK_FORMAT_BC1_RGBA_UNORM_BLOCK:
+			return 8;
+		case VK_FORMAT_BC3_UNORM_BLOCK:
+		case VK_FORMAT_BC7_UNORM_BLOCK:
+			return 16;
+		default:
+			return 0;
+	}
+}
+
 void vk_upload_image_data( image_t *image, int x, int y, int width, 
 	int height, int mipmaps, byte *pixels, int size, qboolean update )
 {
 	VkCommandBuffer command_buffer;
 	VkBufferImageCopy regions[16];
 	VkBufferImageCopy region;
+	const int blockBytes = vk_bc_block_bytes( image->internalFormat );
 
 	byte *buf;
 	int n, mip_level_size;
@@ -1010,7 +1026,7 @@ void vk_upload_image_data( image_t *image, int x, int y, int width,
 	int num_regions = 0;
 	int buffer_size = 0;
 
-	if ( image->internalFormat == VK_FORMAT_BC3_UNORM_BLOCK ) {
+	if ( blockBytes ) {
 		compressed = qtrue;
 		buf = pixels;
 	}
@@ -1044,7 +1060,7 @@ void vk_upload_image_data( image_t *image, int x, int y, int width,
 		num_regions++;
 
 		if ( compressed )
-			mip_level_size = rygCompressedSize(width, height);
+			mip_level_size = ( ( width + 3 ) / 4 ) * ( ( height + 3 ) / 4 ) * blockBytes;
 		else
 			mip_level_size = width * height * n;
 
@@ -1441,6 +1457,131 @@ image_t *R_CreateImage( const char *name, byte *pic, int width, int height, imgF
     return image;
 }
 
+/*
+=================
+R_LoadDDSImage
+
+Pre-compressed texture next to the usual image name: <name>.dds with BC1, BC3 or BC7 data and its own mip
+chain (DX10 header or the classic DXT1 / DXT5 four-character codes). The blocks go to the GPU as they are:
+no decode, no CPU mip generation, no power-of-two or maximum-size restriction. Returns NULL when there is no
+such file or it cannot be used, and the caller falls back to the normal loaders.
+=================
+*/
+static image_t *R_LoadDDSImage( const char *name, imgFlags_t flags, int hash )
+{
+	char		ddsName[MAX_QPATH];
+	byte		*buf = NULL;
+	long		len;
+	uint32_t	hdr[37];
+	uint32_t	width, height, mips, fourcc, dataOfs, need, w, h, i;
+	int			format = 0, blockBytes;
+	VkFormatProperties props;
+	image_t		*image;
+	int			namelen;
+
+	COM_StripExtension( name, ddsName, sizeof( ddsName ) );
+	if ( strlen( ddsName ) + 5 > sizeof( ddsName ) )
+		return NULL;
+	Q_strcat( ddsName, sizeof( ddsName ), ".dds" );
+
+	len = ri.FS_ReadFile( ddsName, (void **)&buf );
+	if ( len <= 0 || !buf )
+		return NULL;
+
+	if ( len < 128 || memcmp( buf, "DDS ", 4 ) ) {
+		ri.Printf( PRINT_WARNING, "R_LoadDDSImage: %s is not a DDS file\n", ddsName );
+		ri.FS_FreeFile( buf );
+		return NULL;
+	}
+
+	Com_Memcpy( hdr, buf, sizeof( hdr ) );		// 4 magic + 124 header + 20 DX10 header
+	height = LittleLong( hdr[3] );
+	width = LittleLong( hdr[4] );
+	mips = LittleLong( hdr[7] );
+	fourcc = LittleLong( hdr[21] );
+	dataOfs = 128;
+
+	if ( fourcc == 0x30315844 /* DX10 */ && len >= 148 ) {
+		const uint32_t dxgi = LittleLong( hdr[32] );
+		dataOfs = 148;
+		if ( dxgi == 70 || dxgi == 71 || dxgi == 72 )		format = VK_FORMAT_BC1_RGBA_UNORM_BLOCK;
+		else if ( dxgi == 76 || dxgi == 77 || dxgi == 78 )	format = VK_FORMAT_BC3_UNORM_BLOCK;
+		else if ( dxgi == 97 || dxgi == 98 || dxgi == 99 )	format = VK_FORMAT_BC7_UNORM_BLOCK;
+	}
+	else if ( fourcc == 0x31545844 /* DXT1 */ )	format = VK_FORMAT_BC1_RGBA_UNORM_BLOCK;
+	else if ( fourcc == 0x35545844 /* DXT5 */ )	format = VK_FORMAT_BC3_UNORM_BLOCK;
+
+	blockBytes = vk_bc_block_bytes( format );
+	if ( !blockBytes || width < 1 || height < 1 || width > 16384 || height > 16384 ) {
+		ri.Printf( PRINT_WARNING, "R_LoadDDSImage: %s: unsupported format or size\n", ddsName );
+		ri.FS_FreeFile( buf );
+		return NULL;
+	}
+
+	qvkGetPhysicalDeviceFormatProperties( vk.physical_device, (VkFormat)format, &props );
+	if ( !( props.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT ) ) {
+		ri.FS_FreeFile( buf );
+		return NULL;		// this device cannot sample the format: use the uncompressed image instead
+	}
+
+	if ( mips < 1 )
+		mips = 1;
+	if ( mips > 16 )
+		mips = 16;
+
+	for ( i = 0, need = 0, w = width, h = height; i < mips; i++ ) {
+		need += ( ( w + 3 ) / 4 ) * ( ( h + 3 ) / 4 ) * blockBytes;
+		if ( w == 1 && h == 1 ) {
+			mips = i + 1;
+			break;
+		}
+		w = ( w > 1 ) ? ( w >> 1 ) : 1;
+		h = ( h > 1 ) ? ( h >> 1 ) : 1;
+	}
+	if ( (uint64_t)dataOfs + need > (uint64_t)len ) {
+		ri.Printf( PRINT_WARNING, "R_LoadDDSImage: %s is truncated\n", ddsName );
+		ri.FS_FreeFile( buf );
+		return NULL;
+	}
+
+	namelen = (int)strlen( name ) + 1;
+	if ( namelen > MAX_QPATH ) {
+		ri.FS_FreeFile( buf );
+		return NULL;
+	}
+
+	image = (image_t *)Z_Malloc( sizeof( *image ) + namelen, TAG_IMAGE_T );
+	Com_Memset( image, 0, sizeof( *image ) + namelen );
+	image->imgName = (char *)( image + 1 );
+	strcpy( image->imgName, name );
+	image->next = hashTable[hash];
+	hashTable[hash] = image;
+	R_AddImageToPool( image );
+
+	// IMGFLAG_NOLIGHTSCALE here records that no light scale was baked into the data (see tr_tworld.cpp)
+	image->flags = flags | IMGFLAG_NO_COMPRESSION | IMGFLAG_NOSCALE | IMGFLAG_NOLIGHTSCALE;
+	image->width = image->uploadWidth = (int)width;
+	image->height = image->uploadHeight = (int)height;
+	image->internalFormat = format;
+
+	if ( flags & IMGFLAG_CLAMPTOBORDER )
+		image->wrapClampMode = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+	else if ( flags & IMGFLAG_CLAMPTOEDGE )
+		image->wrapClampMode = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+	else
+		image->wrapClampMode = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+
+	image->handle = VK_NULL_HANDLE;
+	image->view = VK_NULL_HANDLE;
+	image->descriptor_set = VK_NULL_HANDLE;
+
+	vk_create_image( image, (int)width, (int)height, (int)mips );
+	vk_upload_image_data( image, 0, 0, (int)width, (int)height, (int)mips, buf + dataOfs, (int)need, qfalse );
+
+	ri.FS_FreeFile( buf );
+	return image;
+}
+
 image_t *R_FindImageFile( const char *name, imgFlags_t flags ){
         image_t		*image;
         int			width, height;
@@ -1472,6 +1613,12 @@ image_t *R_FindImageFile( const char *name, imgFlags_t flags ){
                 }
                 return image;
             }
+        }
+
+        // a pre-compressed .dds next to the image takes precedence over the normal loaders
+        image = R_LoadDDSImage( name, flags, hash );
+        if ( image ) {
+            return image;
         }
 
         //

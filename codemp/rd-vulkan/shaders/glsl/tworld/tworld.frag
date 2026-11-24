@@ -11,6 +11,7 @@ layout(location = 0) in vec2 frag_tex_coord;
 layout(location = 1) in vec4 frag_color;
 layout(location = 2) in vec2 frag_detail_coord;
 layout(location = 3) flat in float frag_detail;
+layout(location = 4) flat in vec4 frag_texscale;
 
 layout(location = 0) out vec4 out_color;
 
@@ -26,6 +27,12 @@ void main() {
 		if ( base.a >= alpha_test_value ) discard;
 	} else if ( alpha_test_func == 3 ) {
 		if ( base.a < alpha_test_value ) discard;
+	}
+
+	// The engine brightens uncompressed textures on upload (intensity, and gamma / overbright when the
+	// display cannot do it). Pre-compressed textures skip that step, so the same curve is applied here.
+	if ( frag_texscale.w > 0.5 ) {
+		base.rgb = pow( min( base.rgb * frag_texscale.x, vec3( 1.0 ) ), vec3( frag_texscale.y ) ) * frag_texscale.z;
 	}
 
 	if ( frag_detail > 0.0 ) {
