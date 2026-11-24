@@ -184,7 +184,7 @@ vmCvar_t bot_abTest;
 #define BOTINTENT_EVADE		8	// applied whatever the buttons are, and releases attack
 #define BOTINTENT_WORLD		16	// move along bs->intentWorldDir (navigation jump / unstick), always applied
 
-static int botEvalNavHighJumps, botEvalNavGapJumps, botEvalIdleKicks;
+static int botEvalNavHighJumps, botEvalNavGapJumps, botEvalIdleKicks, botEvalStuckJumps, botEvalStuckSuicides;
 static int botEvalLungeFail[5];	// why a crouch special did not start: not ducked, rolling, saber busy, in air, other
 static int botEvalStyleCount[8];	// thinks spent in each saber style by bots with the specials feature
 
@@ -282,7 +282,8 @@ static void BotEval_Report(void) {
 	}
 	trap->Print("BOTEVAL kata rolls: old logic %d, new logic %d of which started %d; targeted style changes completed %d\n", botEvalKataTried[0], botEvalKataTried[1], botEvalKataStarted[1], botEvalStyleSwitches);
 	trap->Print("BOTEVAL navigation: steered around obstacles %d, jumped low obstacles %d, roam goals reached %d\n", botEvalNavSteers, botEvalNavJumps, botEvalNavGoals);
-	trap->Print("BOTEVAL navigation: force jumps over high obstacles %d, jumps across gaps %d, idle bots set moving %d\n", botEvalNavHighJumps, botEvalNavGapJumps, botEvalIdleKicks);
+	trap->Print("BOTEVAL navigation: force jumps over high obstacles %d, jumps across gaps %d, idle bots set moving %d, stuck jump-outs %d, stuck suicides %d\n",
+		botEvalNavHighJumps, botEvalNavGapJumps, botEvalIdleKicks, botEvalStuckJumps, botEvalStuckSuicides);
 	trap->Print("BOTEVAL jump attacks tried %d started %d; lunges / crouch specials tried %d started %d\n",
 		botEvalSeqTried[BOTSEQ_JUMPATTACK], botEvalSeqStarted[BOTSEQ_JUMPATTACK], botEvalSeqTried[BOTSEQ_LUNGE], botEvalSeqStarted[BOTSEQ_LUNGE]);
 	trap->Print("BOTEVAL roll stabs tried %d started %d; back attacks tried %d started %d; stab-downs tried %d started %d\n",
@@ -1239,61 +1240,114 @@ keeps looking for a target.
 static qboolean BotNav_PathClear(bot_state_t* bs, vec3_t dir, float dist, float raise);
 static void BotNav_Jump(bot_state_t* bs, vec3_t dir, int holdMs, int moveMs);
 
-static void BotAntiIdle(bot_state_t* bs) {
-	gclient_t *cl = g_entities[bs->client].client;
+extern void Cmd_Kill_f(gentity_t *ent);
+
+// one recovery attempt; "level" rises with every failed attempt in the same stuck episode
+static void BotAntiIdle_Recover(bot_state_t* bs, int level_) {
 	vec3_t a, dir;
 	int i, start;
 
-	if (!(bs->features & BOTF_NAV) || !cl || cl->ps.stats[STAT_HEALTH] <= 0 || cl->sess.sessionTeam == TEAM_SPECTATOR) {
-		bs->idleCheckTime = 0;
+	if (level_ <= 2) {
+		// walk off in an open direction (eight compass directions from a random start)
+		start = Q_irand(0, 7);
+		for (i = 0; i < 8; i++) {
+			VectorSet(a, 0, (float)(((start + i) & 7) * 45), 0);
+			AngleVectors(a, dir, NULL, NULL);
+			if (BotNav_PathClear(bs, dir, 96, 0)) {
+				bs->intentFlags = BOTINTENT_WORLD;
+				VectorCopy(dir, bs->intentWorldDir);
+				bs->intentButtons = 0;
+				bs->intentUntil = level.time + 1600;
+				VectorCopy(a, bs->goalAngles);
+				VectorCopy(a, bs->ideal_viewangles);
+				bs->beStill = 0;
+				botEvalIdleKicks++;
+				return;
+			}
+		}
+	}
+	// no open way on foot, or walking did not help: jump out, a different way each time
+	VectorSet(a, 0, (float)(Q_irand(0, 7) * 45), 0);
+	AngleVectors(a, dir, NULL, NULL);
+	bs->beStill = 0;
+	BotNav_Jump(bs, dir, 350 + level_ * 150, 1300);
+	botEvalStuckJumps++;
+}
+
+static void BotAntiIdle(bot_state_t* bs) {
+	gclient_t *cl = g_entities[bs->client].client;
+	qboolean fighting, idle = qfalse;
+
+	if (!(bs->features & BOTF_NAV) || !cl || cl->ps.stats[STAT_HEALTH] <= 0 || cl->sess.sessionTeam == TEAM_SPECTATOR
+		|| cl->ps.pm_type == PM_DEAD || cl->ps.pm_type == PM_INTERMISSION) {
+		bs->idleCheckTime = bs->idleLongTime = bs->stuckEpisodeTime = 0;
+		bs->stuckKicks = 0;
 		return;
 	}
-	if (bs->currentEnemy || bs->tauntTime || cl->ps.groundEntityNum == ENTITYNUM_NONE
-		|| BG_InKnockDown(cl->ps.legsAnim) || (bs->intentFlags & BOTINTENT_WORLD)) {
-		bs->idleCheckTime = level.time;
+	// Standing still is fine only while actually fighting someone we can see nearby. A remembered
+	// enemy that is out of sight does not count (bots used to wait for it to come back).
+	fighting = (bs->currentEnemy && bs->frame_Enemy_Vis && bs->frame_Enemy_Len < 400) ? qtrue : qfalse;
+	if (fighting || bs->tauntTime || BG_InKnockDown(cl->ps.legsAnim)) {
+		bs->idleCheckTime = bs->idleLongTime = level.time;
 		VectorCopy(bs->origin, bs->idleCheckPos);
+		VectorCopy(bs->origin, bs->idleLongPos);
+		if (fighting) {
+			bs->stuckEpisodeTime = 0;
+			bs->stuckKicks = 0;
+		}
 		return;
 	}
 	if (!bs->idleCheckTime || bs->idleCheckTime > level.time) {
 		bs->idleCheckTime = level.time;
 		VectorCopy(bs->origin, bs->idleCheckPos);
-		return;
 	}
-	if (level.time - bs->idleCheckTime < 2500) {
-		return;
+	if (!bs->idleLongTime || bs->idleLongTime > level.time) {
+		bs->idleLongTime = level.time;
+		VectorCopy(bs->origin, bs->idleLongPos);
 	}
-	if (Distance(bs->origin, bs->idleCheckPos) > 48.0f) {
+
+	// an episode ends once the bot has really left the place it was stuck in
+	if (bs->stuckEpisodeTime && Distance(bs->origin, bs->stuckEpisodePos) > 220.0f) {
+		bs->stuckEpisodeTime = 0;
+		bs->stuckKicks = 0;
+	}
+
+	// short check: hardly moved in 2.5 seconds
+	if (level.time - bs->idleCheckTime >= 2500) {
+		if (Distance(bs->origin, bs->idleCheckPos) < 60.0f) {
+			idle = qtrue;
+		}
 		bs->idleCheckTime = level.time;
 		VectorCopy(bs->origin, bs->idleCheckPos);
+	}
+	// long check: still within 130 units of where it was 8 seconds ago (pacing or turning on the spot)
+	if (level.time - bs->idleLongTime >= 8000) {
+		if (Distance(bs->origin, bs->idleLongPos) < 130.0f) {
+			idle = qtrue;
+		}
+		bs->idleLongTime = level.time;
+		VectorCopy(bs->origin, bs->idleLongPos);
+	}
+	if (!idle || (bs->intentFlags & BOTINTENT_WORLD) || cl->ps.groundEntityNum == ENTITYNUM_NONE) {
 		return;
 	}
 
-	// idle: try the eight compass directions from a random start
-	start = Q_irand(0, 7);
-	for (i = 0; i < 8; i++) {
-		VectorSet(a, 0, (float)(((start + i) & 7) * 45), 0);
-		AngleVectors(a, dir, NULL, NULL);
-		if (BotNav_PathClear(bs, dir, 96, 0)) {
-			bs->intentFlags = BOTINTENT_WORLD;
-			VectorCopy(dir, bs->intentWorldDir);
-			bs->intentButtons = 0;
-			bs->intentUntil = level.time + 1400;
-			VectorCopy(a, bs->goalAngles);
-			VectorCopy(a, bs->ideal_viewangles);
-			bs->beStill = 0;
-			botEvalIdleKicks++;
-			bs->idleCheckTime = level.time;
-			VectorCopy(bs->origin, bs->idleCheckPos);
-			return;
-		}
+	if (!bs->stuckEpisodeTime) {
+		bs->stuckEpisodeTime = level.time;
+		VectorCopy(bs->origin, bs->stuckEpisodePos);
+		bs->stuckKicks = 0;
 	}
-	// boxed in on all sides: jump out the way we are facing
-	VectorSet(a, 0, bs->viewangles[YAW], 0);
-	AngleVectors(a, dir, NULL, NULL);
-	BotNav_Jump(bs, dir, 500, 1200);
-	botEvalIdleKicks++;
-	bs->idleCheckTime = level.time;
-	VectorCopy(bs->origin, bs->idleCheckPos);
+	bs->stuckKicks++;
+
+	// Walking and jumping have not got the bot out of this spot: it is trapped. Respawn.
+	if (bs->stuckKicks > 5 || level.time - bs->stuckEpisodeTime > 16000) {
+		bs->stuckEpisodeTime = 0;
+		bs->stuckKicks = 0;
+		botEvalStuckSuicides++;
+		Cmd_Kill_f(&g_entities[bs->client]);
+		return;
+	}
+	BotAntiIdle_Recover(bs, bs->stuckKicks);
 }
 
 /*
@@ -6140,7 +6194,7 @@ static qboolean BotNav_Steer(bot_state_t* bs, vec3_t wantDir, vec3_t outDir, qbo
 			AngleVectors(a, test, NULL, NULL);
 			if (BotNav_PathClear(bs, test, 56, 0)) {
 				steerSide[bs->client] = side;
-				steerSideUntil[bs->client] = level.time + 1500;
+				steerSideUntil[bs->client] = level.time + 2800;
 				VectorCopy(test, outDir);
 				return qtrue;
 			}
@@ -6175,6 +6229,18 @@ static void BotNav_RoamGoal(bot_state_t* bs, vec3_t goal) {
 		static int huntUntil[MAX_CLIENTS];
 		static vec3_t huntGoal[MAX_CLIENTS];
 
+		static int huntClient[MAX_CLIENTS];
+
+		// keep going after the same opponent while it lives, following where it is now
+		if (huntUntil[bs->client] > level.time) {
+			gentity_t *o = &g_entities[huntClient[bs->client]];
+			if (huntClient[bs->client] >= 0 && huntClient[bs->client] < MAX_CLIENTS && o->inuse && o->client && o->health > 0
+				&& o->client->sess.sessionTeam != TEAM_SPECTATOR) {
+				VectorCopy(o->client->ps.origin, huntGoal[bs->client]);
+			} else {
+				huntUntil[bs->client] = 0;
+			}
+		}
 		if (huntUntil[bs->client] <= level.time) {
 			float best = 3000.0f * 3000.0f;
 			int bestClient = -1;
@@ -6191,7 +6257,8 @@ static void BotNav_RoamGoal(bot_state_t* bs, vec3_t goal) {
 					bestClient = i;
 				}
 			}
-			huntUntil[bs->client] = level.time + Q_irand(2500, 4000);
+			huntUntil[bs->client] = level.time + Q_irand(9000, 14000);
+			huntClient[bs->client] = bestClient;
 			if (bestClient >= 0) {
 				VectorCopy(g_entities[bestClient].client->ps.origin, huntGoal[bs->client]);
 			} else {
@@ -6483,8 +6550,10 @@ int BotFallbackNavigation(bot_state_t* bs) {
 			float randomDistance = Q_irand(150, 400); // Shorter, safer distances
 			if (haveRoam && attempts < 7) {
 				// first look for a reachable spot roughly toward the roam goal, widening each try
-				randomAngle = roamAngles[YAW] + Q_irand(-20 - attempts * 12, 20 + attempts * 12);
-				randomDistance = Q_irand(220, 450);
+				// the first tries are almost straight at the goal and reach further, so the bot keeps
+				// its heading while the way is open and only fans out when it is not
+				randomAngle = roamAngles[YAW] + Q_irand(-8 - attempts * 14, 8 + attempts * 14);
+				randomDistance = (attempts < 3) ? Q_irand(350, 600) : Q_irand(220, 420);
 			}
 
 			vec3_t testPos;

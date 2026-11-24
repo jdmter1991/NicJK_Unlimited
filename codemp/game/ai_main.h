@@ -496,6 +496,11 @@ typedef struct bot_state_s
 	int inputHoldUpUntil;		// jump is held until this time (force jump height comes from the hold)
 	int idleCheckTime;			// anti-idle watchdog
 	vec3_t idleCheckPos;
+	int idleLongTime;			// slower check that catches shuffling on the spot
+	vec3_t idleLongPos;
+	int stuckEpisodeTime;		// level.time the current stuck episode began, 0 = not stuck
+	vec3_t stuckEpisodePos;
+	int stuckKicks;				// recovery attempts made in this episode
 } bot_state_t;
 
 // ================================// Niksata Edit
