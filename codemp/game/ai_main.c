@@ -6402,12 +6402,18 @@ static void BotNav_DropCrumb(bot_state_t* bs) {
 // Look around in twelve directions and choose where to go next: through a door if one is in view,
 // otherwise down the longest clear line, leaning toward the roam goal and away from where the bot
 // has just been. This is what takes a bot out of a room instead of round and round inside it.
+// the doorway a bot has decided to go through, and from which side, until it is through
+static int navDoorEnt[MAX_CLIENTS];
+static int navDoorSide[MAX_CLIENTS];
+static int navDoorUntil[MAX_CLIENTS];
 #define BOTNAV_OPEN_DIRS 12
 #define BOTNAV_OPEN_DOORS 6
 static qboolean BotNav_PickOpenTarget(bot_state_t* bs, float goalYaw, vec3_t outTarget) {
 	float score[BOTNAV_OPEN_DIRS + BOTNAV_OPEN_DOORS];
 	vec3_t pos[BOTNAV_OPEN_DIRS + BOTNAV_OPEN_DOORS];
 	qboolean door[BOTNAV_OPEN_DIRS + BOTNAV_OPEN_DOORS];
+	int doorEnt[BOTNAV_OPEN_DIRS + BOTNAV_OPEN_DOORS];
+	int doorSide[BOTNAV_OPEN_DIRS + BOTNAV_OPEN_DOORS];
 	vec3_t a, dir, end;
 	trace_t tr;
 	int i, k, n = 0, tries;
@@ -6420,8 +6426,11 @@ static qboolean BotNav_PickOpenTarget(bot_state_t* bs, float goalYaw, vec3_t out
 	// doors on this floor that the bot can see
 	for (i = MAX_CLIENTS; i < level.num_entities && n < BOTNAV_OPEN_DOORS; i++) {
 		gentity_t *d = &g_entities[i];
-		vec3_t c;
-		float dist, diff;
+		vec3_t c, axis, through, rel;
+		float dist, diff, along, lateral;
+		int flip;
+		qboolean fallbackAxis;
+		const qboolean committed = (navDoorEnt[bs->client] == i && navDoorUntil[bs->client] > level.time) ? qtrue : qfalse;
 
 		if (!d->inuse || d->s.eType != ET_MOVER || !d->classname || Q_stricmp(d->classname, "func_door")) {
 			continue;
@@ -6436,23 +6445,67 @@ static qboolean BotNav_PickOpenTarget(bot_state_t* bs, float goalYaw, vec3_t out
 		VectorSubtract(c, bs->origin, dir);
 		dir[2] = 0;
 		dist = VectorNormalize(dir);
-		if (dist > 1000.0f || dist < 24.0f) {
+		if (dist > 1000.0f) {
 			continue;
 		}
-		JP_Trace(&tr, eye, NULL, NULL, c, bs->client, mask, qfalse, 0, 0);
-		if (tr.fraction < 0.97f && tr.entityNum != i) {
+		// The way through a doorway is square to the door: a door slides sideways (or up), so the
+		// passage runs across its direction of travel. Heading for a point straight behind the
+		// door as seen from the bot sends a bot that arrives at an angle into the wall beside it.
+		fallbackAxis = qfalse;
+		if (fabs(d->movedir[2]) < 0.7f && (d->movedir[0] != 0.0f || d->movedir[1] != 0.0f)) {
+			VectorSet(axis, -d->movedir[1], d->movedir[0], 0);
+			VectorNormalize(axis);
+		} else {
+			VectorCopy(dir, axis);
+			fallbackAxis = qtrue;
+		}
+		VectorSubtract(bs->origin, c, rel);
+		rel[2] = 0;
+		along = DotProduct(rel, axis);
+		// axis is made to point from the side the bot set out from to the far side; a bot that has
+		// chosen this doorway keeps that sense even when it is standing in it
+		flip = committed ? navDoorSide[bs->client] : ((along > 0) ? 1 : 0);
+		if (flip) {
+			VectorNegate(axis, axis);
+			along = -along;
+		}
+		if (committed && fallbackAxis && dist < 50.0f) {
+			navDoorUntil[bs->client] = 0;
 			continue;
+		}
+		if (committed && along > 110.0f) {
+			navDoorUntil[bs->client] = 0;	// through
+			continue;
+		}
+		if (!committed && dist < 24.0f) {
+			continue;
+		}
+		lateral = fabs(rel[0] * axis[1] - rel[1] * axis[0]);
+		if (dist >= 24.0f) {
+			JP_Trace(&tr, eye, NULL, NULL, c, bs->client, mask, qfalse, 0, 0);
+			if (tr.fraction < 0.97f && tr.entityNum != i && !(committed && dist < 200.0f)) {
+				continue;
+			}
 		}
 		door[n] = qtrue;
-		VectorMA(c, 170, dir, pos[n]);		// a point beyond the door
-		pos[n][2] = bs->origin[2];
+		doorEnt[n] = i;
+		doorSide[n] = flip;
+		VectorMA(c, 170, axis, through);	// a point beyond the door
+		through[2] = bs->origin[2];
+		if (lateral > 44.0f && along < -100.0f) {
+			VectorMA(c, -84, axis, pos[n]);	// first line up in front of the doorway
+			pos[n][2] = bs->origin[2];
+		} else {
+			VectorCopy(through, pos[n]);
+		}
 		vectoangles(dir, a);
 		diff = AngleSubtract(a[YAW], goalYaw);
-		score[n] = 1500.0f - dist * 0.5f + 400.0f * cos(DEG2RAD(diff)) + (float)Q_irand(0, 80);
-		for (k = 0; k < 8; k++) {
+		// a doorway in view beats any open direction, and the one already chosen beats the rest
+		score[n] = 2300.0f - dist * 0.5f + 300.0f * cos(DEG2RAD(diff)) + (float)Q_irand(0, 80) + (committed ? 3000.0f : 0.0f);
+		for (k = 0; k < 8 && !committed; k++) {
 			// the doorway the bot has just come through is the last one to choose
-			if (navCrumbIdx[bs->client] > k && Distance(pos[n], navCrumbs[bs->client][k]) < 300.0f) {
-				score[n] -= 500.0f;
+			if (navCrumbIdx[bs->client] > k && Distance(through, navCrumbs[bs->client][k]) < 300.0f) {
+				score[n] -= 600.0f;
 			}
 		}
 		n++;
@@ -6493,7 +6546,16 @@ static qboolean BotNav_PickOpenTarget(bot_state_t* bs, float goalYaw, vec3_t out
 		}
 		if (door[best] || IsPositionReachable(bs, pos[best])) {
 			VectorCopy(pos[best], outTarget);
-			if (door[best]) botEvalNavDoorTargets++; else botEvalNavOpenTargets++;
+			if (door[best]) {
+				if (navDoorEnt[bs->client] != doorEnt[best] || navDoorUntil[bs->client] <= level.time) {
+					navDoorEnt[bs->client] = doorEnt[best];
+					navDoorSide[bs->client] = doorSide[best];
+					navDoorUntil[bs->client] = level.time + 8000;
+					botEvalNavDoorTargets++;
+				}
+			} else {
+				botEvalNavOpenTargets++;
+			}
 			return qtrue;
 		}
 		score[best] = -99999.0f;
