@@ -192,6 +192,9 @@ vmCvar_t bot_abTest;
 #define BOTF_MACHINE	2048
 // 4096: learn from results which swing direction pays in which situation, keep it on disk
 #define BOTF_LEARN		4096
+// 8192: force powers and saber throw only inside the ranges and conditions the game code gives
+//       them, and used on purpose at those ranges
+#define BOTF_FORCE		8192
 
 #define BOTINTENT_EVADE		8	// applied whatever the buttons are, and releases attack
 #define BOTINTENT_WORLD		16	// move along bs->intentWorldDir (navigation jump / unstick), always applied
@@ -200,6 +203,8 @@ static int botEvalNavHighJumps, botEvalNavGapJumps, botEvalIdleKicks, botEvalStu
 static int botEvalStuckInSolid, botEvalLedgeHops;
 static int botEvalPredThreats, botEvalPredEvades, botEvalLearnSamples, botEvalLearnOverrides, botEvalLearnExplore;
 static int Bot_LearnTotal(void);
+static int botEvalForceUse[5];		// lightning, drain, pull, push, saber throw started by the force tactics
+static int botEvalForceBlocked[6];	// uses by the older logic stopped because they could not work: lightning, drain, grip, push, pull, throw
 static int botEvalProPunish, botEvalProHoldOff, botEvalProCounterFrames, botEvalProCrouchFrames;
 static int botEvalMoveSteers, botEvalMoveJumps, botEvalNavDoorTargets, botEvalNavOpenTargets;
 static int botEvalLungeFail[5];	// why a crouch special did not start: not ducked, rolling, saber busy, in air, other
@@ -304,6 +309,9 @@ static void BotEval_Report(void) {
 	trap->Print("BOTEVAL bots found standing inside solid geometry and respawned: %d; hops over low ledges while moving: %d\n", botEvalStuckInSolid, botEvalLedgeHops);
 	trap->Print("BOTEVAL machine: predicted blade hits %d, evaded %d; learning: results recorded %d, swing choices changed by what was learned %d, exploratory choices %d, table holds %d results\n",
 		botEvalPredThreats, botEvalPredEvades, botEvalLearnSamples, botEvalLearnOverrides, botEvalLearnExplore, Bot_LearnTotal());
+	trap->Print("BOTEVAL force: started lightning %d drain %d pull %d push %d saber throw %d; stopped as out of range or pointless: lightning %d drain %d grip %d push %d pull %d throw %d\n",
+		botEvalForceUse[0], botEvalForceUse[1], botEvalForceUse[2], botEvalForceUse[3], botEvalForceUse[4],
+		botEvalForceBlocked[0], botEvalForceBlocked[1], botEvalForceBlocked[2], botEvalForceBlocked[3], botEvalForceBlocked[4], botEvalForceBlocked[5]);
 	trap->Print("BOTEVAL pro tactics: punishes of a rooted enemy %d, evasions skipped to punish or strike at the end %d, frames of strafe-swing combos %d of which crouched %d\n",
 		botEvalProPunish, botEvalProHoldOff, botEvalProCounterFrames, botEvalProCrouchFrames);
 	trap->Print("BOTEVAL movement: steered round an obstacle while moving %d, jumped one %d; exploration targets through doors %d, toward open space %d\n",
@@ -908,6 +916,180 @@ BotInputToUserCommand
 static qboolean BotNav_Steer(bot_state_t* bs, vec3_t wantDir, vec3_t outDir, qboolean *jump, int *jumpHoldMs);
 static void BotNav_Jump(bot_state_t* bs, vec3_t dir, int holdMs, int moveMs);
 
+/*
+==============
+Force power rules  (bot_features 8192)
+
+When a power can do anything at all, from the game code (w_force.c, w_saber.c, bg_saber.c):
+  lightning  level 3: everything within 300 units inside a 60 degree half-angle; levels 1-2: one
+             trace of 2048 units. 1 force point per 50 ms for 1-2 damage. The caster cannot swing
+             while it runs, so it is for an enemy who is not yet in saber reach.
+  drain      level 3: 512 units, same cone; levels 1-2: 2048 unit trace. 5 force points per 50 ms;
+             takes 2-4 force from the target and gives the caster that much health. Worth it only
+             when hurt and the target has force left.
+  grip       256 unit trace from the eye; cannot start on a target that is absorbing or in a saber
+             special; the caster moves at 0.4 speed, so not with a second enemy near.
+  push/pull  a target on the ground with weaponTime 0 and an equal level simply stands there; one
+             that is mid-swing or in the air cannot counter. Push only knocks down within 128.
+  throw      the saber turns back at 700 units per level, and its owner cannot swing meanwhile.
+An enemy with Absorb up turns lightning, drain and grip into force for himself.
+"cont" is for a power already running: a little slack so it is not cut off at the very edge.
+==============
+*/
+void Bot_HoldButtons(bot_state_t* bs, int buttons, int ms);
+qboolean Bot_SendGenCmd(bot_state_t* bs, int genCmd, int debounceMs);
+static qboolean Bot_ForceCrowded(bot_state_t* bs, float radius) {
+	int i;
+	for (i = 0; i < MAX_CLIENTS; i++) {
+		gentity_t *o = &g_entities[i];
+		if (i == bs->client || o == bs->currentEnemy || !o->inuse || !o->client || o->health <= 0
+			|| o->client->sess.sessionTeam == TEAM_SPECTATOR || OnSameTeam(&g_entities[bs->client], o)) {
+			continue;
+		}
+		if (DistanceSquared(o->client->ps.origin, bs->origin) < radius * radius) {
+			return qtrue;
+		}
+	}
+	return qfalse;
+}
+
+static qboolean Bot_ForceOK(bot_state_t* bs, int power, qboolean cont) {
+	gentity_t *me = &g_entities[bs->client];
+	gentity_t *en = bs->currentEnemy;
+	const playerState_t *ps, *ep;
+	int d, lvl, fp, max;
+	qboolean absorbing, counterless;
+
+	if (!me->client) {
+		return qfalse;
+	}
+	ps = &me->client->ps;
+	if (power == FP_PUSH && ps->fd.forceGripBeingGripped > level.time) {
+		return qtrue;	// push breaks a grip
+	}
+	if (!en || !en->client || en->health <= 0 || !bs->frame_Enemy_Vis) {
+		return qfalse;
+	}
+	ep = &en->client->ps;
+	d = bs->frame_Enemy_Len;
+	lvl = ps->fd.forcePowerLevel[power];
+	fp = ps->fd.forcePower;
+	absorbing = (ep->fd.forcePowersActive & (1 << FP_ABSORB)) ? qtrue : qfalse;
+	counterless = (ep->weaponTime > 0 || ep->groundEntityNum == ENTITYNUM_NONE || BG_SaberInAttack(ep->saberMove)) ? qtrue : qfalse;
+
+	switch (power) {
+	case FP_LIGHTNING:
+		max = (lvl >= 3) ? 285 : 1100;
+		return (!absorbing && d >= (cont ? 95 : 130) && d <= max && fp >= (cont ? 25 : 35) && !Bot_ForceCrowded(bs, 150)) ? qtrue : qfalse;
+	case FP_DRAIN:
+		max = (lvl >= 3) ? 480 : 1100;
+		return (!absorbing && ep->fd.forcePower >= 10 && me->health < (cont ? 95 : 70) && d >= (cont ? 95 : 130) && d <= max
+			&& fp >= (cont ? 25 : 45) && !Bot_ForceCrowded(bs, 150)) ? qtrue : qfalse;
+	case FP_GRIP:
+		return (!absorbing && !BG_SaberInSpecial(ep->saberMove) && d >= 70 && d <= (cont ? 250 : 235)
+			&& (cont || !Bot_ForceCrowded(bs, 300))) ? qtrue : qfalse;
+	case FP_PUSH:
+		return (d <= 150 && counterless && lvl >= 2) ? qtrue : qfalse;
+	case FP_PULL:
+		return (d >= 120 && d <= 420 && counterless) ? qtrue : qfalse;
+	case FP_SABERTHROW:
+		max = 700 * lvl - 120;
+		if (max > 1000) max = 1000;
+		return (d >= (cont ? 150 : 280) && d <= max && !Bot_ForceCrowded(bs, 250)) ? qtrue : qfalse;
+	}
+	return qtrue;
+}
+
+// take out of this usercmd any force use or saber throw that cannot work from here
+static void Bot_ForceGate(bot_state_t* bs, usercmd_t* ucmd) {
+	gclient_t *cl = g_entities[bs->client].client;
+
+	if (!cl || cl->ps.stats[STAT_HEALTH] <= 0) {
+		return;
+	}
+	if ((bs->inputHoldButtons & BUTTON_FORCE_LIGHTNING) && !Bot_ForceOK(bs, FP_LIGHTNING, qtrue)) bs->inputHoldButtons &= ~BUTTON_FORCE_LIGHTNING;
+	if ((bs->inputHoldButtons & BUTTON_FORCE_DRAIN) && !Bot_ForceOK(bs, FP_DRAIN, qtrue)) bs->inputHoldButtons &= ~BUTTON_FORCE_DRAIN;
+	if ((bs->inputHoldButtons & BUTTON_FORCEGRIP) && !Bot_ForceOK(bs, FP_GRIP, qtrue)) bs->inputHoldButtons &= ~BUTTON_FORCEGRIP;
+
+	if (ucmd->buttons & BUTTON_FORCEPOWER) {
+		const int sel = (ucmd->forcesel != 255) ? ucmd->forcesel : cl->ps.fd.forcePowerSelected;
+		const qboolean running = (sel >= 0 && sel < NUM_FORCE_POWERS && (cl->ps.fd.forcePowersActive & (1 << sel))) ? qtrue : qfalse;
+		int slot = -1;
+		switch (sel) {
+		case FP_LIGHTNING: slot = 0; break;
+		case FP_DRAIN: slot = 1; break;
+		case FP_GRIP: slot = 2; break;
+		case FP_PUSH: slot = 3; break;
+		case FP_PULL: slot = 4; break;
+		}
+		if (slot >= 0 && !Bot_ForceOK(bs, sel, running)) {
+			ucmd->buttons &= ~BUTTON_FORCEPOWER;
+			botEvalForceBlocked[slot]++;
+		}
+	}
+	// alt attack alone with a single saber or duals is the saber throw
+	if ((ucmd->buttons & BUTTON_ALT_ATTACK) && !(ucmd->buttons & BUTTON_ATTACK) && cl->ps.weapon == WP_SABER
+		&& cl->ps.fd.saberAnimLevel != SS_STAFF && !(bs->intentFlags & BOTINTENT_KATA) && !bs->seqType
+		&& !Bot_ForceOK(bs, FP_SABERTHROW, cl->ps.saberInFlight ? qtrue : qfalse)) {
+		ucmd->buttons &= ~BUTTON_ALT_ATTACK;
+		bs->inputHoldButtons &= ~BUTTON_ALT_ATTACK;
+		botEvalForceBlocked[5]++;
+	}
+}
+
+// Use the powers on purpose where they pay. The saber stays the main weapon: nothing here starts
+// inside saber reach except a push that will knock the enemy down.
+static void Bot_ForceTactics(bot_state_t* bs) {
+	static int nextUse[MAX_CLIENTS];
+	gentity_t *me = &g_entities[bs->client];
+	gentity_t *en = bs->currentEnemy;
+	const playerState_t *ps;
+	int known, d, dur;
+
+	if (!(bs->features & BOTF_FORCE) || !me->client || me->health <= 0 || !en || !en->client || !bs->frame_Enemy_Vis) {
+		return;
+	}
+	ps = &me->client->ps;
+	if (nextUse[bs->client] > level.time + 20000) nextUse[bs->client] = 0;	// map restart
+	if (level.time < nextUse[bs->client] || bs->seqType || (bs->intentFlags & BOTINTENT_KATA) || bs->seqPrepUntil > level.time
+		|| bs->inputHoldButtons || ps->forceHandExtend != HANDEXTEND_NONE || ps->weaponTime > 0
+		|| BG_SaberInAttack(ps->saberMove) || BG_SaberInSpecial(ps->saberMove) || BG_InKnockDown(ps->legsAnim)
+		|| ps->fd.forceGripBeingGripped > level.time) {
+		return;
+	}
+	known = ps->fd.forcePowersKnown;
+	d = bs->frame_Enemy_Len;
+
+	if ((known & (1 << FP_DRAIN)) && !(g_forcePowerDisable.integer & (1 << FP_DRAIN)) && Bot_ForceOK(bs, FP_DRAIN, qfalse)) {
+		dur = Q_irand(450, 800);	// 5 force a tick: short
+		Bot_HoldButtons(bs, BUTTON_FORCE_DRAIN, dur);
+		nextUse[bs->client] = level.time + dur + Q_irand(1800, 2600);
+		botEvalForceUse[1]++;
+	} else if ((known & (1 << FP_LIGHTNING)) && !(g_forcePowerDisable.integer & (1 << FP_LIGHTNING)) && Bot_ForceOK(bs, FP_LIGHTNING, qfalse)) {
+		dur = Q_irand(800, 1500);
+		Bot_HoldButtons(bs, BUTTON_FORCE_LIGHTNING, dur);
+		nextUse[bs->client] = level.time + dur + Q_irand(1800, 3200);
+		botEvalForceUse[0]++;
+	} else if ((known & (1 << FP_PUSH)) && !(g_forcePowerDisable.integer & (1 << FP_PUSH)) && ps->fd.forcePowerLevel[FP_PUSH] >= 3 && d <= 110
+		&& ps->fd.forcePower >= 40 && !BG_InKnockDown(en->client->ps.legsAnim) && Bot_ForceOK(bs, FP_PUSH, qfalse) && Q_irand(1, 100) <= 30) {
+		if (Bot_SendGenCmd(bs, GENCMD_FORCE_THROW, 300)) {
+			nextUse[bs->client] = level.time + Q_irand(2500, 4000);
+			botEvalForceUse[3]++;
+		}
+	} else if ((known & (1 << FP_PULL)) && !(g_forcePowerDisable.integer & (1 << FP_PULL)) && d >= 150 && d <= 320
+		&& ps->fd.forcePower >= 40 && Bot_ForceOK(bs, FP_PULL, qfalse) && Q_irand(1, 100) <= 25) {
+		if (Bot_SendGenCmd(bs, GENCMD_FORCE_PULL, 300)) {	// bring him into reach while he cannot resist
+			nextUse[bs->client] = level.time + Q_irand(2500, 4000);
+			botEvalForceUse[2]++;
+		}
+	} else if ((known & (1 << FP_SABERTHROW)) && ps->weapon == WP_SABER && ps->fd.saberAnimLevel != SS_STAFF && !ps->saberInFlight
+		&& !ps->saberHolstered && ps->fd.forcePower >= 30 && Bot_ForceOK(bs, FP_SABERTHROW, qfalse) && Q_irand(1, 100) <= 20) {
+		Bot_HoldButtons(bs, BUTTON_ALT_ATTACK, 800);
+		nextUse[bs->client] = level.time + Q_irand(5000, 9000);
+		botEvalForceUse[4]++;
+	}
+}
+
 void BotInputToUserCommand(bot_state_t* bs, bot_input_t* bi, usercmd_t* ucmd, int delta_angles[3], int time, int useTime) {
 	vec3_t angles, forward, right;
 	short temp;
@@ -939,6 +1121,9 @@ void BotInputToUserCommand(bot_state_t* bs, bot_input_t* bi, usercmd_t* ucmd, in
 	// Inputs the botlib action flags cannot express: dedicated buttons held for a while
 	// (BUTTON_FORCEGRIP, BUTTON_FORCE_LIGHTNING, BUTTON_FORCE_DRAIN, ...) and one-shot generic
 	// commands (saber style cycle, taunts, direct force powers), as a human client sends them.
+	if (bs->features & BOTF_FORCE) {
+		Bot_ForceGate(bs, ucmd);
+	}
 	if (bs->inputHoldButtons) {
 		if (level.time < bs->inputHoldUntil) {
 			ucmd->buttons |= bs->inputHoldButtons;
@@ -1811,6 +1996,7 @@ int BotAI(int client, float thinktime) {
 	if (bs->features & BOTF_LEARN) {
 		Bot_LearnResolve(bs);
 	}
+	Bot_ForceTactics(bs);
 #ifdef _DEBUG
 	end = trap->Milliseconds();
 
@@ -12379,8 +12565,8 @@ void Bot_ExecuteSaberCombat(bot_state_t* bs) {
 			&& kps->saberMove == LS_READY	// PM_SaberMoveOkayForKata
 			&& !((kps->fd.saberAnimLevelBase == SS_STAFF || kps->fd.saberAnimLevelBase == SS_DUAL) && kps->fd.saberAnimLevel != kps->fd.saberAnimLevelBase)	// PM_InSecondaryStyle
 			&& kps->forceHandExtend == HANDEXTEND_NONE
-			&& (enemyVulnerable || enemyRecovering)
-			&& (!(bs->features & BOTF_PRO) || (enemyVulnerable && Q_irand(1, 100) <= 20))
+			&& enemyVulnerable && Q_irand(1, 100) <= 35 && !Bot_ForceCrowded(bs, 260)
+			&& (!(bs->features & BOTF_PRO) || Q_irand(1, 100) <= 60)
 			&& (!(bs->features & BOTF_SPECIALS) || level.time >= bs->seqNextSpecialTime)
 			&& Q_irand(1, 100) <= (specialChance + 10))
 		{
@@ -12388,7 +12574,7 @@ void Bot_ExecuteSaberCombat(bot_state_t* bs) {
 			bs->currentSpecial = SPECIAL_KATA;
 			bs->specialDuration = 1200;
 			bs->lastSpecialTime = level.time;
-			bs->kataCooldownTime = level.time + Q_irand(5000, 9000);
+			bs->kataCooldownTime = level.time + Q_irand(14000, 24000);
 
 			bs->intentFlags = BOTINTENT_MOVE | BOTINTENT_NOJUMP | BOTINTENT_KATA;
 			bs->intentForward = 0;
@@ -17171,7 +17357,7 @@ int BotAISetup(int restart) {
 	trap->Cvar_Register(&bot_profile, "bot_profile", "0", 0);
 	trap->Cvar_Register(&bot_fixes, "bot_fixes", "1", CVAR_ARCHIVE);
 	trap->Cvar_Register(&bot_abBase, "bot_abBase", "0", 0);	// features of the baseline group in an A/B test
-	trap->Cvar_Register(&bot_features, "bot_features", "6639", CVAR_ARCHIVE);	// 495 + 2048 (blade prediction) + 4096 (learning); 16, 512, 1024 lost their A/B tests
+	trap->Cvar_Register(&bot_features, "bot_features", "14831", CVAR_ARCHIVE);	// 495 + 2048 (blade prediction) + 4096 (learning) + 8192 (force rules); 16, 512, 1024 lost their A/B tests
 	trap->Cvar_Register(&bot_abTest, "bot_abTest", "0", 0);
 	trap->Cvar_Register(&bot_attachments, "bot_attachments", "1", 0);
 	trap->Cvar_Register(&bot_camp, "bot_camp", "1", 0);
