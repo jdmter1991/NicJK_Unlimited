@@ -478,6 +478,12 @@ typedef struct bot_state_s
 	int styleWanted;			// saber style the bot is cycling towards (SS_*), 0 = none
 	int styleDecisionTime;		// level.time of the next style decision
 	int styleCyclePresses;		// cycle commands sent for the current decision
+
+	// multi-frame special move input (jump attacks, lunge): see Bot_SpecialSequenceInput
+	int seqType;				// BOTSEQ_*, 0 = none
+	int seqFrame;				// usercmds built since the sequence started
+	int seqJumpCooldown;		// earliest level.time for the next jump attack
+	int seqLungeCooldown;		// earliest level.time for the next lunge / crouch special
 } bot_state_t;
 
 // ================================// Niksata Edit

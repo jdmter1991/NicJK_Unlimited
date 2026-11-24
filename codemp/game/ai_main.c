@@ -154,11 +154,31 @@ vmCvar_t bot_abTest;
 //       command like a player until that style is reached. The old code cycled one step every
 //       two seconds without being able to aim for a style, and its rules for the strong style
 //       could never fire.
+//  32 = jump attacks (red DFA, yellow flip, dual / staff jump attack) and the crouch specials
+//       (fast-style lunge, dual / staff spin) are entered with the frame-by-frame input the engine
+//       requires, only when it can accept them. The old code pressed everything in a single frame.
+//  64 = no hesitation in saber range: attack is held whenever the enemy is in reach, the "stand
+//       and block" early returns are skipped (a swing is only stopped by blade contact, standing
+//       still does not block), and a special-move lockout no longer stops ordinary swings.
 #define BOTF_FORCESEL	1
 #define BOTF_TAUNTS		2
 #define BOTF_SWINGDIR	4
 #define BOTF_KATA		8
 #define BOTF_STYLE		16
+// 128 = fallback navigation steers around obstacles and roams the map: when the way ahead is
+//       blocked it looks for an open direction to either side (or jumps a low obstacle) instead
+//       of backing off and picking a new random spot, and its random exploration is biased
+//       toward a far roam goal (one of the map's spawn areas) so bots travel between areas.
+#define BOTF_SPECIALS	32
+#define BOTF_AGGRO		64
+#define BOTF_NAV		128
+
+static int botEvalNavSteers, botEvalNavJumps, botEvalNavGoals;
+
+#define BOTSEQ_JUMPATTACK	1
+#define BOTSEQ_LUNGE		2
+
+static int botEvalSeqTried[3], botEvalSeqStarted[3];	// indexed by BOTSEQ_*
 
 static int botEvalStyleSwitches;	// styles reached through the targeted selection
 
@@ -240,6 +260,9 @@ static void BotEval_Report(void) {
 		deaths[g] += g_entities[i].client->ps.persistant[PERS_KILLED];
 	}
 	trap->Print("BOTEVAL kata rolls: old logic %d, new logic %d of which started %d; targeted style changes completed %d\n", botEvalKataTried[0], botEvalKataTried[1], botEvalKataStarted[1], botEvalStyleSwitches);
+	trap->Print("BOTEVAL navigation: steered around obstacles %d, jumped low obstacles %d, roam goals reached %d\n", botEvalNavSteers, botEvalNavJumps, botEvalNavGoals);
+	trap->Print("BOTEVAL jump attacks tried %d started %d; lunges / crouch specials tried %d started %d\n",
+		botEvalSeqTried[BOTSEQ_JUMPATTACK], botEvalSeqStarted[BOTSEQ_JUMPATTACK], botEvalSeqTried[BOTSEQ_LUNGE], botEvalSeqStarted[BOTSEQ_LUNGE]);
 	if (bot_abTest.integer) {
 		trap->Print("BOTEVAL baseline: bots %d kills %d deaths %d | features %d: bots %d kills %d deaths %d\n",
 			bots[0], kills[0], deaths[0], bot_features.integer, bots[1], kills[1], deaths[1]);
@@ -953,6 +976,36 @@ void BotInputToUserCommand(bot_state_t* bs, bot_input_t* bi, usercmd_t* ucmd, in
 	//crouch/movedown
 	if (bi->actionflags & ACTION_CROUCH) {
 		ucmd->upmove = -127;
+	}
+
+	// Multi-frame special move input. PM_SaberAttackForMovement only starts these moves from an
+	// exact state, so the keys are pressed in order over several usercmds:
+	//   jump attack: release jump, then forward + jump, then add attack while still rising and
+	//                within 32 units of the ground (rightmove must be 0)
+	//   lunge / crouch special: crouch until ducked, then forward + attack
+	if (bs->seqType && g_entities[bs->client].client) {
+		const playerState_t *sps = &g_entities[bs->client].client->ps;
+
+		if (BG_SaberInSpecial(sps->saberMove)) {
+			botEvalSeqStarted[bs->seqType]++;
+			bs->seqType = 0;
+		} else if (bs->seqFrame > 9 || sps->stats[STAT_HEALTH] <= 0 || sps->weapon != WP_SABER) {
+			bs->seqType = 0;
+		} else {
+			ucmd->rightmove = 0;
+			ucmd->forwardmove = 127;
+			ucmd->buttons &= ~(BUTTON_ATTACK | BUTTON_ALT_ATTACK);
+			if (bs->seqType == BOTSEQ_JUMPATTACK) {
+				ucmd->upmove = (bs->seqFrame >= 1) ? 127 : 0;
+				if (bs->seqFrame >= 2) ucmd->buttons |= BUTTON_ATTACK;
+			} else {
+				ucmd->upmove = -127;
+				if (bs->seqFrame < 3) ucmd->forwardmove = 0;
+				else ucmd->buttons |= BUTTON_ATTACK;
+			}
+			bs->seqFrame++;
+			return;		// the sequence owns this usercmd
+		}
 	}
 
 	// combat input intent (see bot_state_t): last word on the movement keys for this frame
@@ -5764,6 +5817,128 @@ qboolean MoveTowardLastWaypoint(bot_state_t* bs);
 //back to jumping around and turning in random
 //directions off walls to see if we can get back to a
 //good place.
+/*
+==============
+Fallback navigation helpers (bot_features 128)
+==============
+*/
+// can the bot walk "dist" units along the flat direction "dir": nothing solid in the way of the
+// player box and ground under the far end
+static qboolean BotNav_PathClear(bot_state_t* bs, vec3_t dir, float dist, float raise) {
+	vec3_t mins, maxs, start, end, down;
+	trace_t tr;
+
+	VectorSet(mins, -15, -15, -8);
+	VectorSet(maxs, 15, 15, 32);
+	VectorCopy(bs->origin, start);
+	start[2] += raise;
+	VectorMA(start, dist, dir, end);
+	JP_Trace(&tr, start, mins, maxs, end, bs->client, MASK_PLAYERSOLID, qfalse, 0, 0);
+	if (tr.startsolid || tr.fraction < 1.0f) {
+		return qfalse;
+	}
+	VectorCopy(end, down);
+	down[2] -= 120 + raise;
+	JP_Trace(&tr, end, NULL, NULL, down, bs->client, MASK_SOLID, qfalse, 0, 0);
+	return (tr.fraction < 1.0f) ? qtrue : qfalse;
+}
+
+// Find a direction to walk in when "wantDir" is blocked: straight on, over a low obstacle with a
+// jump, or the nearest open direction to one side. The chosen side is kept for a while so the bot
+// goes round an obstacle instead of dithering in front of it.
+static qboolean BotNav_Steer(bot_state_t* bs, vec3_t wantDir, vec3_t outDir, qboolean *jump) {
+	static int steerSide[MAX_CLIENTS];
+	static int steerSideUntil[MAX_CLIENTS];
+	static const float offsets[] = { 35.0f, 70.0f, 105.0f };
+	vec3_t angles, dir;
+	int i, s;
+
+	*jump = qfalse;
+	VectorCopy(wantDir, dir);
+	dir[2] = 0;
+	if (VectorNormalize(dir) < 0.01f) {
+		return qfalse;
+	}
+	if (BotNav_PathClear(bs, dir, 56, 0)) {
+		VectorCopy(dir, outDir);
+		return qtrue;
+	}
+	// low obstacle (crate, ledge up to about jump height): clear when raised
+	if (g_entities[bs->client].client && g_entities[bs->client].client->ps.groundEntityNum != ENTITYNUM_NONE
+		&& BotNav_PathClear(bs, dir, 56, 40)) {
+		VectorCopy(dir, outDir);
+		*jump = qtrue;
+		return qtrue;
+	}
+	if (steerSideUntil[bs->client] < level.time || !steerSide[bs->client]) {
+		steerSide[bs->client] = Q_irand(0, 1) ? 1 : -1;
+	}
+	vectoangles(dir, angles);
+	for (i = 0; i < (int)ARRAY_LEN(offsets); i++) {
+		for (s = 0; s < 2; s++) {
+			vec3_t a, test;
+			const int side = s ? -steerSide[bs->client] : steerSide[bs->client];
+
+			VectorCopy(angles, a);
+			a[PITCH] = 0;
+			a[YAW] += side * offsets[i];
+			AngleVectors(a, test, NULL, NULL);
+			if (BotNav_PathClear(bs, test, 56, 0)) {
+				steerSide[bs->client] = side;
+				steerSideUntil[bs->client] = level.time + 1500;
+				VectorCopy(test, outDir);
+				return qtrue;
+			}
+		}
+	}
+	return qfalse;
+}
+
+// A far place to head for, so exploration crosses the map instead of circling one spot. Players
+// know where a map's spawn areas are; pick one that is not close.
+static void BotNav_RoamGoal(bot_state_t* bs, vec3_t goal) {
+	static vec3_t roamGoal[MAX_CLIENTS];
+	static int roamGoalUntil[MAX_CLIENTS];
+	static vec3_t spots[64];
+	static int numSpots = -1;
+	int i;
+
+	if (numSpots < 0) {
+		numSpots = 0;
+		for (i = MAX_CLIENTS; i < level.num_entities && numSpots < (int)ARRAY_LEN(spots); i++) {
+			gentity_t *e = &g_entities[i];
+			if (e->inuse && e->classname && (!Q_stricmp(e->classname, "info_player_deathmatch") || !Q_stricmp(e->classname, "info_player_start"))) {
+				VectorCopy(e->s.origin, spots[numSpots]);
+				numSpots++;
+			}
+		}
+	}
+	if (roamGoalUntil[bs->client] > level.time && Distance(bs->origin, roamGoal[bs->client]) > 300) {
+		VectorCopy(roamGoal[bs->client], goal);
+		return;
+	}
+	if (roamGoalUntil[bs->client] > level.time) {
+		botEvalNavGoals++;	// arrived
+	}
+	if (numSpots > 0) {
+		for (i = 0; i < 8; i++) {
+			const int pick = Q_irand(0, numSpots - 1);
+			if (Distance(bs->origin, spots[pick]) > 1200 || i == 7) {
+				VectorCopy(spots[pick], roamGoal[bs->client]);
+				break;
+			}
+		}
+	} else {
+		// no spawn entities to go by: a far point in a random direction
+		const float ang = DEG2RAD(Q_irand(0, 359));
+		roamGoal[bs->client][0] = bs->origin[0] + cos(ang) * 3000;
+		roamGoal[bs->client][1] = bs->origin[1] + sin(ang) * 3000;
+		roamGoal[bs->client][2] = bs->origin[2];
+	}
+	roamGoalUntil[bs->client] = level.time + Q_irand(45000, 90000);
+	VectorCopy(roamGoal[bs->client], goal);
+}
+
 int BotFallbackNavigation(bot_state_t* bs) {
 	vec3_t mins, maxs, forward, right, up, end;
 	trace_t tr;
@@ -5798,7 +5973,32 @@ int BotFallbackNavigation(bot_state_t* bs) {
 	float movedDistance = Distance(bs->origin, lastPosition[bs->client]);
 
 	// Check if we're actually moving toward our target
-	if (explorationTarget[bs->client][0] != 0 || explorationTarget[bs->client][1] != 0) {
+	if (bs->features & BOTF_NAV) {
+		// The test below compares positions one frame apart. At 40 server frames a second a running
+		// bot covers about 6 units a frame, under its 10 unit threshold, so every bot counted as
+		// stuck on every frame and dropped its target (and then waited a second) several times a
+		// second. Measure progress over half a second instead.
+		static int progressTime[MAX_CLIENTS];
+		static vec3_t progressPos[MAX_CLIENTS];
+
+		if (level.time - progressTime[bs->client] >= 500 || progressTime[bs->client] > level.time) {
+			if (explorationTarget[bs->client][0] != 0 || explorationTarget[bs->client][1] != 0) {
+				if (Distance(bs->origin, progressPos[bs->client]) < 30.0f) {
+					stuckCounter[bs->client]++;
+					if (stuckCounter[bs->client] > 2) {
+						VectorClear(explorationTarget[bs->client]);
+						stuckCounter[bs->client] = 0;
+						lastWallHitTime[bs->client] = level.time + 150;
+					}
+				} else {
+					stuckCounter[bs->client] = 0;
+				}
+			}
+			VectorCopy(bs->origin, progressPos[bs->client]);
+			progressTime[bs->client] = level.time;
+		}
+	}
+	else if (explorationTarget[bs->client][0] != 0 || explorationTarget[bs->client][1] != 0) {
 		vec3_t targetDirection;
 		VectorSubtract(explorationTarget[bs->client], bs->origin, targetDirection);
 		targetDirection[2] = 0;
@@ -5845,6 +6045,34 @@ int BotFallbackNavigation(bot_state_t* bs) {
 
 	// LEDGE DETECTION - if no ground within reasonable distance
 	qboolean isLedgeAhead = (tr.fraction >= 1.0f) || (ledgeCheck[2] - tr.endpos[2] > 120);
+
+	// Blocked by something that is not a drop: go round it or over it (bot_features 128)
+	if ((bs->features & BOTF_NAV) && wallDistance < 20 && !isLedgeAhead) {
+		vec3_t want, steer;
+		qboolean jump;
+
+		if (explorationTarget[bs->client][0] != 0 || explorationTarget[bs->client][1] != 0) {
+			VectorSubtract(explorationTarget[bs->client], bs->origin, want);
+		} else {
+			VectorCopy(forward, want);
+		}
+		if (BotNav_Steer(bs, want, steer, &jump)) {
+			if (jump && bs->jumpTime < level.time) {
+				bs->jumpTime = level.time + 600;
+				trap->EA_Jump(bs->client);
+				botEvalNavJumps++;
+			} else {
+				botEvalNavSteers++;
+			}
+			VectorCopy(steer, lastMovementDirection[bs->client]);
+			vectoangles(steer, bs->goalAngles);
+			bs->goalAngles[PITCH] = 0;
+			bs->goalAngles[ROLL] = 0;
+			trap->EA_Move(bs->client, steer, 3500);
+			VectorMA(bs->origin, 250.0f, steer, bs->goalPosition);
+			return 1;
+		}
+	}
 
 	// IMMEDIATE WALL/LEDGE RESPONSE
 	if (wallDistance < 20 || isLedgeAhead) {
@@ -5934,9 +6162,24 @@ int BotFallbackNavigation(bot_state_t* bs) {
 	// Generate new SAFE exploration targets
 	if (!hasTarget && lastWallHitTime[bs->client] < level.time) {
 		// Try multiple directions with safety checks
+		vec3_t roamGoal, roamAngles;
+		qboolean haveRoam = qfalse;
+		if (bs->features & BOTF_NAV) {
+			vec3_t toGoal;
+			BotNav_RoamGoal(bs, roamGoal);
+			VectorSubtract(roamGoal, bs->origin, toGoal);
+			toGoal[2] = 0;
+			vectoangles(toGoal, roamAngles);
+			haveRoam = qtrue;
+		}
 		for (int attempts = 0; attempts < 12; attempts++) { // More attempts
 			float randomAngle = Q_irand(0, 359);
 			float randomDistance = Q_irand(150, 400); // Shorter, safer distances
+			if (haveRoam && attempts < 7) {
+				// first look for a reachable spot roughly toward the roam goal, widening each try
+				randomAngle = roamAngles[YAW] + Q_irand(-20 - attempts * 12, 20 + attempts * 12);
+				randomDistance = Q_irand(220, 450);
+			}
 
 			vec3_t testPos;
 			testPos[0] = bs->origin[0] + cos(DEG2RAD(randomAngle)) * randomDistance;
@@ -5955,6 +6198,20 @@ int BotFallbackNavigation(bot_state_t* bs) {
 	}
 
 	// Execute movement
+	if (hasTarget && (bs->features & BOTF_NAV)) {
+		vec3_t steer;
+		qboolean jump;
+		if (BotNav_Steer(bs, moveDir, steer, &jump)) {
+			if (jump && bs->jumpTime < level.time) {
+				bs->jumpTime = level.time + 600;
+				trap->EA_Jump(bs->client);
+				botEvalNavJumps++;
+			} else if (DotProduct(steer, moveDir) < 0.99f) {
+				botEvalNavSteers++;
+			}
+			VectorCopy(steer, moveDir);
+		}
+	}
 	if (hasTarget) {
 		VectorCopy(moveDir, lastMovementDirection[bs->client]);
 
@@ -10584,7 +10841,7 @@ void Bot_ExecuteSaberCombat(bot_state_t* bs) {
 			bs->doAttack = 1;
 		}
 	}
-	else if (Q_irand(1, 10) <= 7) // 70% chance to attack (increased from default)
+	else if ((bs->features & BOTF_AGGRO) || Q_irand(1, 10) <= 7) // 70% chance to attack (increased from default)
 	{
 		if (bs->frame_Enemy_Len <= SABER_ATTACK_RANGE)
 		{
@@ -10768,11 +11025,15 @@ void Bot_ExecuteSaberCombat(bot_state_t* bs) {
 	}
 
 	// Don't start new specials if one is active or on cooldown
+	qboolean specialLocked = qfalse;
 	if (bs->currentSpecial != SPECIAL_NONE || (level.time - bs->lastSpecialTime < 600)) { // Reduced cooldown from 800 to 600
 		// Only continue movement for current special, don't start new ones
 		if (bs->currentSpecial != SPECIAL_NONE) {
 			// Continue current special movement (no new commands)
-			return;
+			if (!(bs->features & BOTF_AGGRO) || bs->seqType || (bs->intentFlags & BOTINTENT_KATA)) {
+				return;
+			}
+			specialLocked = qtrue;	// no new special, but keep swinging
 		}
 		// On cooldown - allow normal attacks but no specials
 	}
@@ -10812,7 +11073,7 @@ void Bot_ExecuteSaberCombat(bot_state_t* bs) {
 		(bs->blocking.blockConfidence < 0.2f || // Reduced from 0.3f to 0.2f - even more aggressive
 			bs->blocking.enemyAttackPower > 18.0f); // Increased from 15.0f to 18.0f
 
-	if (shouldBlock &&
+	if (shouldBlock && !(bs->features & BOTF_AGGRO) &&
 		(bs->blocking.enemySwingStage >= 2 && bs->blocking.enemySwingStage <= 6)) {
 		// Block but prepare to counter - INCREASED COUNTER CHANCE
 		if (enemyRecovering && Q_irand(1, 100) <= 80) { // Increased from 60% to 80%
@@ -10830,6 +11091,7 @@ void Bot_ExecuteSaberCombat(bot_state_t* bs) {
 	// SPECIAL ATTACK PRIORITY SYSTEM (INCREASED BASE CHANCE)
 	// ================================
 
+	if (!specialLocked) {	// (closed before the ordinary attack section)
 	// Calculate special attack priority based on situation
 	int specialPriority = 0;
 
@@ -10922,6 +11184,44 @@ void Bot_ExecuteSaberCombat(bot_state_t* bs) {
 		return;
 	}
 
+	// Real jump attack and crouch special (bot_features 32): start the input sequence only from
+	// the state the engine needs; when it is not possible fall through without a lockout.
+	if (bs->features & BOTF_SPECIALS) {
+		const playerState_t *sp = &g_entities[bs->client].client->ps;
+		const int style = sp->fd.saberAnimLevel;
+		const qboolean secondary = ((sp->fd.saberAnimLevelBase == SS_STAFF || sp->fd.saberAnimLevelBase == SS_DUAL) && style != sp->fd.saberAnimLevelBase) ? qtrue : qfalse;
+		const qboolean canStart = (sp->weapon == WP_SABER && !sp->saberHolstered && !sp->saberInFlight
+			&& sp->groundEntityNum != ENTITYNUM_NONE && sp->saberMove == LS_READY && sp->weaponTime <= 0
+			&& sp->forceHandExtend == HANDEXTEND_NONE && sp->fd.forcePower >= 25 && !secondary && !bs->seqType) ? qtrue : qfalse;
+
+		if (canStart && dist >= 70 && dist <= 190 && level.time >= bs->seqJumpCooldown
+			&& (style == SS_MEDIUM || style == SS_STRONG || style == SS_DUAL || style == SS_STAFF)
+			&& Q_irand(1, 100) <= (specialChance + 5))
+		{
+			bs->currentSpecial = SPECIAL_DFA;
+			bs->specialDuration = 1000;
+			bs->lastSpecialTime = level.time;
+			bs->seqJumpCooldown = level.time + Q_irand(4000, 8000);
+			bs->seqType = BOTSEQ_JUMPATTACK;
+			bs->seqFrame = 0;
+			botEvalSeqTried[BOTSEQ_JUMPATTACK]++;
+			return;
+		}
+		if (canStart && dist >= 45 && dist <= 120 && level.time >= bs->seqLungeCooldown
+			&& (style == SS_FAST || style == SS_DUAL || style == SS_STAFF)
+			&& Q_irand(1, 100) <= (specialChance + 5))
+		{
+			bs->currentSpecial = SPECIAL_CROUCHLUNGE;
+			bs->specialDuration = 1000;
+			bs->lastSpecialTime = level.time;
+			bs->seqLungeCooldown = level.time + Q_irand(3500, 7000);
+			bs->seqType = BOTSEQ_LUNGE;
+			bs->seqFrame = 0;
+			botEvalSeqTried[BOTSEQ_LUNGE]++;
+			return;
+		}
+	}
+	else
 	// DFA ATTACK (40% + priority) - REDUCED GATING
 	if (dist <= 200 && Q_irand(1, 100) <= (specialChance + 5)) { // Increased from 30% to 40%, bonus from 0 to 5
 
@@ -10942,7 +11242,7 @@ void Bot_ExecuteSaberCombat(bot_state_t* bs) {
 	}
 
 	// Crouch Lunge ATTACK (40% + priority) - REDUCED GATING
-	if (dist <= 100 && Q_irand(1, 100) <= (specialChance + 5)) { // Increased from 30% to 40%, bonus from 0 to 5
+	if (!(bs->features & BOTF_SPECIALS) && dist <= 100 && Q_irand(1, 100) <= (specialChance + 5)) { // Increased from 30% to 40%, bonus from 0 to 5
 
 		// CHECK SABER STYLE - only for FAST, DUAL, STAFF
 		if (bs->cur_ps.fd.saberAnimLevel == SS_FAST ||
@@ -11025,12 +11325,14 @@ void Bot_ExecuteSaberCombat(bot_state_t* bs) {
 		return;
 	}
 
+	}	// !specialLocked
+
 	// ================================
 	// AGGRESSIVE ATTACK PRIORITIES (INCREASED BASE CHANCE) - NO OBSTACLE CHECKS
 	// ================================
 
 	// HIGH AGGRESSION - Default attack patterns (INCREASED from 50% to 70%)
-	if (dist <= SABER_RANGE && Q_irand(1, 100) <= 70) { // Increased from 50% to 70%
+	if (dist <= SABER_RANGE && ((bs->features & BOTF_AGGRO) || Q_irand(1, 100) <= 70)) { // Increased from 50% to 70%
 		// FIXED: Removed obstacle check
 		// REMOVED SABER MOVE STATE CHECK - ALWAYS ATTACK
 		int quad = Q_irand(Q_R, Q_L);
@@ -11052,7 +11354,9 @@ void Bot_ExecuteSaberCombat(bot_state_t* bs) {
 			return;
 		}
 		// Otherwise block normally
-		return;
+		if (!(bs->features & BOTF_AGGRO)) {
+			return;
+		}
 	}
 
 	// LUNGE ATTACKS (Increased base chance)
@@ -15647,7 +15951,7 @@ int BotAISetup(int restart) {
 
 	trap->Cvar_Register(&bot_profile, "bot_profile", "0", 0);
 	trap->Cvar_Register(&bot_fixes, "bot_fixes", "1", CVAR_ARCHIVE);
-	trap->Cvar_Register(&bot_features, "bot_features", "15", CVAR_ARCHIVE);	// 1 + 2 + 4 + 8; 16 (targeted style) did not help in A/B and stays off
+	trap->Cvar_Register(&bot_features, "bot_features", "239", CVAR_ARCHIVE);	// everything except 16 (targeted style), which did not help in A/B
 	trap->Cvar_Register(&bot_abTest, "bot_abTest", "0", 0);
 	trap->Cvar_Register(&bot_attachments, "bot_attachments", "1", 0);
 	trap->Cvar_Register(&bot_camp, "bot_camp", "1", 0);
