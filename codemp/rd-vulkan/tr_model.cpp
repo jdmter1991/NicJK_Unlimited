@@ -1118,6 +1118,22 @@ static qboolean R_LoadMD3 ( model_t *mod, int lod, void *buffer, const char *mod
 			v->xyz[1] = LittleShort(md3xyz->xyz[1]) * MD3_XYZ_SCALE;
 			v->xyz[2] = LittleShort(md3xyz->xyz[2]) * MD3_XYZ_SCALE;
 
+			// Some exporters write frame bounds that do not contain the vertices. Models are
+			// culled by those bounds, so such a model vanished while part of it was still on
+			// screen. Grow the frame box and sphere to cover every vertex actually loaded.
+			if ( md3Surf->numVerts > 0 && ( j / md3Surf->numVerts ) < mdvModel->numFrames )
+			{
+				mdvFrame_t *vf = &mdvModel->frames[ j / md3Surf->numVerts ];
+				float dist;
+
+				for ( int k = 0; k < 3; k++ ) {
+					if ( v->xyz[k] < vf->bounds[0][k] ) vf->bounds[0][k] = v->xyz[k];
+					if ( v->xyz[k] > vf->bounds[1][k] ) vf->bounds[1][k] = v->xyz[k];
+				}
+				dist = Distance( v->xyz, vf->localOrigin );
+				if ( dist > vf->radius ) vf->radius = dist;
+			}
+
 			normal = LittleShort(md3xyz->normal);
 
 			lat = ( normal >> 8 ) & 0xff;
