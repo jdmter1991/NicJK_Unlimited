@@ -475,6 +475,9 @@ typedef struct bot_state_s
 	int intentRight;
 	int intentButtons;			// extra buttons pressed with the intent
 	int kataCooldownTime;		// earliest level.time for the next deliberate kata
+	int styleWanted;			// saber style the bot is cycling towards (SS_*), 0 = none
+	int styleDecisionTime;		// level.time of the next style decision
+	int styleCyclePresses;		// cycle commands sent for the current decision
 } bot_state_t;
 
 // ================================// Niksata Edit

@@ -149,10 +149,18 @@ vmCvar_t bot_abTest;
 //       reach, cooldown) and with the input a kata needs (attack + alt attack, no movement keys).
 //       Without it the kata roll wins at least 75 % of the time and costs a 1.2 s special lockout
 //       whether or not anything happened.
+//  16 = targeted saber style selection: decide which style is wanted (counter the enemy's style,
+//       fast when badly hurt), keep the decision for several seconds, and press the style-cycle
+//       command like a player until that style is reached. The old code cycled one step every
+//       two seconds without being able to aim for a style, and its rules for the strong style
+//       could never fire.
 #define BOTF_FORCESEL	1
 #define BOTF_TAUNTS		2
 #define BOTF_SWINGDIR	4
 #define BOTF_KATA		8
+#define BOTF_STYLE		16
+
+static int botEvalStyleSwitches;	// styles reached through the targeted selection
 
 #define BOTINTENT_MOVE		1	// override forwardmove / rightmove
 #define BOTINTENT_NOJUMP	2	// drop a jump from this usercmd
@@ -231,7 +239,7 @@ static void BotEval_Report(void) {
 		kills[g] += g_entities[i].client->ps.persistant[PERS_SCORE];
 		deaths[g] += g_entities[i].client->ps.persistant[PERS_KILLED];
 	}
-	trap->Print("BOTEVAL kata rolls: old logic %d, new logic %d of which started %d\n", botEvalKataTried[0], botEvalKataTried[1], botEvalKataStarted[1]);
+	trap->Print("BOTEVAL kata rolls: old logic %d, new logic %d of which started %d; targeted style changes completed %d\n", botEvalKataTried[0], botEvalKataTried[1], botEvalKataStarted[1], botEvalStyleSwitches);
 	if (bot_abTest.integer) {
 		trap->Print("BOTEVAL baseline: bots %d kills %d deaths %d | features %d: bots %d kills %d deaths %d\n",
 			bots[0], kills[0], deaths[0], bot_features.integer, bots[1], kills[1], deaths[1]);
@@ -9649,6 +9657,85 @@ float Bot_GetStyleAdvantage(int myStyle, int enemyStyle) {
 // ================================ // Niksata Edit
 // INTEGRATED INTELLIGENT SABER STYLE SELECTION (SIMPLIFIED)
 // ================================
+/*
+==============
+Bot_SelectStyleTargeted  (bot_features 16)
+
+Single-saber users only. In this fork a single saber cycles
+FAST -> MEDIUM -> STRONG -> DESANN -> TAVION -> FAST (Cmd_SaberAttackCycle_f).
+==============
+*/
+static void Bot_SelectStyleTargeted(bot_state_t* bs) {
+	gclient_t *cl = g_entities[bs->client].client;
+	int current, want;
+
+	if (!cl || !bs->currentEnemy || !bs->currentEnemy->client) {
+		return;
+	}
+	if (cl->ps.weapon != WP_SABER || BG_SaberInKata(cl->ps.saberMove)) {
+		return;
+	}
+	if (cl->saber[0].model[0] && cl->saber[1].model[0]) {
+		return;	// dual sabers: the command toggles a saber instead
+	}
+	if (cl->ps.fd.saberAnimLevelBase == SS_STAFF || cl->ps.fd.saberAnimLevelBase == SS_DUAL
+		|| cl->ps.fd.saberAnimLevel == SS_STAFF || cl->ps.fd.saberAnimLevel == SS_DUAL) {
+		return;	// staff: the command toggles a blade instead
+	}
+
+	// the style we will have once a queued change is applied
+	current = cl->saberCycleQueue ? cl->saberCycleQueue : cl->ps.fd.saberAnimLevel;
+
+	if (level.time >= bs->styleDecisionTime) {
+		const int enemyStyle = bs->currentEnemy->client->ps.fd.saberAnimLevel;
+		const int myHealth = g_entities[bs->client].health;
+
+		want = current;
+		if (myHealth < 40) {
+			want = SS_FAST;				// hurt: quick swings and no movement penalty
+		} else {
+			switch (enemyStyle) {
+			case SS_STRONG:
+			case SS_DESANN:
+				want = SS_FAST;			// slow heavy swings: get inside them
+				break;
+			case SS_FAST:
+				want = SS_MEDIUM;		// more damage and reach against light swings
+				break;
+			case SS_MEDIUM:
+			case SS_TAVION:
+				want = SS_STRONG;		// out-power the balanced styles
+				break;
+			default:					// dual, staff or unknown: balanced
+				want = SS_MEDIUM;
+				break;
+			}
+		}
+		// keep each decision for a while so two bots do not chase each other's style every second
+		bs->styleDecisionTime = level.time + Q_irand(6000, 11000);
+		bs->styleCyclePresses = 0;
+		bs->styleWanted = (want != current) ? want : 0;
+	}
+
+	if (!bs->styleWanted) {
+		return;
+	}
+	if (current == bs->styleWanted) {
+		botEvalStyleSwitches++;
+		bs->styleWanted = 0;
+		bs->lastStyleSwitchTime = level.time;
+		return;
+	}
+	if (bs->styleCyclePresses >= 6) {
+		bs->styleWanted = 0;	// the saber does not allow this style
+		return;
+	}
+	// one press per debounce period, like tapping the key (the server debounces at 300 ms)
+	if (Bot_SendGenCmd(bs, GENCMD_SABERATTACKCYCLE, 340)) {
+		bs->styleCyclePresses++;
+	}
+}
+
 void Bot_SelectOptimalSaberStyle(bot_state_t* bs) {
 	int dist = bs->frame_Enemy_Len;
 	int myHealth = g_entities[bs->client].health;
@@ -9663,6 +9750,11 @@ void Bot_SelectOptimalSaberStyle(bot_state_t* bs) {
 	// ================================ // Niksata Edit
 	// Niksata Edit - KATA PROTECTION CHECK
 	// ================================
+	if (bs->features & BOTF_STYLE) {
+		Bot_SelectStyleTargeted(bs);
+		return;
+	}
+
 	// Don't switch styles during katas - this interrupts the kata
 	if (BG_SaberInKata(bs->cur_ps.saberMove)) {
 		return;
@@ -15555,7 +15647,7 @@ int BotAISetup(int restart) {
 
 	trap->Cvar_Register(&bot_profile, "bot_profile", "0", 0);
 	trap->Cvar_Register(&bot_fixes, "bot_fixes", "1", CVAR_ARCHIVE);
-	trap->Cvar_Register(&bot_features, "bot_features", "11", CVAR_ARCHIVE);	// 1 + 2 + 8; 4 (swing direction) is still being evaluated
+	trap->Cvar_Register(&bot_features, "bot_features", "15", CVAR_ARCHIVE);	// 1 + 2 + 4 + 8; 16 (targeted style) did not help in A/B and stays off
 	trap->Cvar_Register(&bot_abTest, "bot_abTest", "0", 0);
 	trap->Cvar_Register(&bot_attachments, "bot_attachments", "1", 0);
 	trap->Cvar_Register(&bot_camp, "bot_camp", "1", 0);
