@@ -211,7 +211,14 @@ void RE_AddRefEntityToScene( const refEntity_t *ent ) {
 	}
 
 	if ( r_numentities >= MAX_REFENTITIES ) {
+		static const void *warnedWorld = NULL;
+
 		r_droppedRefEntities++;
+		// say so once per map in every build: dropped entities look like flickering geometry
+		if ( warnedWorld != (const void *)tr.world ) {
+			warnedWorld = (const void *)tr.world;
+			ri.Printf( PRINT_WARNING, "WARNING: more than %i render entities in one frame, the rest are not drawn (r_showLimits 1 for details)\n", MAX_REFENTITIES );
+		}
 		ri.Printf(PRINT_DEVELOPER, "RE_AddRefEntityToScene: Dropping refEntity, reached MAX_REFENTITIES\n");
 		return;
 	}

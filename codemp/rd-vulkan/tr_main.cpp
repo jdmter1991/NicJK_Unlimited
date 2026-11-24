@@ -1678,6 +1678,12 @@ void R_RenderView( const viewParms_t *parms ) {
 	}
 
 	if ( numDrawSurfs > MAX_DRAWSURFS ) {
+		static const void *warnedWorld = NULL;
+
+		if ( warnedWorld != (const void *)tr.world ) {
+			warnedWorld = (const void *)tr.world;
+			ri.Printf( PRINT_WARNING, "WARNING: more than %i draw surfaces in one frame, the first ones are not drawn (r_showLimits 1 for details)\n", MAX_DRAWSURFS );
+		}
 		numDrawSurfs = MAX_DRAWSURFS;
 	}
 
