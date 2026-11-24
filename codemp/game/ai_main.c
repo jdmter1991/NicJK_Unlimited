@@ -185,6 +185,8 @@ vmCvar_t bot_abTest;
 #define BOTINTENT_WORLD		16	// move along bs->intentWorldDir (navigation jump / unstick), always applied
 
 static int botEvalNavHighJumps, botEvalNavGapJumps, botEvalIdleKicks, botEvalStuckJumps, botEvalStuckSuicides;
+static int botEvalStuckInSolid;
+static int botEvalMoveSteers, botEvalMoveJumps, botEvalNavDoorTargets, botEvalNavOpenTargets;
 static int botEvalLungeFail[5];	// why a crouch special did not start: not ducked, rolling, saber busy, in air, other
 static int botEvalStyleCount[8];	// thinks spent in each saber style by bots with the specials feature
 
@@ -284,6 +286,9 @@ static void BotEval_Report(void) {
 	trap->Print("BOTEVAL navigation: steered around obstacles %d, jumped low obstacles %d, roam goals reached %d\n", botEvalNavSteers, botEvalNavJumps, botEvalNavGoals);
 	trap->Print("BOTEVAL navigation: force jumps over high obstacles %d, jumps across gaps %d, idle bots set moving %d, stuck jump-outs %d, stuck suicides %d\n",
 		botEvalNavHighJumps, botEvalNavGapJumps, botEvalIdleKicks, botEvalStuckJumps, botEvalStuckSuicides);
+	trap->Print("BOTEVAL bots found standing inside solid geometry and respawned: %d\n", botEvalStuckInSolid);
+	trap->Print("BOTEVAL movement: steered round an obstacle while moving %d, jumped one %d; exploration targets through doors %d, toward open space %d\n",
+		botEvalMoveSteers, botEvalMoveJumps, botEvalNavDoorTargets, botEvalNavOpenTargets);
 	trap->Print("BOTEVAL jump attacks tried %d started %d; lunges / crouch specials tried %d started %d\n",
 		botEvalSeqTried[BOTSEQ_JUMPATTACK], botEvalSeqStarted[BOTSEQ_JUMPATTACK], botEvalSeqTried[BOTSEQ_LUNGE], botEvalSeqStarted[BOTSEQ_LUNGE]);
 	trap->Print("BOTEVAL roll stabs tried %d started %d; back attacks tried %d started %d; stab-downs tried %d started %d\n",
@@ -881,6 +886,9 @@ void BotChangeViewAngles(bot_state_t* bs, float thinktime) {
 BotInputToUserCommand
 ==============
 */
+static qboolean BotNav_Steer(bot_state_t* bs, vec3_t wantDir, vec3_t outDir, qboolean *jump, int *jumpHoldMs);
+static void BotNav_Jump(bot_state_t* bs, vec3_t dir, int holdMs, int moveMs);
+
 void BotInputToUserCommand(bot_state_t* bs, bot_input_t* bi, usercmd_t* ucmd, int delta_angles[3], int time, int useTime) {
 	vec3_t angles, forward, right;
 	short temp;
@@ -1008,6 +1016,47 @@ void BotInputToUserCommand(bot_state_t* bs, bot_input_t* bi, usercmd_t* ucmd, in
 	//crouch/movedown
 	if (bi->actionflags & ACTION_CROUCH) {
 		ucmd->upmove = -127;
+	}
+
+	// Whatever decided this frame's movement (chasing an enemy, strafing, exploring): if a wall or
+	// object is right in the way, go round it or over it instead of pushing against it. Other
+	// players are not obstacles here, and a slope is not a wall.
+	if ((bs->features & BOTF_NAV) && !bs->seqType && !(bs->intentFlags & (BOTINTENT_WORLD | BOTINTENT_KATA))
+		&& (ucmd->forwardmove || ucmd->rightmove) && g_entities[bs->client].client
+		&& g_entities[bs->client].client->ps.stats[STAT_HEALTH] > 0
+		&& g_entities[bs->client].client->ps.groundEntityNum != ENTITYNUM_NONE) {
+		vec3_t a, fw, rt, dir, mins, maxs, end;
+		trace_t tr;
+
+		VectorSet(a, 0, bi->viewangles[YAW], 0);
+		AngleVectors(a, fw, rt, NULL);
+		VectorScale(fw, (float)ucmd->forwardmove, dir);
+		VectorMA(dir, (float)ucmd->rightmove, rt, dir);
+		dir[2] = 0;
+		if (VectorNormalize(dir) > 0.01f) {
+			VectorSet(mins, -15, -15, -8);
+			VectorSet(maxs, 15, 15, 32);
+			VectorMA(bs->origin, 36, dir, end);
+			JP_Trace(&tr, bs->origin, mins, maxs, end, bs->client, MASK_PLAYERSOLID & ~CONTENTS_BODY, qfalse, 0, 0);
+			if (tr.fraction < 1.0f && !tr.startsolid && tr.plane.normal[2] < 0.7f
+				&& !(tr.entityNum >= MAX_CLIENTS && tr.entityNum < ENTITYNUM_WORLD && g_entities[tr.entityNum].s.eType == ET_MOVER)) {
+				vec3_t steer;
+				qboolean jump;
+				int holdMs;
+				if (BotNav_Steer(bs, dir, steer, &jump, &holdMs)) {
+					if (jump) {
+						if (bs->jumpTime < level.time && !(bs->currentEnemy && bs->frame_Enemy_Vis && bs->frame_Enemy_Len < 300)) {
+							BotNav_Jump(bs, steer, holdMs, 400 + holdMs);
+							botEvalMoveJumps++;
+						}
+					} else {
+						ucmd->forwardmove = (signed char)(DotProduct(fw, steer) * 127.0f);
+						ucmd->rightmove = (signed char)(DotProduct(rt, steer) * 127.0f);
+						botEvalMoveSteers++;
+					}
+				}
+			}
+		}
 	}
 
 	// Multi-frame special move input. PM_SaberAttackForMovement only starts these moves from an
@@ -1286,7 +1335,15 @@ static void BotAntiIdle(bot_state_t* bs) {
 	}
 	// Standing still is fine only while actually fighting someone we can see nearby. A remembered
 	// enemy that is out of sight does not count (bots used to wait for it to come back).
-	fighting = (bs->currentEnemy && bs->frame_Enemy_Vis && bs->frame_Enemy_Len < 400) ? qtrue : qfalse;
+	// ... and "fighting" means in reach, or at least one of the two is swinging or using a power:
+	// two bots looking at each other across a gap or through a window are not fighting.
+	fighting = qfalse;
+	if (bs->currentEnemy && bs->currentEnemy->client && bs->frame_Enemy_Vis && bs->frame_Enemy_Len < 400) {
+		if (bs->frame_Enemy_Len < 160 || BG_SaberInAttack(cl->ps.saberMove) || BG_SaberInAttack(bs->currentEnemy->client->ps.saberMove)
+			|| cl->ps.fd.forcePowersActive || cl->ps.saberInFlight) {
+			fighting = qtrue;
+		}
+	}
 	if (fighting || bs->tauntTime || BG_InKnockDown(cl->ps.legsAnim)) {
 		bs->idleCheckTime = bs->idleLongTime = level.time;
 		VectorCopy(bs->origin, bs->idleCheckPos);
@@ -1328,8 +1385,30 @@ static void BotAntiIdle(bot_state_t* bs) {
 		bs->idleLongTime = level.time;
 		VectorCopy(bs->origin, bs->idleLongPos);
 	}
-	if (!idle || (bs->intentFlags & BOTINTENT_WORLD) || cl->ps.groundEntityNum == ENTITYNUM_NONE) {
+	if (!idle || (bs->intentFlags & BOTINTENT_WORLD)) {
 		return;
+	}
+	{
+		// A bot that has not moved and is standing inside world geometry (a spawn point placed in a
+		// collision volume, or pushed into a wall) cannot walk or jump at all: respawn it at once.
+		// Such a bot has no ground under it, so this has to come before the in-air test.
+		static vec3_t pmins = { -15, -15, -24 }, pmaxs = { 15, 15, 40 };
+		trace_t tr;
+		JP_Trace(&tr, bs->origin, pmins, pmaxs, bs->origin, bs->client, MASK_PLAYERSOLID & ~CONTENTS_BODY, qfalse, 0, 0);
+		if (tr.startsolid || tr.allsolid) {
+			bs->stuckEpisodeTime = 0;
+			bs->stuckKicks = 0;
+			botEvalStuckInSolid++;
+			botEvalStuckSuicides++;
+			if (bot_profile.integer) {
+				trap->Print("BOTSTUCK client %d inside solid at %.0f %.0f %.0f, respawning\n", bs->client, bs->origin[0], bs->origin[1], bs->origin[2]);
+			}
+			Cmd_Kill_f(&g_entities[bs->client]);
+			return;
+		}
+	}
+	if (cl->ps.groundEntityNum == ENTITYNUM_NONE && VectorLengthSquared(cl->ps.velocity) > 40.0f * 40.0f) {
+		return;		// really in the air
 	}
 
 	if (!bs->stuckEpisodeTime) {
@@ -6054,6 +6133,11 @@ static qboolean BotNav_PathClear(bot_state_t* bs, vec3_t dir, float dist, float 
 	start[2] += raise;
 	VectorMA(start, dist, dir, end);
 	JP_Trace(&tr, start, mins, maxs, end, bs->client, MASK_PLAYERSOLID, qfalse, 0, 0);
+	if (tr.fraction < 1.0f && !tr.startsolid && tr.entityNum >= MAX_CLIENTS && tr.entityNum < ENTITYNUM_WORLD
+		&& g_entities[tr.entityNum].s.eType == ET_MOVER && g_entities[tr.entityNum].classname
+		&& !Q_stricmp(g_entities[tr.entityNum].classname, "func_door")) {
+		return qtrue;	// a door: walk into it, it opens
+	}
 	if (tr.startsolid || tr.fraction < 1.0f) {
 		return qfalse;
 	}
@@ -6295,6 +6379,123 @@ static void BotNav_RoamGoal(bot_state_t* bs, vec3_t goal) {
 	}
 	roamGoalUntil[bs->client] = level.time + Q_irand(45000, 90000);
 	VectorCopy(roamGoal[bs->client], goal);
+}
+
+// Where the bot has been lately (one position every 3 seconds, the last 8), so exploration can
+// prefer places it has not just come from.
+static vec3_t navCrumbs[MAX_CLIENTS][8];
+static int navCrumbIdx[MAX_CLIENTS];
+static int navCrumbTime[MAX_CLIENTS];
+
+static void BotNav_DropCrumb(bot_state_t* bs) {
+	if (navCrumbTime[bs->client] <= level.time && level.time - navCrumbTime[bs->client] < 3000) {
+		return;
+	}
+	navCrumbTime[bs->client] = level.time;
+	VectorCopy(bs->origin, navCrumbs[bs->client][navCrumbIdx[bs->client] & 7]);
+	navCrumbIdx[bs->client]++;
+}
+
+// Look around in twelve directions and choose where to go next: through a door if one is in view,
+// otherwise down the longest clear line, leaning toward the roam goal and away from where the bot
+// has just been. This is what takes a bot out of a room instead of round and round inside it.
+#define BOTNAV_OPEN_DIRS 12
+#define BOTNAV_OPEN_DOORS 6
+static qboolean BotNav_PickOpenTarget(bot_state_t* bs, float goalYaw, vec3_t outTarget) {
+	float score[BOTNAV_OPEN_DIRS + BOTNAV_OPEN_DOORS];
+	vec3_t pos[BOTNAV_OPEN_DIRS + BOTNAV_OPEN_DOORS];
+	qboolean door[BOTNAV_OPEN_DIRS + BOTNAV_OPEN_DOORS];
+	vec3_t a, dir, end;
+	trace_t tr;
+	int i, k, n = 0, tries;
+	vec3_t eye;
+	const int mask = MASK_PLAYERSOLID & ~CONTENTS_BODY;
+
+	VectorCopy(bs->origin, eye);	// bs->eye can be stale just after a respawn
+	eye[2] += 32;
+
+	// doors on this floor that the bot can see
+	for (i = MAX_CLIENTS; i < level.num_entities && n < BOTNAV_OPEN_DOORS; i++) {
+		gentity_t *d = &g_entities[i];
+		vec3_t c;
+		float dist, diff;
+
+		if (!d->inuse || d->s.eType != ET_MOVER || !d->classname || Q_stricmp(d->classname, "func_door")) {
+			continue;
+		}
+		// the doorway is where the door is drawn (its spawn position); on this map the door's
+		// collision box is somewhere else, so absmin/absmax cannot be used
+		VectorCopy(d->pos1, c);
+		if (bs->origin[2] - c[2] < -30.0f || bs->origin[2] - c[2] > 130.0f) {
+			continue;
+		}
+		c[2] = eye[2];
+		VectorSubtract(c, bs->origin, dir);
+		dir[2] = 0;
+		dist = VectorNormalize(dir);
+		if (dist > 1000.0f || dist < 24.0f) {
+			continue;
+		}
+		JP_Trace(&tr, eye, NULL, NULL, c, bs->client, mask, qfalse, 0, 0);
+		if (tr.fraction < 0.97f && tr.entityNum != i) {
+			continue;
+		}
+		door[n] = qtrue;
+		VectorMA(c, 170, dir, pos[n]);		// a point beyond the door
+		pos[n][2] = bs->origin[2];
+		vectoangles(dir, a);
+		diff = AngleSubtract(a[YAW], goalYaw);
+		score[n] = 1500.0f - dist * 0.5f + 400.0f * cos(DEG2RAD(diff)) + (float)Q_irand(0, 80);
+		for (k = 0; k < 8; k++) {
+			// the doorway the bot has just come through is the last one to choose
+			if (navCrumbIdx[bs->client] > k && Distance(pos[n], navCrumbs[bs->client][k]) < 300.0f) {
+				score[n] -= 500.0f;
+			}
+		}
+		n++;
+	}
+	// open directions
+	for (i = 0; i < BOTNAV_OPEN_DIRS; i++, n++) {
+		float len, diff;
+
+		door[n] = qfalse;
+		VectorSet(a, 0, (float)(i * 30), 0);
+		AngleVectors(a, dir, NULL, NULL);
+		VectorMA(eye, 1200, dir, end);
+		JP_Trace(&tr, eye, NULL, NULL, end, bs->client, mask, qfalse, 0, 0);
+		len = tr.fraction * 1200.0f;
+		if (len < 160.0f) {
+			score[n] = -99999.0f;
+			continue;
+		}
+		VectorMA(bs->origin, (len - 48.0f > 600.0f) ? 600.0f : len - 48.0f, dir, pos[n]);
+		diff = AngleSubtract((float)(i * 30), goalYaw);
+		// the way toward the goal counts for more than how long the clear line is
+		score[n] = ((len > 700.0f) ? 700.0f : len) + 600.0f * cos(DEG2RAD(diff)) + (float)Q_irand(0, 80);
+		for (k = 0; k < 8; k++) {
+			if (navCrumbIdx[bs->client] > k && Distance(pos[n], navCrumbs[bs->client][k]) < 260.0f) {
+				score[n] -= 260.0f;
+			}
+		}
+	}
+	for (tries = 0; tries < 5; tries++) {
+		int best = -1;
+		for (i = 0; i < n; i++) {
+			if (score[i] > -90000.0f && (best < 0 || score[i] > score[best])) {
+				best = i;
+			}
+		}
+		if (best < 0) {
+			return qfalse;
+		}
+		if (door[best] || IsPositionReachable(bs, pos[best])) {
+			VectorCopy(pos[best], outTarget);
+			if (door[best]) botEvalNavDoorTargets++; else botEvalNavOpenTargets++;
+			return qtrue;
+		}
+		score[best] = -99999.0f;
+	}
+	return qfalse;
 }
 
 int BotFallbackNavigation(bot_state_t* bs) {
@@ -6545,7 +6746,18 @@ int BotFallbackNavigation(bot_state_t* bs) {
 			vectoangles(toGoal, roamAngles);
 			haveRoam = qtrue;
 		}
-		for (int attempts = 0; attempts < 12; attempts++) { // More attempts
+		if (haveRoam) {
+			vec3_t openTarget;
+			BotNav_DropCrumb(bs);
+			if (BotNav_PickOpenTarget(bs, roamAngles[YAW], openTarget)) {
+				VectorCopy(openTarget, explorationTarget[bs->client]);
+				VectorSubtract(openTarget, bs->origin, moveDir);
+				moveDir[2] = 0;
+				VectorNormalize(moveDir);
+				hasTarget = qtrue;
+			}
+		}
+		for (int attempts = 0; attempts < 12 && !hasTarget; attempts++) { // More attempts
 			float randomAngle = Q_irand(0, 359);
 			float randomDistance = Q_irand(150, 400); // Shorter, safer distances
 			if (haveRoam && attempts < 7) {
