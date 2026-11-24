@@ -128,8 +128,12 @@ vmCvar_t bot_profile;
 //       aimed at a point next to the map origin)
 //   2 = stuck / back-up detection keeps its state per bot (it was one set shared by all bots)
 vmCvar_t bot_fixes;
+//   4 = the old kata routine no longer writes ps.weaponTime = 0. That write happens on every kata
+//       roll (about once a second per bot) and lets the bot start its next swing immediately,
+//       an attack-rate advantage no player input can produce.
 #define BOT_FIX_SIDE_PROBES		1
 #define BOT_FIX_PER_BOT_STUCK	2
+#define BOT_FIX_NO_WEAPONTIME_RESET	4
 
 // New bot abilities, one bit each, so every one can be switched and compared in game.
 //   1 = send the selected force power in the usercmd like a real client. Without it Pmove resets a
@@ -10582,7 +10586,8 @@ void Bot_ExecuteKataAttack(bot_state_t* bs) {
 	trap->EA_Alt_Attack(bs->client);
 
 	// Force immediate execution by clearing any delays
-	g_entities[bs->client].client->ps.weaponTime = 0;
+	if (!(bot_fixes.integer & BOT_FIX_NO_WEAPONTIME_RESET))
+		g_entities[bs->client].client->ps.weaponTime = 0;
 
 	// Track kata usage
 	bs->lastKataTime = level.time;
@@ -11363,19 +11368,38 @@ void Bot_ExecuteSaberCombat(bot_state_t* bs) {
 					}
 				}
 			}
-			if (!want && !secondary && sp->fd.forcePower >= 25 && Q_irand(1, 100) <= (specialChance + 5)) {
+			// The aim is to kill quickly. Ordinary swings are the steady damage; a special commits the
+			// bot to a long move, so it is worth it when it is likely to land: the enemy is recovering
+			// from a swing, otherwise vulnerable, or not facing us. Without such an opening a special
+			// is only an occasional mix-up, and there is always a gap between two specials.
+			if (!want && !secondary && sp->fd.forcePower >= 25 && level.time >= bs->seqNextSpecialTime) {
 				const qboolean jumpStyle = (style == SS_MEDIUM || style == SS_STRONG || style == SS_DUAL || style == SS_STAFF) ? qtrue : qfalse;
 				const qboolean crouchStyle = (style == SS_FAST || style == SS_DUAL || style == SS_STAFF) ? qtrue : qfalse;
 				const float speed2 = sp->velocity[0] * sp->velocity[0] + sp->velocity[1] * sp->velocity[1];
+				vec3_t efw, toMe;
+				qboolean enemyFacingMe, opening;
+				int roll;
 
-				if (crouchStyle && dist >= 45 && dist <= 120 && level.time >= bs->seqLungeCooldown && (!jumpStyle || Q_irand(0, 1))) {
-					want = BOTSEQ_LUNGE;
-				} else if (jumpStyle && dist >= 70 && dist <= 190 && level.time >= bs->seqJumpCooldown) {
-					want = BOTSEQ_JUMPATTACK;
-				} else if (dist >= 130 && dist <= 260 && speed2 >= 200.0f * 200.0f && level.time >= bs->seqRollCooldown) {
-					want = BOTSEQ_ROLLSTAB;		// running at the enemy: roll in and stab
-				} else if (crouchStyle && dist >= 45 && dist <= 120 && level.time >= bs->seqLungeCooldown) {
-					want = BOTSEQ_LUNGE;
+				AngleVectors(ep->viewangles, efw, NULL, NULL);
+				efw[2] = 0;
+				VectorNormalize(efw);
+				VectorSubtract(bs->origin, ep->origin, toMe);
+				toMe[2] = 0;
+				VectorNormalize(toMe);
+				enemyFacingMe = (DotProduct(efw, toMe) > 0.5f) ? qtrue : qfalse;
+				opening = (enemyRecovering || enemyVulnerable || !enemyFacingMe) ? qtrue : qfalse;
+				roll = Q_irand(1, 100);
+
+				if (crouchStyle && dist >= 50 && dist <= 110 && level.time >= bs->seqLungeCooldown
+					&& roll <= (opening ? 70 : 8)) {
+					want = BOTSEQ_LUNGE;			// quick punish at close range
+				} else if (jumpStyle && dist >= 100 && dist <= 190 && level.time >= bs->seqJumpCooldown
+					&& !(enemySwinging && enemyFacingMe)
+					&& roll <= (opening ? 60 : 6)) {
+					want = BOTSEQ_JUMPATTACK;		// close the gap with a heavy hit
+				} else if (dist >= 150 && dist <= 260 && speed2 >= 200.0f * 200.0f && level.time >= bs->seqRollCooldown
+					&& roll <= ((!enemyFacingMe || enemyVulnerable) ? 55 : 4)) {
+					want = BOTSEQ_ROLLSTAB;			// roll in on an enemy looking elsewhere
 				}
 			}
 		}
@@ -11399,10 +11423,13 @@ void Bot_ExecuteSaberCombat(bot_state_t* bs) {
 			bs->specialDuration = (want == BOTSEQ_ROLLSTAB) ? 1300 : 1000;
 			bs->lastSpecialTime = level.time;
 			switch (want) {
-			case BOTSEQ_JUMPATTACK:	bs->seqJumpCooldown = level.time + Q_irand(2500, 5000); break;
-			case BOTSEQ_LUNGE:		bs->seqLungeCooldown = level.time + Q_irand(2500, 5000); break;
-			case BOTSEQ_ROLLSTAB:	bs->seqRollCooldown = level.time + Q_irand(5000, 9000); break;
+			case BOTSEQ_JUMPATTACK:	bs->seqJumpCooldown = level.time + Q_irand(6000, 10000); break;
+			case BOTSEQ_LUNGE:		bs->seqLungeCooldown = level.time + Q_irand(5000, 9000); break;
+			case BOTSEQ_ROLLSTAB:	bs->seqRollCooldown = level.time + Q_irand(9000, 14000); break;
 			default:				bs->seqBackCooldown = level.time + Q_irand(1500, 3000); break;
+			}
+			if (want == BOTSEQ_JUMPATTACK || want == BOTSEQ_LUNGE || want == BOTSEQ_ROLLSTAB) {
+				bs->seqNextSpecialTime = level.time + Q_irand(3000, 4500);
 			}
 			return;
 		}
@@ -11423,9 +11450,11 @@ void Bot_ExecuteSaberCombat(bot_state_t* bs) {
 			&& kps->saberMove == LS_READY	// PM_SaberMoveOkayForKata
 			&& !((kps->fd.saberAnimLevelBase == SS_STAFF || kps->fd.saberAnimLevelBase == SS_DUAL) && kps->fd.saberAnimLevel != kps->fd.saberAnimLevelBase)	// PM_InSecondaryStyle
 			&& kps->forceHandExtend == HANDEXTEND_NONE
-			&& (enemyVulnerable || enemyRecovering || !enemySwinging)
+			&& (enemyVulnerable || enemyRecovering)
+			&& (!(bs->features & BOTF_SPECIALS) || level.time >= bs->seqNextSpecialTime)
 			&& Q_irand(1, 100) <= (specialChance + 10))
 		{
+			bs->seqNextSpecialTime = level.time + Q_irand(3000, 4500);
 			bs->currentSpecial = SPECIAL_KATA;
 			bs->specialDuration = 1200;
 			bs->lastSpecialTime = level.time;

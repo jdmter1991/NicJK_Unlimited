@@ -491,6 +491,7 @@ typedef struct bot_state_s
 	int defThreatTime;			// level.time a threatening enemy move was first noticed, 0 = none
 	int defEvadeUntil;			// an evasive move is in progress until this time
 	int defNextHealTime;
+	int seqNextSpecialTime;		// earliest level.time for any further special move (gap between specials)
 } bot_state_t;
 
 // ================================// Niksata Edit
