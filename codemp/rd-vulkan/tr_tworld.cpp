@@ -17,6 +17,10 @@ colour (applied through "rgbGen lightingDiffuse" with a private entity
 uniform per placement), up to three levels of detail per mesh chosen by
 projected size, and culling of placements that are too small on screen.
 
+Materials flagged as blended (water, glass, decals, glow) are drawn by a
+second draw surface that sorts with the other blended shaders, after all
+opaque geometry; within it placements are not depth-sorted.
+
 The whole pass is one draw surface (SF_TWORLD) owned by the world entity;
 its back-end function culls placements against the view frustum and issues
 the draws itself, so the 4095 render-entity and 65536 draw-surface limits do
@@ -54,8 +58,10 @@ typedef struct {
 typedef struct {
 	char		shader[64];
 	float		tint[3];
-	uint32_t	flags;
+	uint32_t	flags;			// TWMAT_*
 } twMaterial_t;				// 80 bytes
+
+#define TWMAT_BLEND		1		// drawn in the blended pass
 
 typedef struct {
 	uint32_t	firstVert, numVerts;
@@ -91,6 +97,7 @@ typedef struct {
 typedef struct {
 	shader_t		*shader;
 	int				tintIndex;		// index into tworld_t::tints
+	int				pass;			// 0 opaque, 1 blended
 	srfVBOMDVMesh_t	surf;
 } tworldSub_t;
 
@@ -98,6 +105,7 @@ typedef struct {
 	int				numLods;
 	int				lodFirstSub[TWORLD_MAX_LODS];
 	int				lodNumSubs[TWORLD_MAX_LODS];
+	int				lodPassMask[TWORLD_MAX_LODS];	// bit 0: has opaque ranges, bit 1: has blended ranges
 } tworldMesh_t;
 
 typedef struct {
@@ -108,7 +116,9 @@ typedef struct {
 } tworldInst_t;
 
 typedef struct tworld_s {
-	surfaceType_t	surfaceType;	// SF_TWORLD, must be first
+	surfaceType_t	surfaceType;	// SF_TWORLD, must be first: the opaque pass
+	surfaceType_t	blendSurfaceType;	// SF_TWORLD again: the blended pass
+	shader_t		*blendSortShader;	// a blended material's shader, used only to sort the blended pass
 
 	int				numMeshes, numSubs, numInstances;
 	tworldMesh_t	*meshes;
@@ -261,7 +271,10 @@ void R_LoadTWorld( const char *bspName )
 		if ( !shaders[i] )
 			shaders[i] = tr.defaultShader;
 		VectorCopy( fmat[i].tint, tw->tints[i] );
+		if ( ( fmat[i].flags & TWMAT_BLEND ) && !tw->blendSortShader && shaders[i] != tr.defaultShader )
+			tw->blendSortShader = shaders[i];
 	}
+	tw->blendSurfaceType = SF_TWORLD;
 
 	// one vertex buffer and one index buffer per mesh (all detail levels), in the MD3 VBO layout
 	for ( i = 0; i < h->numMeshes; i++ ) {
@@ -303,6 +316,8 @@ void R_LoadTWorld( const char *bspName )
 
 				out->shader = shaders[s->material];
 				out->tintIndex = s->material;
+				out->pass = ( fmat[s->material].flags & TWMAT_BLEND ) ? 1 : 0;
+				tw->meshes[i].lodPassMask[l] |= 1 << out->pass;
 				out->surf.surfaceType = SF_VBO_MDVMESH;
 				out->surf.vbo = vbo;
 				out->surf.ibo = ibo;
@@ -355,6 +370,9 @@ void R_AddTWorldSurface( void )
 	AddPointToBounds( s_tworld->maxs, tr.viewParms.visBounds[0], tr.viewParms.visBounds[1] );
 
 	R_AddDrawSurf( &s_tworld->surfaceType, tr.defaultShader, 0, 0 );
+
+	if ( s_tworld->blendSortShader )
+		R_AddDrawSurf( &s_tworld->blendSurfaceType, s_tworld->blendSortShader, 0, 0 );
 }
 
 /*
@@ -368,7 +386,8 @@ through the normal stage iterator.
 */
 void RB_SurfaceTWorld( void *surface )
 {
-	tworld_t		*tw = (tworld_t *)surface;
+	tworld_t		*tw = s_tworld;
+	const int		pass = ( tw && surface == (void *)&tw->blendSurfaceType ) ? 1 : 0;
 	shader_t		*savedShader = tess.shader;
 	const int		savedFog = tess.fogNum;
 	const uint32_t	savedWorldUbo = vk.cmd->entity_ubo_offset[REFENTITYNUM_WORLD];
@@ -382,11 +401,16 @@ void RB_SurfaceTWorld( void *surface )
 	float			modelView[16];
 	int				i, j, p;
 
+	if ( !tw )
+		return;
+
 	// finish whatever batch was open (normally nothing: our dummy shader has no geometry)
 	RB_EndSurface();
 
-	tw->c_instances = tw->c_draws = tw->c_indexes = tw->c_small = tw->c_uboFail = 0;
-	tw->c_lod[0] = tw->c_lod[1] = tw->c_lod[2] = 0;
+	if ( pass == 0 ) {
+		tw->c_instances = tw->c_draws = tw->c_indexes = tw->c_small = tw->c_uboFail = 0;
+		tw->c_lod[0] = tw->c_lod[1] = tw->c_lod[2] = 0;
+	}
 
 	for ( i = 0; i < tw->numInstances; i++ ) {
 		const tworldInst_t *inst = &tw->instances[i];
@@ -410,7 +434,8 @@ void RB_SurfaceTWorld( void *surface )
 		if ( dist > 1.0f ) {
 			size = inst->radius / dist;
 			if ( size < cullSize ) {
-				tw->c_small++;
+				if ( pass == 0 )
+					tw->c_small++;
 				continue;
 			}
 			if ( mesh->numLods > 2 && size < lodSize2 )
@@ -419,17 +444,22 @@ void RB_SurfaceTWorld( void *surface )
 				lod = 1;
 		}
 
+		if ( !( mesh->lodPassMask[lod] & ( 1 << pass ) ) )
+			continue;		// nothing of this placement belongs to this pass
+
 		myGlMultMatrix( inst->matrix, backEnd.viewParms.world.modelViewMatrix, modelView );
 		Com_Memcpy( vk_world.modelview_transform, modelView, 64 );
 		vk_update_mvp( NULL );
 
-		tw->c_instances++;
-		tw->c_lod[lod]++;
+		if ( pass == 0 ) {
+			tw->c_instances++;
+			tw->c_lod[lod]++;
+		}
 
 		for ( j = 0; j < mesh->lodNumSubs[lod]; j++ ) {
 			tworldSub_t *sub = &tw->subs[mesh->lodFirstSub[lod] + j];
 
-			if ( !sub->surf.numIndexes )
+			if ( !sub->surf.numIndexes || sub->pass != pass )
 				continue;
 
 			// lighting uniform: sun and ambient multiplied by the material tint, normals rotated by the placement
@@ -476,7 +506,7 @@ void RB_SurfaceTWorld( void *surface )
 	vk_update_mvp( NULL );
 	RB_BeginSurface( savedShader, savedFog );
 
-	if ( r_tworldStats && r_tworldStats->integer && backEnd.viewParms.portalView == PV_NONE ) {
+	if ( pass == 0 && r_tworldStats && r_tworldStats->integer && backEnd.viewParms.portalView == PV_NONE ) {
 		const int now = ri.Milliseconds();
 		if ( now - tw->lastStatsTime >= 1000 ) {
 			tw->lastStatsTime = now;
