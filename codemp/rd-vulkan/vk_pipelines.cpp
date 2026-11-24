@@ -261,6 +261,28 @@ static void vk_push_vertex_input_binding_attribute( const Vk_Pipeline_Def *def )
     is_ghoul2_vbo = def->vbo_ghoul2;
     is_mdv_vbo = def->vbo_mdv;
 #endif
+    if ( def->shader_type == TYPE_TWORLD )
+    {
+        // cooked static world: binding 0 = mesh vertices in the MD3 buffer layout (vec4 position, vec4 normal,
+        // vec2 texcoord, vec4 unused), binding 1 = per-instance placement rows and tint
+        uint32_t i;
+#ifdef USE_VBO
+        is_ghoul2_vbo = is_mdv_vbo = qfalse;
+#endif
+        bindings[0].binding = 0; bindings[0].stride = 56; bindings[0].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+        bindings[1].binding = 1; bindings[1].stride = 64; bindings[1].inputRate = VK_VERTEX_INPUT_RATE_INSTANCE;
+        num_binds = 2;
+
+        attribs[0].location = 0; attribs[0].binding = 0; attribs[0].format = VK_FORMAT_R32G32B32_SFLOAT; attribs[0].offset = 0;
+        attribs[1].location = 1; attribs[1].binding = 0; attribs[1].format = VK_FORMAT_R32G32B32_SFLOAT; attribs[1].offset = 16;
+        attribs[2].location = 2; attribs[2].binding = 0; attribs[2].format = VK_FORMAT_R32G32_SFLOAT;    attribs[2].offset = 32;
+        for ( i = 0; i < 4; i++ ) {
+            attribs[3 + i].location = 3 + i; attribs[3 + i].binding = 1;
+            attribs[3 + i].format = VK_FORMAT_R32G32B32A32_SFLOAT; attribs[3 + i].offset = 16 * i;
+        }
+        num_attrs = 7;
+        return;
+    }
 #ifdef USE_VBO_SS
     if ( def->surface_sprite_flags )
     {
@@ -739,6 +761,10 @@ VkPipeline vk_create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPa
 #endif
 
     switch ( def->shader_type ) {
+        case TYPE_TWORLD:
+            vs_module = &vk.shaders.tworld_vs;
+            fs_module = &vk.shaders.tworld_fs;
+            break;
         case TYPE_REFRACTION:
             vs_module = &vk.shaders.refraction_vs[vbo];
             fs_module = &vk.shaders.refraction_fs;

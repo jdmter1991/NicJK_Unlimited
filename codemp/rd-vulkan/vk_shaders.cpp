@@ -23,6 +23,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 
 #include "tr_local.h"
 #include "shaders/spirv/shader_data.c"
+#include "shaders/spirv/tworld_data.c"		// cooked static world, see naboo/tools/compile_tworld_shaders.py
 
 // Vulkan has to be specified in a bytecode format which is called SPIR-V
 // and is designed to be work with both Vulkan and OpenCL.
@@ -157,6 +158,9 @@ void vk_create_shader_modules( void )
 
     vk.shaders.color_fs = SHADER_MODULE(color_frag_spv);
     vk.shaders.color_vs = SHADER_MODULE(color_vert_spv);
+
+    vk.shaders.tworld_fs = SHADER_MODULE(tworld_frag_spv);
+    vk.shaders.tworld_vs = SHADER_MODULE(tworld_vert_spv);
     VK_SET_OBJECT_NAME(vk.shaders.color_vs, "refraction vertex module", VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT);
     VK_SET_OBJECT_NAME(vk.shaders.color_fs, "refraction fragment module", VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT);
 
@@ -271,6 +275,9 @@ void vk_destroy_shader_modules( void )
 
     qvkDestroyShaderModule(vk.device, vk.shaders.color_fs, NULL);
     qvkDestroyShaderModule(vk.device, vk.shaders.color_vs, NULL);
+
+    qvkDestroyShaderModule(vk.device, vk.shaders.tworld_fs, NULL);
+    qvkDestroyShaderModule(vk.device, vk.shaders.tworld_vs, NULL);
 
     for ( i = 0; i < 3; i++ )
         qvkDestroyShaderModule(vk.device, vk.shaders.refraction_vs[i], NULL);

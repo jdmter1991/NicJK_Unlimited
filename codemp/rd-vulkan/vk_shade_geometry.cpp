@@ -854,6 +854,20 @@ void vk_bind_pipeline( uint32_t pipeline ) {
 }
 
 VkDrawIndexedIndirectCommand *vk_reserve_draw_indexed_indirect( uint32_t count, uint32_t *offset );
+static void vk_update_depth_range( Vk_Depth_Range depth_range );
+
+// helpers for the cooked-world pass (tr_tworld.cpp), which issues its own draw calls
+void vk_tworld_set_dynamic_state( void )
+{
+	vk_update_depth_range( DEPTH_RANGE_NORMAL );
+}
+
+void vk_tworld_reset_descriptors( void )
+{
+	for ( uint32_t i = 0; i < VK_DESC_COUNT; i++ )
+		vk_reset_descriptor( i );
+}
+
 static void vk_update_depth_range( Vk_Depth_Range depth_range )
 {
 	if ( vk.cmd->depth_range == depth_range )

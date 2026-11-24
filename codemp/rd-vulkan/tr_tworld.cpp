@@ -98,6 +98,7 @@ typedef struct {
 	shader_t		*shader;
 	int				tintIndex;		// index into tworld_t::tints
 	int				pass;			// 0 opaque, 1 blended
+	uint32_t		pipeline[2];	// instanced pipeline index + 1 (normal view, mirror view); 0 = not created yet
 	srfVBOMDVMesh_t	surf;
 } tworldSub_t;
 
@@ -130,6 +131,13 @@ typedef struct tworld_s {
 
 	int				numTints;
 	vec3_t			*tints;			// one per material
+	float			*alphas;		// one per material: opacity for the instanced path
+
+	// instanced path, per-frame scratch
+	int				*visInst;		// visible placement indexes
+	byte			*visLod;
+	int				*batchCount, *batchStart, *batchCursor;	// per submesh
+	int				*subOrder;		// submesh indexes sorted by shader
 	vec3_t			sunDir, sunColor, ambientColor;
 
 	// statistics of the last view drawn
@@ -144,6 +152,16 @@ static cvar_t	*r_tworldCullSize;
 static cvar_t	*r_tworldLodSize1;
 static cvar_t	*r_tworldLodSize2;
 static cvar_t	*r_tworldLight;
+static cvar_t	*r_tworldInstancing;
+
+static const tworldSub_t *s_sortSubs;
+static int TW_CompareSubs( const void *a, const void *b )
+{
+	const shader_t *sa = s_sortSubs[*(const int *)a].shader, *sb = s_sortSubs[*(const int *)b].shader;
+	if ( sa != sb )
+		return ( sa < sb ) ? -1 : 1;
+	return *(const int *)a - *(const int *)b;
+}
 
 #define TW_ERR( msg ) { ri.Printf( PRINT_WARNING, "R_LoadTWorld: %s: " msg "\n", name ); ri.FS_FreeFile( buffer ); return; }
 
@@ -181,6 +199,8 @@ void R_LoadTWorld( const char *bspName )
 	r_tworldLodSize1 = ri.Cvar_Get( "r_tworldLodSize1", "0.12", CVAR_ARCHIVE_ND, "Cooked world: use detail level 1 below this size (radius / distance)" );
 	r_tworldLodSize2 = ri.Cvar_Get( "r_tworldLodSize2", "0.035", CVAR_ARCHIVE_ND, "Cooked world: use detail level 2 below this size (radius / distance)" );
 	r_tworldLight = ri.Cvar_Get( "r_tworldLight", "1", CVAR_ARCHIVE_ND, "Cooked world: brightness scale of the sun and ambient light" );
+
+	r_tworldInstancing = ri.Cvar_Get( "r_tworldInstancing", "1", CVAR_ARCHIVE_ND, "Cooked world: 1 = one instanced draw per mesh level and material, 0 = one draw per placement through the model path" );
 
 	if ( !vk.vboMdvActive )
 		return;
@@ -274,6 +294,17 @@ void R_LoadTWorld( const char *bspName )
 		if ( ( fmat[i].flags & TWMAT_BLEND ) && !tw->blendSortShader && shaders[i] != tr.defaultShader )
 			tw->blendSortShader = shaders[i];
 	}
+	tw->alphas = (float *)ri.Hunk_Alloc( sizeof( float ) * ( h->numMaterials + 1 ), h_low );
+	for ( i = 0; i < h->numMaterials; i++ ) {
+		const uint32_t a = ( fmat[i].flags >> 8 ) & 255;
+		tw->alphas[i] = a ? a / 255.0f : 1.0f;
+	}
+	tw->visInst = (int *)ri.Hunk_Alloc( sizeof( int ) * ( h->numInstances + 1 ), h_low );
+	tw->visLod = (byte *)ri.Hunk_Alloc( h->numInstances + 1, h_low );
+	tw->batchCount = (int *)ri.Hunk_Alloc( sizeof( int ) * ( h->numSubmeshes + 1 ) * 3, h_low );
+	tw->batchStart = tw->batchCount + h->numSubmeshes + 1;
+	tw->batchCursor = tw->batchStart + h->numSubmeshes + 1;
+	tw->subOrder = (int *)ri.Hunk_Alloc( sizeof( int ) * ( h->numSubmeshes + 1 ), h_low );
 	tw->blendSurfaceType = SF_TWORLD;
 
 	// one vertex buffer and one index buffer per mesh (all detail levels), in the MD3 VBO layout
@@ -331,6 +362,11 @@ void R_LoadTWorld( const char *bspName )
 	}
 	ri.Hunk_FreeTempMemory( shaders );
 
+	for ( i = 0; i < h->numSubmeshes; i++ )
+		tw->subOrder[i] = i;
+	s_sortSubs = tw->subs;
+	qsort( tw->subOrder, h->numSubmeshes, sizeof( int ), TW_CompareSubs );
+
 	for ( i = 0; i < h->numInstances; i++ ) {
 		const twInstance_t *in = &finst[i];
 		tworldInst_t *out = &tw->instances[i];
@@ -377,6 +413,206 @@ void R_AddTWorldSurface( void )
 
 /*
 =================
+RB_TWorldInstanced
+
+Instanced path: cull and pick detail levels as usual, then group the visible
+placements by (mesh level, material) range, write one 64-byte record per
+placement into the per-frame buffer and issue one instanced draw per group.
+Returns qfalse only when the path is not available.
+=================
+*/
+typedef struct {
+	float	row0[4], row1[4], row2[4];
+	float	tint[4];
+} twInstData_t;
+
+static qboolean RB_TWorldInstanced( tworld_t *tw, const int pass )
+{
+	const cplane_t	*frustum = backEnd.viewParms.frustum;
+	const qboolean	cull = (qboolean)( !r_nocull->integer );
+	const float		cullSize = r_tworldCullSize->value;
+	const float		lodSize1 = r_tworldLodSize1->value;
+	const float		lodSize2 = r_tworldLodSize2->value;
+	const float		light = r_tworldLight->value;
+	const float		*viewOrg = backEnd.viewParms.ori.origin;
+	const int		mirror = ( backEnd.viewParms.portalView == PV_MIRROR ) ? 1 : 0;
+	int				i, j, p, numVis = 0, total = 0, run = 0, draws = 0, indexes = 0;
+	uint32_t		bufOffset, uboOffset;
+	twInstData_t	*data;
+	vkUniformEntity_t u = {};
+
+	if ( vk.geometry_buffer_size_new )
+		return qtrue;		// the per-frame buffer is being replaced; nothing can be drawn from it this frame
+
+	if ( pass == 0 ) {
+		tw->c_instances = tw->c_draws = tw->c_indexes = tw->c_small = tw->c_uboFail = 0;
+		tw->c_lod[0] = tw->c_lod[1] = tw->c_lod[2] = 0;
+	}
+
+	Com_Memset( tw->batchCount, 0, sizeof( int ) * tw->numSubs );
+
+	for ( i = 0; i < tw->numInstances; i++ ) {
+		const tworldInst_t *inst = &tw->instances[i];
+		const tworldMesh_t *mesh = &tw->meshes[inst->mesh];
+		vec3_t	d;
+		float	dist;
+		int		lod = 0;
+
+		if ( cull ) {
+			for ( p = 0; p < 4; p++ ) {
+				if ( DotProduct( inst->center, frustum[p].normal ) - frustum[p].dist < -inst->radius )
+					break;
+			}
+			if ( p < 4 )
+				continue;
+		}
+
+		VectorSubtract( inst->center, viewOrg, d );
+		dist = VectorLength( d ) - inst->radius;
+		if ( dist > 1.0f ) {
+			const float size = inst->radius / dist;
+			if ( size < cullSize ) {
+				if ( pass == 0 )
+					tw->c_small++;
+				continue;
+			}
+			if ( mesh->numLods > 2 && size < lodSize2 )
+				lod = 2;
+			else if ( mesh->numLods > 1 && size < lodSize1 )
+				lod = 1;
+		}
+
+		if ( !( mesh->lodPassMask[lod] & ( 1 << pass ) ) )
+			continue;
+
+		tw->visInst[numVis] = i;
+		tw->visLod[numVis] = (byte)lod;
+		numVis++;
+
+		for ( j = 0; j < mesh->lodNumSubs[lod]; j++ ) {
+			const int s = mesh->lodFirstSub[lod] + j;
+			if ( tw->subs[s].pass == pass && tw->subs[s].surf.numIndexes ) {
+				tw->batchCount[s]++;
+				total++;
+			}
+		}
+
+		if ( pass == 0 ) {
+			tw->c_instances++;
+			tw->c_lod[lod]++;
+		}
+	}
+
+	if ( !total )
+		return qtrue;
+
+	data = (twInstData_t *)vk_reserve_uniform( (size_t)total * sizeof( twInstData_t ), &bufOffset );
+	VectorScale( tw->ambientColor, light, u.ambientLight );
+	VectorScale( tw->sunColor, light, u.directedLight );
+	VectorCopy( tw->sunDir, u.localLightOrigin );
+	uboOffset = data ? vk_append_uniform( &u, sizeof( u ), vk.uniform_entity_item_size ) : ~0U;
+
+	if ( !data || uboOffset == ~0U ) {
+		// per-frame buffer too small: skip the cooked world this frame and ask for a bigger buffer
+		tw->c_uboFail++;
+		if ( !vk.geometry_buffer_size_new && vk.geometry_buffer_size < ( 256u << 20 ) )
+			vk.geometry_buffer_size_new = vk.geometry_buffer_size * 2;
+		return qtrue;
+	}
+
+	for ( i = 0; i < tw->numSubs; i++ ) {
+		tw->batchStart[i] = tw->batchCursor[i] = run;
+		run += tw->batchCount[i];
+	}
+
+	for ( i = 0; i < numVis; i++ ) {
+		const tworldInst_t *inst = &tw->instances[tw->visInst[i]];
+		const tworldMesh_t *mesh = &tw->meshes[inst->mesh];
+		const int lod = tw->visLod[i];
+		const float *m = inst->matrix;
+
+		for ( j = 0; j < mesh->lodNumSubs[lod]; j++ ) {
+			const int s = mesh->lodFirstSub[lod] + j;
+			const tworldSub_t *sub = &tw->subs[s];
+			twInstData_t *out;
+
+			if ( sub->pass != pass || !sub->surf.numIndexes )
+				continue;
+
+			out = &data[tw->batchCursor[s]++];
+			out->row0[0] = m[0]; out->row0[1] = m[4]; out->row0[2] = m[8];  out->row0[3] = m[12];
+			out->row1[0] = m[1]; out->row1[1] = m[5]; out->row1[2] = m[9];  out->row1[3] = m[13];
+			out->row2[0] = m[2]; out->row2[1] = m[6]; out->row2[2] = m[10]; out->row2[3] = m[14];
+			VectorCopy( tw->tints[sub->tintIndex], out->tint );
+			out->tint[3] = tw->alphas[sub->tintIndex];
+		}
+	}
+
+	// world matrix in the push constants, dynamic state, our lighting uniform
+	Com_Memcpy( vk_world.modelview_transform, backEnd.viewParms.world.modelViewMatrix, 64 );
+	vk_update_mvp( NULL );
+	vk_tworld_set_dynamic_state();
+	vk_tworld_reset_descriptors();
+	vk_update_descriptor( VK_DESC_UNIFORM, vk.cmd->uniform_descriptor );
+	vk_update_descriptor_offset( VK_DESC_UNIFORM_ENTITY_BINDING, uboOffset );
+
+	for ( i = 0; i < tw->numSubs; i++ ) {
+		const int s = tw->subOrder[i];
+		const int count = tw->batchCount[s];
+		tworldSub_t *sub = &tw->subs[s];
+		const shaderStage_t *stage;
+		image_t *image;
+		VkBuffer bufs[2];
+		VkDeviceSize offs[2];
+
+		if ( !count )
+			continue;
+
+		stage = sub->shader->stages[0];
+		if ( !stage )
+			continue;
+
+		if ( !sub->pipeline[mirror] ) {
+			Vk_Pipeline_Def def;
+			Com_Memset( &def, 0, sizeof( def ) );
+			def.shader_type = TYPE_TWORLD;
+			def.state_bits = stage->stateBits;
+			def.face_culling = sub->shader->cullType;
+			def.polygon_offset = sub->shader->polygonOffset;
+			def.mirror = (qboolean)mirror;
+			sub->pipeline[mirror] = vk_find_pipeline_ext( 0, &def, qfalse ) + 1;
+		}
+
+		image = stage->bundle[0].image[0] ? stage->bundle[0].image[0] : tr.whiteImage;
+
+		vk_bind_pipeline( sub->pipeline[mirror] - 1 );
+		vk_update_descriptor( VK_DESC_TEXTURE0, image->descriptor_set );
+		vk_bind_descriptor_sets();
+
+		if ( sub->shader->polygonOffset )
+			qvkCmdSetDepthBias( vk.cmd->command_buffer, r_offsetUnits->value, 0.0f, r_offsetFactor->value );
+
+		bufs[0] = sub->surf.vbo->buffer;	offs[0] = 0;
+		bufs[1] = vk.cmd->vertex_buffer;	offs[1] = (VkDeviceSize)bufOffset + (VkDeviceSize)tw->batchStart[s] * sizeof( twInstData_t );
+		qvkCmdBindVertexBuffers( vk.cmd->command_buffer, 0, 2, bufs, offs );
+		vk_bind_index_buffer( sub->surf.ibo->buffer, 0, VK_INDEX_TYPE_UINT32 );
+		qvkCmdDrawIndexed( vk.cmd->command_buffer, sub->surf.numIndexes, count, sub->surf.indexOffset, 0, 0 );
+
+		draws++;
+		indexes += sub->surf.numIndexes * count;
+	}
+
+	vk_tworld_reset_descriptors();
+
+	if ( pass == 0 ) {
+		tw->c_draws = draws;
+		tw->c_indexes = indexes;
+	}
+	return qtrue;
+}
+
+/*
+=================
 RB_SurfaceTWorld
 
 Back end: cull placements, pick a detail level, set the model-view matrix and
@@ -406,6 +642,11 @@ void RB_SurfaceTWorld( void *surface )
 
 	// finish whatever batch was open (normally nothing: our dummy shader has no geometry)
 	RB_EndSurface();
+
+	if ( r_tworldInstancing->integer && RB_TWorldInstanced( tw, pass ) ) {
+		RB_BeginSurface( savedShader, savedFog );
+		goto stats;
+	}
 
 	if ( pass == 0 ) {
 		tw->c_instances = tw->c_draws = tw->c_indexes = tw->c_small = tw->c_uboFail = 0;
@@ -506,6 +747,7 @@ void RB_SurfaceTWorld( void *surface )
 	vk_update_mvp( NULL );
 	RB_BeginSurface( savedShader, savedFog );
 
+stats:
 	if ( pass == 0 && r_tworldStats && r_tworldStats->integer && backEnd.viewParms.portalView == PV_NONE ) {
 		const int now = ri.Milliseconds();
 		if ( now - tw->lastStatsTime >= 1000 ) {

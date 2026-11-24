@@ -272,7 +272,9 @@ typedef enum {
 	TYPE_BLEND3_DST_COLOR_SRC_ALPHA,
 	TYPE_BLEND3_DST_COLOR_SRC_ALPHA_ENV,
 
-	TYPE_GENERIC_END = TYPE_BLEND3_MIX_ONE_MINUS_ALPHA_ENV
+	TYPE_GENERIC_END = TYPE_BLEND3_MIX_ONE_MINUS_ALPHA_ENV,
+
+	TYPE_TWORLD = TYPE_BLEND3_DST_COLOR_SRC_ALPHA_ENV + 1	// cooked static world, instanced (tr_tworld.cpp)
 
 } Vk_Shader_Type;
 
@@ -908,6 +910,9 @@ typedef struct {
 		VkShaderModule color_vs;
 		VkShaderModule color_fs;
 
+		VkShaderModule tworld_vs;
+		VkShaderModule tworld_fs;
+
 		VkShaderModule bloom_fs;
 		VkShaderModule blur_fs;
 		VkShaderModule blend_fs;
@@ -1111,6 +1116,9 @@ void		vk_bind_index_buffer( VkBuffer buffer, uint32_t offset, VkIndexType type =
 void		vk_bind_index( void );
 void		vk_bind_index_ext( const int numIndexes, const uint32_t *indexes );
 void		vk_bind_pipeline( uint32_t pipeline );
+void		vk_bind_descriptor_sets( void );
+void		vk_tworld_set_dynamic_state( void );
+void		vk_tworld_reset_descriptors( void );
 void		vk_draw_geometry( Vk_Depth_Range depth_range, qboolean indexed );
 void		vk_draw_dot( uint32_t storage_offset );
 void		vk_bind_geometry( uint32_t flags );
