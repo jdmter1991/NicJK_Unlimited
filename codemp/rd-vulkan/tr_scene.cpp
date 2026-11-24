@@ -23,6 +23,8 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 
 #include "tr_local.h"
 
+int r_droppedRefEntities = 0;	// refEntities refused because the scene was full (see r_showLimits)
+
 #include "ghoul2/G2.h"
 #include "ghoul2/g2_local.h"
 #include "qcommon/matcomp.h"
@@ -209,6 +211,7 @@ void RE_AddRefEntityToScene( const refEntity_t *ent ) {
 	}
 
 	if ( r_numentities >= MAX_REFENTITIES ) {
+		r_droppedRefEntities++;
 		ri.Printf(PRINT_DEVELOPER, "RE_AddRefEntityToScene: Dropping refEntity, reached MAX_REFENTITIES\n");
 		return;
 	}

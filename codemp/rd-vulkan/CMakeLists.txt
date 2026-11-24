@@ -215,7 +215,8 @@ else(WIN32)
 	endif()
 endif()
 
-set_target_properties(${MPVulkanRenderer} PROPERTIES COMPILE_DEFINITIONS "${SharedDefines}")
+# 12 entity bits fill the 32-bit drawsurf sort key exactly (1 dlight + 5 fog + 12 entity + 14 shader)
+set_target_properties(${MPVulkanRenderer} PROPERTIES COMPILE_DEFINITIONS "${SharedDefines};REFENTITYNUM_BITS=12")
 
 # Hide symbols not explicitly marked public.
 set_property(TARGET ${MPVulkanRenderer} APPEND PROPERTY COMPILE_OPTIONS ${OPENJK_VISIBILITY_FLAGS})

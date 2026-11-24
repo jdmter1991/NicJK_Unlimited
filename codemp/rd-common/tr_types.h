@@ -27,7 +27,12 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "../qcommon/q_shared.h"
 
 #define	MAX_DLIGHTS		32			// can't be increased, because bit flags are used on surfaces
+// Per-frame render entity limit is 2^REFENTITYNUM_BITS - 1. The value is bounded by the 32-bit
+// drawsurf sort key of each renderer. rd-vulkan has one spare bit and builds with 12 (4095
+// entities, set in its CMakeLists.txt); rd-vanilla and rd-rend2 have none and stay at 11 (2047).
+#ifndef REFENTITYNUM_BITS
 #define	REFENTITYNUM_BITS	11		// can't be increased without changing drawsurf bit packing
+#endif
 #define	REFENTITYNUM_MASK	((1<<REFENTITYNUM_BITS) - 1)
 // the last N-bit number (2^REFENTITYNUM_BITS - 1) is reserved for the special world refentity,
 //  and this is reflected by the value of MAX_REFENTITIES (which therefore is not a power-of-2)

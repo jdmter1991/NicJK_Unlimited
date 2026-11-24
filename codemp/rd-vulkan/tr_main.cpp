@@ -1311,8 +1311,8 @@ void R_AddLitSurf( surfaceType_t *surface, shader_t *shader, int fogIndex )
 
 	litsurf = &tr.refdef.litSurfs[tr.refdef.numLitSurfs++];
 
-	litsurf->sort = (shader->sortedIndex << QSORT_SHADERNUM_SHIFT)
-		| tr.shiftedEntityNum | (fogIndex << QSORT_FOGNUM_SHIFT);
+	litsurf->sort = ((unsigned)shader->sortedIndex << QSORT_SHADERNUM_SHIFT)
+		| (unsigned)tr.shiftedEntityNum | ((unsigned)fogIndex << QSORT_FOGNUM_SHIFT);
 	litsurf->surface = surface;
 
 	if (!tr.light->head)
@@ -1369,8 +1369,8 @@ void R_AddDrawSurf( surfaceType_t *surface, shader_t *shader,
 	index = tr.refdef.numDrawSurfs & DRAWSURF_MASK;
 	// the sort data is packed into a single 32 bit value so it can be
 	// compared quickly during the qsorting process
-	tr.refdef.drawSurfs[index].sort = (shader->sortedIndex << QSORT_SHADERNUM_SHIFT)
-		| tr.shiftedEntityNum | (fogIndex << QSORT_FOGNUM_SHIFT) | (int)dlightMap;
+	tr.refdef.drawSurfs[index].sort = ((unsigned)shader->sortedIndex << QSORT_SHADERNUM_SHIFT)
+		| (unsigned)tr.shiftedEntityNum | ((unsigned)fogIndex << QSORT_FOGNUM_SHIFT) | (unsigned)dlightMap;
 	tr.refdef.drawSurfs[index].surface = surface;
 	tr.refdef.numDrawSurfs++;
 }
@@ -1652,6 +1652,31 @@ void R_RenderView( const viewParms_t *parms ) {
 	// wrapped around in the buffer and we will be missing
 	// the first surfaces, not the last ones
 	numDrawSurfs = tr.refdef.numDrawSurfs;
+
+	// "r_showLimits 1": once a second, print how close the frame came to the per-frame limits
+	{
+		extern int r_droppedRefEntities;
+		static cvar_t *r_showLimits = NULL;
+		static int peakSurfs = 0, peakEnts = 0, overflowViews = 0, lastPrint = 0;
+
+		if ( !r_showLimits ) {
+			r_showLimits = ri.Cvar_Get( "r_showLimits", "0", CVAR_TEMP, "" );
+		}
+		if ( numDrawSurfs > peakSurfs ) peakSurfs = numDrawSurfs;
+		if ( tr.refdef.num_entities > peakEnts ) peakEnts = tr.refdef.num_entities;
+		if ( numDrawSurfs > MAX_DRAWSURFS ) overflowViews++;
+		if ( r_showLimits->integer ) {
+			const int now = ri.Milliseconds();
+			if ( now - lastPrint >= 1000 ) {
+				ri.Printf( PRINT_ALL, "RLIMITS drawsurfs peak %i of %i (views over: %i)  refentities peak %i of %i (dropped: %i)\n",
+					peakSurfs, MAX_DRAWSURFS, overflowViews, peakEnts, MAX_REFENTITIES, r_droppedRefEntities );
+				lastPrint = now;
+				peakSurfs = peakEnts = overflowViews = 0;
+				r_droppedRefEntities = 0;
+			}
+		}
+	}
+
 	if ( numDrawSurfs > MAX_DRAWSURFS ) {
 		numDrawSurfs = MAX_DRAWSURFS;
 	}

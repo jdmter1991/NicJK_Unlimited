@@ -4804,7 +4804,7 @@ static void FixRenderCommandList( int newShader ) {
 					sortedIndex = (( drawSurf->sort >> QSORT_SHADERNUM_SHIFT ) & SHADERNUM_MASK);
 					if ( sortedIndex >= newShader ) {
 						sortedIndex = shader->sortedIndex;
-						drawSurf->sort = (sortedIndex << QSORT_SHADERNUM_SHIFT) | (entityNum << QSORT_REFENTITYNUM_SHIFT) | ( fogNum << QSORT_FOGNUM_SHIFT ) | (int)dlightMap;
+						drawSurf->sort = ((unsigned)sortedIndex << QSORT_SHADERNUM_SHIFT) | ((unsigned)entityNum << QSORT_REFENTITYNUM_SHIFT) | ((unsigned)fogNum << QSORT_FOGNUM_SHIFT ) | (unsigned)dlightMap;
 					}
 				}
 				curCmd = (const void *)(ds_cmd + 1);
