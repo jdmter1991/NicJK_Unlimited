@@ -180,12 +180,20 @@ vmCvar_t bot_abTest;
 #define BOTF_AGGRO		64
 #define BOTF_NAV		128
 #define BOTF_DEFENSE	256
+// 512: duelling habits of experienced players (after Kaoii's multiplayer saber combat guide):
+// punish moves that root the enemy in place, keep away from them otherwise, fight with strafe
+// swings ("counters") instead of standing still, crouch the combos where the guide says the
+// lower body is the weak point, and keep katas and jump attacks for moments they can land.
+#define BOTF_PRO		512
+// 1024: fight in melee with strafe swings from side to side, crouched where the guide says so
+#define BOTF_COUNTERS	1024
 
 #define BOTINTENT_EVADE		8	// applied whatever the buttons are, and releases attack
 #define BOTINTENT_WORLD		16	// move along bs->intentWorldDir (navigation jump / unstick), always applied
 
 static int botEvalNavHighJumps, botEvalNavGapJumps, botEvalIdleKicks, botEvalStuckJumps, botEvalStuckSuicides;
 static int botEvalStuckInSolid, botEvalLedgeHops;
+static int botEvalProPunish, botEvalProHoldOff, botEvalProCounterFrames, botEvalProCrouchFrames;
 static int botEvalMoveSteers, botEvalMoveJumps, botEvalNavDoorTargets, botEvalNavOpenTargets;
 static int botEvalLungeFail[5];	// why a crouch special did not start: not ducked, rolling, saber busy, in air, other
 static int botEvalStyleCount[8];	// thinks spent in each saber style by bots with the specials feature
@@ -287,6 +295,8 @@ static void BotEval_Report(void) {
 	trap->Print("BOTEVAL navigation: force jumps over high obstacles %d, jumps across gaps %d, idle bots set moving %d, stuck jump-outs %d, stuck suicides %d\n",
 		botEvalNavHighJumps, botEvalNavGapJumps, botEvalIdleKicks, botEvalStuckJumps, botEvalStuckSuicides);
 	trap->Print("BOTEVAL bots found standing inside solid geometry and respawned: %d; hops over low ledges while moving: %d\n", botEvalStuckInSolid, botEvalLedgeHops);
+	trap->Print("BOTEVAL pro tactics: punishes of a rooted enemy %d, evasions skipped to punish or strike at the end %d, frames of strafe-swing combos %d of which crouched %d\n",
+		botEvalProPunish, botEvalProHoldOff, botEvalProCounterFrames, botEvalProCrouchFrames);
 	trap->Print("BOTEVAL movement: steered round an obstacle while moving %d, jumped one %d; exploration targets through doors %d, toward open space %d\n",
 		botEvalMoveSteers, botEvalMoveJumps, botEvalNavDoorTargets, botEvalNavOpenTargets);
 	trap->Print("BOTEVAL jump attacks tried %d started %d; lunges / crouch specials tried %d started %d\n",
@@ -1018,6 +1028,62 @@ void BotInputToUserCommand(bot_state_t* bs, bot_input_t* bi, usercmd_t* ucmd, in
 		ucmd->upmove = -127;
 	}
 
+	// Melee the way it is fought by people: not standing in front of the enemy pressing attack, but
+	// swinging while strafing from one side to the other and facing him all the time (the
+	// "counter" or "fan"), which gives the wide side swings and keeps the bot moving. The side
+	// changes with every swing. Dual and staff fighters crouch these combos where the guide gives
+	// the lower body as the weak point; crouched, forward is never held, because crouch + forward
+	// + attack is the lunge / spin special.
+	if ((bs->features & BOTF_COUNTERS) && !bs->seqType && bs->intentUntil <= level.time && bs->seqPrepUntil <= level.time
+		&& bs->currentEnemy && bs->currentEnemy->client && bs->frame_Enemy_Vis && bs->frame_Enemy_Len <= 105
+		&& g_entities[bs->client].client && ucmd->upmove <= 0) {
+		const playerState_t *mp = &g_entities[bs->client].client->ps;
+		const playerState_t *op = &bs->currentEnemy->client->ps;
+
+		if (mp->stats[STAT_HEALTH] > 0 && mp->weapon == WP_SABER && !mp->saberHolstered && !mp->saberInFlight
+			&& mp->groundEntityNum != ENTITYNUM_NONE && !BG_SaberInSpecial(mp->saberMove) && !BG_SaberInKata(mp->saberMove)
+			&& !BG_InKnockDown(mp->legsAnim) && mp->forceHandExtend == HANDEXTEND_NONE
+			&& ((ucmd->buttons & BUTTON_ATTACK) || BG_SaberInAttack(mp->saberMove))
+			&& (BG_SaberInAttack(op->saberMove) || BG_SaberInSpecial(op->saberMove))) {
+			static int side[MAX_CLIENTS], sideTime[MAX_CLIENTS], lastMove[MAX_CLIENTS], crouchFlip[MAX_CLIENTS];
+			const int c = bs->client;
+			const int dist = bs->frame_Enemy_Len;
+			const int myBase = mp->fd.saberAnimLevelBase, enBase = op->fd.saberAnimLevelBase;
+			const qboolean enemyDucked = (op->pm_flags & PMF_DUCKED) ? qtrue : qfalse;
+			qboolean crouch = qfalse;
+
+			if (!side[c]) side[c] = Q_irand(0, 1) ? 1 : -1;
+			// a new swing has begun (or this one has run long): go the other way
+			if ((mp->saberMove != lastMove[c] && BG_SaberInAttack(mp->saberMove)) || level.time - sideTime[c] > 700 || sideTime[c] > level.time) {
+				if (mp->saberMove != lastMove[c] || level.time - sideTime[c] > 700) {
+					side[c] = -side[c];
+					crouchFlip[c] ^= 1;
+					sideTime[c] = level.time;
+				}
+			}
+			lastMove[c] = mp->saberMove;
+
+			if (myBase == SS_DUAL) {
+				// duals: crouched against staff and single; against duals crouch if he stands, mix if he crouches
+				crouch = (enBase == SS_DUAL && enemyDucked) ? (crouchFlip[c] ? qtrue : qfalse) : qtrue;
+			} else if (myBase == SS_STAFF) {
+				if (enBase == SS_DUAL) crouch = enemyDucked ? (crouchFlip[c] ? qtrue : qfalse) : qtrue;
+				else if (enBase != SS_STAFF && op->fd.saberAnimLevel == SS_MEDIUM) crouch = qtrue;
+			} else if (mp->fd.saberAnimLevel == SS_MEDIUM && op->saberMove == LS_A_LUNGE) {
+				crouch = qtrue;		// yellow against a lunge: crouched counters
+			}
+
+			ucmd->rightmove = (signed char)(side[c] * 127);
+			ucmd->forwardmove = (dist > 60) ? 127 : ((dist < 36) ? -127 : 0);
+			botEvalProCounterFrames++;
+			if (crouch) {
+				ucmd->upmove = -127;
+				if (ucmd->forwardmove > 0) ucmd->forwardmove = 0;
+				botEvalProCrouchFrames++;
+			}
+		}
+	}
+
 	// Whatever decided this frame's movement (chasing an enemy, strafing, exploring): if a wall or
 	// object is right in the way, go round it or over it instead of pushing against it. Other
 	// players are not obstacles here, and a slope is not a wall.
@@ -1273,9 +1339,10 @@ void Bot_HoldButtons(bot_state_t* bs, int buttons, int ms) {
 	bs->inputHoldUntil = level.time + ms;
 }
 
+static vmCvar_t bot_abBase;
 static int BotFeaturesFor(int client) {
 	if (bot_abTest.integer > 0 && (client < bot_abTest.integer || client >= 2 * bot_abTest.integer)) {
-		return 0;	// baseline group
+		return bot_abBase.integer;	// baseline group
 	}
 	return bot_features.integer;
 }
@@ -11495,6 +11562,23 @@ static qboolean Bot_DefensiveReaction(bot_state_t* bs) {
 		&& (en->ps.fd.saberAnimLevel == SS_STRONG || en->ps.fd.saberAnimLevel == SS_DESANN)
 		&& !BG_SaberInAttack(cl->ps.saberMove)) ? qtrue : qfalse;
 
+	if (enemySpecial && (bs->features & BOTF_PRO)) {
+		// A kata, a lunge or a crouch spin roots the enemy to the spot. With the fast style (lunge)
+		// or a staff (butterfly) that is the moment to hit, not to step back; with anything else
+		// stay clear while it runs and go in as it ends, when the enemy cannot yet move or guard.
+		// The spun dual kata hits all round until its last moment: never go near it early.
+		const int em = en->ps.saberMove;
+		const qboolean rooted = (BG_SaberInKata(em) || em == LS_A_LUNGE || em == LS_SPINATTACK_DUAL || em == LS_SPINATTACK) ? qtrue : qfalse;
+		const int myStyle = cl->ps.fd.saberAnimLevel;
+		if (rooted && cl->ps.fd.forcePower >= 25 && em != LS_DUAL_SPIN_PROTECT
+			&& ((myStyle == SS_FAST && dist >= 40 && dist <= 130) || (myStyle == SS_STAFF && dist >= 90))) {
+			botEvalProHoldOff++;
+			enemySpecial = qfalse;
+		} else if (rooted && en->ps.torsoTimer > 0 && en->ps.torsoTimer < 450) {
+			botEvalProHoldOff++;
+			enemySpecial = qfalse;
+		}
+	}
 	if (enemySpecial || enemyHeavySwing) {
 		if (!bs->defThreatTime) {
 			bs->defThreatTime = level.time;		// noticed now, react after the delay
@@ -11897,6 +11981,7 @@ void Bot_ExecuteSaberCombat(bot_state_t* bs) {
 			&& sp->groundEntityNum != ENTITYNUM_NONE && sp->forceHandExtend == HANDEXTEND_NONE && !bs->seqType) ? qtrue : qfalse;
 		const qboolean ready = (usable && sp->saberMove == LS_READY && sp->weaponTime <= 0) ? qtrue : qfalse;
 		const qboolean enemyDown = BG_InKnockDown(ep->legsAnim) ? qtrue : qfalse;
+		const qboolean pro = (bs->features & BOTF_PRO) ? qtrue : qfalse;
 		int want = 0;
 
 		if (style >= 0 && style < 8) botEvalStyleCount[style]++;
@@ -11934,6 +12019,22 @@ void Bot_ExecuteSaberCombat(bot_state_t* bs) {
 			// bot to a long move, so it is worth it when it is likely to land: the enemy is recovering
 			// from a swing, otherwise vulnerable, or not facing us. Without such an opening a special
 			// is only an occasional mix-up, and there is always a gap between two specials.
+			if (!want && pro && !secondary && sp->fd.forcePower >= 25 && bs->frame_Enemy_Vis) {
+				// the enemy is rooted in a kata, a lunge or a crouch spin
+				const int em = ep->saberMove;
+				const qboolean rooted = (BG_SaberInKata(em) || em == LS_A_LUNGE || em == LS_SPINATTACK_DUAL || em == LS_SPINATTACK) ? qtrue : qfalse;
+				if (rooted && em != LS_DUAL_SPIN_PROTECT && level.time >= bs->proPunishTime) {
+					if (style == SS_FAST && dist >= 40 && dist <= 130) {
+						want = BOTSEQ_LUNGE;
+					} else if (style == SS_STAFF && dist >= 90 && dist <= 200) {
+						want = BOTSEQ_JUMPATTACK;	// butterfly
+					}
+					if (want) {
+						bs->proPunishTime = level.time + 1500;
+						botEvalProPunish++;
+					}
+				}
+			}
 			if (!want && !secondary && sp->fd.forcePower >= 25 && level.time >= bs->seqNextSpecialTime) {
 				const qboolean jumpStyle = (style == SS_MEDIUM || style == SS_STRONG || style == SS_DUAL || style == SS_STAFF) ? qtrue : qfalse;
 				const qboolean crouchStyle = (style == SS_FAST || style == SS_DUAL || style == SS_STAFF) ? qtrue : qfalse;
@@ -11952,12 +12053,21 @@ void Bot_ExecuteSaberCombat(bot_state_t* bs) {
 				opening = (enemyRecovering || enemyVulnerable || !enemyFacingMe) ? qtrue : qfalse;
 				roll = Q_irand(1, 100);
 
+				// Experienced players keep these for when they will land: the lunge is the fast style's
+				// punish and nothing else, the dual and staff crouch spins leave the back open and are
+				// not used, and a jump attack against a standing, watching enemy is a free hit for him.
+				if (pro && (style != SS_FAST || !opening)) {
+					/* no crouch special */
+				} else
 				if (crouchStyle && dist >= 50 && dist <= 110 && level.time >= bs->seqLungeCooldown
 					&& roll <= (opening ? 85 : 30)) {
 					want = BOTSEQ_LUNGE;			// quick punish at close range
+				}
+				if (want) {
+					/* chosen */
 				} else if (jumpStyle && dist >= 100 && dist <= 190 && level.time >= bs->seqJumpCooldown
 					&& !(enemySwinging && enemyFacingMe)
-					&& roll <= (opening ? 60 : 6)) {
+					&& roll <= (pro ? ((enemyVulnerable && !enemyFacingMe) ? 45 : 0) : (opening ? 60 : 6))) {
 					want = BOTSEQ_JUMPATTACK;		// close the gap with a heavy hit
 				} else if (dist >= 150 && dist <= 260 && speed2 >= 200.0f * 200.0f && level.time >= bs->seqRollCooldown
 					&& roll <= ((!enemyFacingMe || enemyVulnerable) ? 55 : 4)) {
@@ -12013,6 +12123,7 @@ void Bot_ExecuteSaberCombat(bot_state_t* bs) {
 			&& !((kps->fd.saberAnimLevelBase == SS_STAFF || kps->fd.saberAnimLevelBase == SS_DUAL) && kps->fd.saberAnimLevel != kps->fd.saberAnimLevelBase)	// PM_InSecondaryStyle
 			&& kps->forceHandExtend == HANDEXTEND_NONE
 			&& (enemyVulnerable || enemyRecovering)
+			&& (!(bs->features & BOTF_PRO) || (enemyVulnerable && Q_irand(1, 100) <= 20))
 			&& (!(bs->features & BOTF_SPECIALS) || level.time >= bs->seqNextSpecialTime)
 			&& Q_irand(1, 100) <= (specialChance + 10))
 		{
@@ -16801,7 +16912,8 @@ int BotAISetup(int restart) {
 
 	trap->Cvar_Register(&bot_profile, "bot_profile", "0", 0);
 	trap->Cvar_Register(&bot_fixes, "bot_fixes", "1", CVAR_ARCHIVE);
-	trap->Cvar_Register(&bot_features, "bot_features", "495", CVAR_ARCHIVE);	// everything except 16 (targeted style), which did not help in A/B
+	trap->Cvar_Register(&bot_abBase, "bot_abBase", "0", 0);	// features of the baseline group in an A/B test
+	trap->Cvar_Register(&bot_features, "bot_features", "495", CVAR_ARCHIVE);	// 512 and 1024 (guide tactics) are off: they did not win their A/B tests against bots	// everything except 16 (targeted style), which did not help in A/B
 	trap->Cvar_Register(&bot_abTest, "bot_abTest", "0", 0);
 	trap->Cvar_Register(&bot_attachments, "bot_attachments", "1", 0);
 	trap->Cvar_Register(&bot_camp, "bot_camp", "1", 0);

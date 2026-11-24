@@ -500,6 +500,7 @@ typedef struct bot_state_s
 	vec3_t idleLongPos;
 	int stuckEpisodeTime;		// level.time the current stuck episode began, 0 = not stuck
 	vec3_t stuckEpisodePos;
+	int proPunishTime;			// next time a rooted enemy may be punished with a special
 	int stuckKicks;				// recovery attempts made in this episode
 } bot_state_t;
 
