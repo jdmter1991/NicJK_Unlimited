@@ -62,6 +62,8 @@ typedef struct {
 } twMaterial_t;				// 80 bytes
 
 #define TWMAT_BLEND		1		// drawn in the blended pass
+// flags bits 8-15: opacity * 255 (0 = opaque); bits 16-31: detail texture repeats per unit of UV (0 = none).
+// The detail texture is the image of the material shader's second stage.
 
 typedef struct {
 	uint32_t	firstVert, numVerts;
@@ -132,6 +134,7 @@ typedef struct tworld_s {
 	int				numTints;
 	vec3_t			*tints;			// one per material
 	float			*alphas;		// one per material: opacity for the instanced path
+	float			*details;		// one per material: detail repeats per unit of UV, 0 = none
 
 	// instanced path, per-frame scratch
 	int				*visInst;		// visible placement indexes
@@ -299,6 +302,19 @@ void R_LoadTWorld( const char *bspName )
 		const uint32_t a = ( fmat[i].flags >> 8 ) & 255;
 		tw->alphas[i] = a ? a / 255.0f : 1.0f;
 	}
+	tw->details = (float *)ri.Hunk_Alloc( sizeof( float ) * ( h->numMaterials + 1 ), h_low );
+	for ( i = 0; i < h->numMaterials; i++ )
+		tw->details[i] = (float)( ( fmat[i].flags >> 16 ) & 0xffff );
+
+	// the far plane and the cull distance must cover the cooked world, whatever the BSP's worldspawn says
+	{
+		vec3_t size;
+		float need;
+		VectorSubtract( h->maxs, h->mins, size );
+		need = VectorLength( size ) / 1.732f;
+		if ( need < 1.0e6f && tr.distanceCull < need )
+			tr.distanceCull = need;
+	}
 	tw->visInst = (int *)ri.Hunk_Alloc( sizeof( int ) * ( h->numInstances + 1 ), h_low );
 	tw->visLod = (byte *)ri.Hunk_Alloc( h->numInstances + 1, h_low );
 	tw->batchCount = (int *)ri.Hunk_Alloc( sizeof( int ) * ( h->numSubmeshes + 1 ) * 3, h_low );
@@ -424,7 +440,8 @@ Returns qfalse only when the path is not available.
 typedef struct {
 	float	row0[4], row1[4], row2[4];
 	float	tint[4];
-} twInstData_t;
+	float	params[4];		// x: detail repeats per unit of UV
+} twInstData_t;				// 80 bytes
 
 static qboolean RB_TWorldInstanced( tworld_t *tw, const int pass )
 {
@@ -545,6 +562,8 @@ static qboolean RB_TWorldInstanced( tworld_t *tw, const int pass )
 			out->row2[0] = m[2]; out->row2[1] = m[6]; out->row2[2] = m[10]; out->row2[3] = m[14];
 			VectorCopy( tw->tints[sub->tintIndex], out->tint );
 			out->tint[3] = tw->alphas[sub->tintIndex];
+			out->params[0] = tw->details[sub->tintIndex];
+			out->params[1] = out->params[2] = out->params[3] = 0.0f;
 		}
 	}
 
@@ -587,6 +606,11 @@ static qboolean RB_TWorldInstanced( tworld_t *tw, const int pass )
 
 		vk_bind_pipeline( sub->pipeline[mirror] - 1 );
 		vk_update_descriptor( VK_DESC_TEXTURE0, image->descriptor_set );
+		{
+			const shaderStage_t *ds = ( tw->details[sub->tintIndex] > 0.0f ) ? sub->shader->stages[1] : NULL;
+			image_t *detail = ( ds && ds->bundle[0].image[0] ) ? ds->bundle[0].image[0] : tr.whiteImage;
+			vk_update_descriptor( VK_DESC_TEXTURE0 + 1, detail->descriptor_set );
+		}
 		vk_bind_descriptor_sets();
 
 		if ( sub->shader->polygonOffset )

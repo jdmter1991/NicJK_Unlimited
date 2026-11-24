@@ -1,7 +1,7 @@
 #version 450
 
 // Cooked static world ("tworld"), instanced path. One draw call per (mesh detail level, material) with
-// instanceCount placements. Per-instance data: three rows of the placement matrix and a tint.
+// instanceCount placements. Per-instance data: three rows of the placement matrix, a tint and parameters.
 // Lighting is per vertex: one sun and an ambient colour, taken from the entity uniform block that the
 // pass fills once per view. Same response curve as the model shader's "rgbGen lightingDiffuse".
 
@@ -25,9 +25,12 @@ layout(location = 3) in vec4 in_row0;		// per instance
 layout(location = 4) in vec4 in_row1;
 layout(location = 5) in vec4 in_row2;
 layout(location = 6) in vec4 in_tint;		// rgb tint, a opacity
+layout(location = 7) in vec4 in_params;		// x: detail texture repeats per unit of UV (0 = no detail layer)
 
 layout(location = 0) out vec2 frag_tex_coord;
 layout(location = 1) out vec4 frag_color;
+layout(location = 2) out vec2 frag_detail_coord;
+layout(location = 3) flat out float frag_detail;
 
 out gl_PerVertex {
 	vec4 gl_Position;
@@ -44,5 +47,7 @@ void main() {
 
 	frag_color = vec4( light * in_tint.rgb, in_tint.a );
 	frag_tex_coord = in_tex_coord;
+	frag_detail_coord = in_tex_coord * in_params.x;
+	frag_detail = in_params.x;
 	gl_Position = mvp * vec4( world, 1.0 );
 }
