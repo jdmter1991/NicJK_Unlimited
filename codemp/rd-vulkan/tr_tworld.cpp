@@ -147,6 +147,15 @@ typedef struct tworld_s {
 	int				*subOrder;		// submesh indexes sorted by shader
 	vec3_t			sunDir, sunColor, ambientColor;
 
+	// baked sun shadow map (maps/<name>_shadow.dds + maps/<name>.tshadow), NULL when the map has none
+	image_t			*shadowImage;
+	float			shadowRow[3][4];	// world -> texel x, texel y, depth 0..1
+	float			shadowTexel;		// world units per texel
+	float			shadowRange;		// world units covered by depth 0..1
+	int				shadowLowW, shadowLowH;
+	float			shadowLowScale[2];	// full-size texels per texel of the reduced copy
+	uint16_t		*shadowLow;			// reduced copy for CPU lookups
+
 	// statistics of the last view drawn
 	int				c_instances, c_draws, c_indexes, c_small, c_lod[TWORLD_MAX_LODS], c_uboFail;
 	int				lastStatsTime;
@@ -160,6 +169,9 @@ static cvar_t	*r_tworldLodSize1;
 static cvar_t	*r_tworldLodSize2;
 static cvar_t	*r_tworldLight;
 static cvar_t	*r_tworldInstancing;
+static cvar_t	*r_tworldShadows;
+static cvar_t	*r_tworldShadowOffset;
+static cvar_t	*r_tworldShadowBias;
 
 static const tworldSub_t *s_sortSubs;
 static int TW_CompareSubs( const void *a, const void *b )
@@ -168,6 +180,99 @@ static int TW_CompareSubs( const void *a, const void *b )
 	if ( sa != sb )
 		return ( sa < sb ) ? -1 : 1;
 	return *(const int *)a - *(const int *)b;
+}
+
+#pragma pack(push, 1)
+typedef struct {
+	char		magic[4];		// "TSHD"
+	uint32_t	version;		// 1
+	uint32_t	width, height;	// of the full-size map in the .dds
+	uint32_t	lowWidth, lowHeight;
+	float		row[3][4];
+	float		texelUnits, depthRange, lowScaleX, lowScaleY;
+} twShadowHeader_t;				// 88 bytes, followed by lowWidth * lowHeight uint16 depths
+#pragma pack(pop)
+
+/*
+=================
+R_LoadTWorldShadow
+
+Optional baked sun shadows: a 16-bit depth map seen from the sun (tools: bake_sun_shadow.py) and a small file
+with the world -> map transform plus a reduced copy of the map for CPU lookups.
+=================
+*/
+static void R_LoadTWorldShadow( tworld_t *tw, const char *bspName )
+{
+	char	name[MAX_QPATH], imgName[MAX_QPATH];
+	byte	*buffer = NULL;
+	long	len;
+	const twShadowHeader_t *h;
+	image_t	*image;
+	size_t	lowBytes;
+
+	COM_StripExtension( bspName, name, sizeof( name ) );
+	Q_strncpyz( imgName, name, sizeof( imgName ) );
+	Q_strcat( name, sizeof( name ), ".tshadow" );
+	Q_strcat( imgName, sizeof( imgName ), "_shadow" );
+
+	len = ri.FS_ReadFile( name, (void **)&buffer );
+	if ( len <= 0 || !buffer )
+		return;
+
+	h = (const twShadowHeader_t *)buffer;
+	if ( len < (long)sizeof( *h ) || memcmp( h->magic, "TSHD", 4 ) || h->version != 1
+		|| h->lowWidth < 1 || h->lowHeight < 1 || h->lowWidth > 4096 || h->lowHeight > 4096
+		|| (size_t)len != sizeof( *h ) + (size_t)h->lowWidth * h->lowHeight * 2 ) {
+		ri.Printf( PRINT_WARNING, "R_LoadTWorldShadow: %s: bad file\n", name );
+		ri.FS_FreeFile( buffer );
+		return;
+	}
+
+	image = R_FindImageFile( imgName, (imgFlags_t)( IMGFLAG_CLAMPTOEDGE | IMGFLAG_NO_COMPRESSION | IMGFLAG_NOSCALE | IMGFLAG_NOLIGHTSCALE ) );
+	if ( !image || image->internalFormat != VK_FORMAT_R16_UNORM
+		|| image->width != (int)h->width || image->height != (int)h->height ) {
+		ri.Printf( PRINT_WARNING, "R_LoadTWorldShadow: %s.dds is missing, not R16 or not the size the .tshadow file names\n", imgName );
+		ri.FS_FreeFile( buffer );
+		return;
+	}
+
+	Com_Memcpy( tw->shadowRow, h->row, sizeof( tw->shadowRow ) );
+	tw->shadowTexel = h->texelUnits;
+	tw->shadowRange = h->depthRange;
+	tw->shadowLowW = (int)h->lowWidth;
+	tw->shadowLowH = (int)h->lowHeight;
+	tw->shadowLowScale[0] = h->lowScaleX;
+	tw->shadowLowScale[1] = h->lowScaleY;
+	lowBytes = (size_t)h->lowWidth * h->lowHeight * 2;
+	tw->shadowLow = (uint16_t *)ri.Hunk_Alloc( (int)lowBytes, h_low );
+	Com_Memcpy( tw->shadowLow, h + 1, lowBytes );
+	tw->shadowImage = image;
+
+	ri.Printf( PRINT_ALL, "R_LoadTWorldShadow: %s: %u x %u, %.2f units per texel, CPU copy %u x %u\n",
+		imgName, h->width, h->height, h->texelUnits, h->lowWidth, h->lowHeight );
+	ri.FS_FreeFile( buffer );
+}
+
+/*
+=================
+TW_SunVisibility
+
+CPU lookup in the reduced shadow map: 1 when the point sees the sun, 0 when it is occluded.
+=================
+*/
+static float TW_SunVisibility( const tworld_t *tw, const vec3_t p )
+{
+	float	c[3];
+	int		i, x, y;
+
+	for ( i = 0; i < 3; i++ )
+		c[i] = tw->shadowRow[i][0] * p[0] + tw->shadowRow[i][1] * p[1] + tw->shadowRow[i][2] * p[2] + tw->shadowRow[i][3];
+	x = (int)floorf( c[0] / tw->shadowLowScale[0] );
+	y = (int)floorf( c[1] / tw->shadowLowScale[1] );
+	if ( x < 0 || y < 0 || x >= tw->shadowLowW || y >= tw->shadowLowH )
+		return 1.0f;
+	// the reduced copy keeps the deepest value of each block; allow two of its texels of slope
+	return ( c[2] - 2.0f * tw->shadowTexel * tw->shadowLowScale[0] / tw->shadowRange <= tw->shadowLow[y * tw->shadowLowW + x] / 65535.0f ) ? 1.0f : 0.0f;
 }
 
 #define TW_ERR( msg ) { ri.Printf( PRINT_WARNING, "R_LoadTWorld: %s: " msg "\n", name ); ri.FS_FreeFile( buffer ); return; }
@@ -207,6 +312,9 @@ void R_LoadTWorld( const char *bspName )
 	r_tworldLodSize2 = ri.Cvar_Get( "r_tworldLodSize2", "0.035", CVAR_ARCHIVE_ND, "Cooked world: use detail level 2 below this size (radius / distance)" );
 	r_tworldLight = ri.Cvar_Get( "r_tworldLight", "1", CVAR_ARCHIVE_ND, "Cooked world: brightness scale of the sun and ambient light" );
 
+	r_tworldShadows = ri.Cvar_Get( "r_tworldShadows", "1", CVAR_ARCHIVE_ND, "Cooked world: baked sun shadows, 0 = off, up to 1 = sun fully removed in shadow" );
+	r_tworldShadowOffset = ri.Cvar_Get( "r_tworldShadowOffset", "2.0", CVAR_TEMP, "Cooked world shadows: receiver offset along its normal, in shadow map texels" );
+	r_tworldShadowBias = ri.Cvar_Get( "r_tworldShadowBias", "1.5", CVAR_TEMP, "Cooked world shadows: depth bias, in shadow map texels" );
 	r_tworldInstancing = ri.Cvar_Get( "r_tworldInstancing", "1", CVAR_ARCHIVE_ND, "Cooked world: 1 = one instanced draw per mesh level and material, 0 = one draw per placement through the model path" );
 
 	if ( !vk.vboMdvActive )
@@ -417,6 +525,7 @@ void R_LoadTWorld( const char *bspName )
 		len / ( 1024.0f * 1024.0f ), ri.Milliseconds() - startTime );
 
 	ri.FS_FreeFile( buffer );
+	R_LoadTWorldShadow( tw, bspName );
 	s_tworld = tw;
 }
 
@@ -426,7 +535,8 @@ R_TWorldEntityLight
 
 Entity lighting on a map whose BSP has no light grid: use the cooked world's sun and ambient colour, so
 players and other models are shaded like the geometry around them (same response curve in both shaders).
-There is no occlusion: an entity under a roof is lit like one in the open.
+With a baked sun shadow map the sun part is scaled by how much of the entity sees the sun (five lookups
+around its origin, so the change at a shadow edge is gradual).
 =================
 */
 qboolean R_TWorldEntityLight( trRefEntity_t *ent )
@@ -440,6 +550,19 @@ qboolean R_TWorldEntityLight( trRefEntity_t *ent )
 	VectorScale( s_tworld->ambientColor, scale, ent->ambientLight );
 	VectorScale( s_tworld->sunColor, scale, ent->directedLight );
 	VectorCopy( s_tworld->sunDir, ent->lightDir );
+
+	if ( s_tworld->shadowImage && r_tworldShadows->value > 0.0f ) {
+		static const float ofs[5][3] = { { 0, 0, 24 }, { 20, 0, 8 }, { -20, 0, 8 }, { 0, 20, 40 }, { 0, -20, 40 } };
+		const float strength = ( r_tworldShadows->value > 1.0f ) ? 1.0f : r_tworldShadows->value;
+		float vis = 0.0f;
+		vec3_t p;
+		int i;
+		for ( i = 0; i < 5; i++ ) {
+			VectorAdd( ent->e.origin, ofs[i], p );
+			vis += TW_SunVisibility( s_tworld, p );
+		}
+		VectorScale( ent->directedLight, 1.0f - strength * ( 1.0f - vis * 0.2f ), ent->directedLight );
+	}
 	return qtrue;
 }
 
@@ -575,6 +698,12 @@ static qboolean RB_TWorldInstanced( tworld_t *tw, const int pass )
 		u.localViewOrigin[1] = 1.0f;
 		u.localViewOrigin[2] = 1.0f;
 	}
+	if ( tw->shadowImage && r_tworldShadows->value > 0.0f ) {
+		Com_Memcpy( u.modelMatrix, tw->shadowRow, sizeof( tw->shadowRow ) );
+		u.modelMatrix[12] = r_tworldShadowOffset->value * tw->shadowTexel;
+		u.modelMatrix[13] = r_tworldShadowBias->value * tw->shadowTexel / tw->shadowRange;
+		u.modelMatrix[14] = ( r_tworldShadows->value > 1.0f ) ? 1.0f : r_tworldShadows->value;
+	}
 	uboOffset = data ? vk_append_uniform( &u, sizeof( u ), vk.uniform_entity_item_size ) : ~0U;
 
 	if ( !data || uboOffset == ~0U ) {
@@ -661,6 +790,7 @@ static qboolean RB_TWorldInstanced( tworld_t *tw, const int pass )
 			image_t *detail = ( ds && ds->bundle[0].image[0] ) ? ds->bundle[0].image[0] : tr.whiteImage;
 			vk_update_descriptor( VK_DESC_TEXTURE0 + 1, detail->descriptor_set );
 		}
+		vk_update_descriptor( VK_DESC_TEXTURE0 + 2, ( tw->shadowImage ? tw->shadowImage : tr.whiteImage )->descriptor_set );
 		vk_bind_descriptor_sets();
 
 		if ( sub->shader->polygonOffset )

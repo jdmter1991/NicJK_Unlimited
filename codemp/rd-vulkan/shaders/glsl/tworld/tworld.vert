@@ -2,8 +2,10 @@
 
 // Cooked static world ("tworld"), instanced path. One draw call per (mesh detail level, material) with
 // instanceCount placements. Per-instance data: three rows of the placement matrix, a tint and parameters.
-// Lighting is per vertex: one sun and an ambient colour, taken from the entity uniform block that the
-// pass fills once per view. Same response curve as the model shader's "rgbGen lightingDiffuse".
+// Lighting: one sun and an ambient colour, taken from the entity uniform block that the pass fills once
+// per view. Same response curve as the model shader's "rgbGen lightingDiffuse". The ambient and the sun
+// part go to the fragment shader separately, so that it can remove the sun part where the baked sun
+// shadow map says the point is occluded.
 //
 // Animation (in_params.z): 0 none, 1 water (fragment shader), 2 vegetation swaying in the wind,
 // 3 cloth hanging from its top edge. Driven by the time in u_entity.localViewOrigin.w.
@@ -17,7 +19,8 @@ layout(set = 0, binding = 2) uniform Entity {
 	vec4 directedLight;
 	vec4 localLightOrigin;	// xyz: unit vector towards the sun
 	vec4 localViewOrigin;	// reused: x intensity, y 1/gamma, z overbright scale for textures that were not light-scaled
-	mat4 modelMatrix;
+	mat4 modelMatrix;		// reused for the sun shadow map: [0] [1] world -> texel x, y; [2] world -> depth 0..1;
+							// [3] x: receiver offset along its normal (units), y: depth bias, z: shadow strength (0 = off)
 } u_entity;
 
 layout(location = 0) in vec3 in_position;
@@ -40,6 +43,8 @@ layout(location = 3) flat out float frag_detail;
 layout(location = 4) flat out vec4 frag_texscale;	// x intensity, y 1/gamma, z overbright scale, w 1 = apply
 layout(location = 5) out vec2 frag_world_xy;
 layout(location = 6) flat out vec2 frag_anim;		// x animation type, y time
+layout(location = 7) out vec3 frag_sun;				// sun part of the light times the tint
+layout(location = 8) out vec3 frag_shadow;			// shadow map texel x, y and depth
 
 out gl_PerVertex {
 	vec4 gl_Position;
@@ -70,10 +75,15 @@ void main() {
 	}
 
 	float ndl = dot( n, u_entity.localLightOrigin.xyz );
-	vec3 light = u_entity.directedLight.rgb * ( 1.2 * clamp( ndl, 0.001, 1.0 ) )
-			   + u_entity.ambientLight.rgb * ( 1.7 * max( ndl, 0.5 ) );
+	vec3 sunLight = u_entity.directedLight.rgb * ( 1.2 * clamp( ndl, 0.001, 1.0 ) );
+	vec3 ambLight = u_entity.ambientLight.rgb * ( 1.7 * max( ndl, 0.5 ) );
 
-	frag_color = vec4( light * in_tint.rgb, in_tint.a );
+	frag_color = vec4( ambLight * in_tint.rgb, in_tint.a );
+	frag_sun = sunLight * in_tint.rgb;
+
+	// look the receiver up a little in front of its surface: removes self-shadowing without a large depth bias
+	vec4 sp = vec4( world + n * u_entity.modelMatrix[3].x, 1.0 );
+	frag_shadow = vec3( dot( u_entity.modelMatrix[0], sp ), dot( u_entity.modelMatrix[1], sp ), dot( u_entity.modelMatrix[2], sp ) );
 	frag_tex_coord = in_tex_coord;
 	frag_detail_coord = in_tex_coord * in_params.x;
 	frag_detail = in_params.x;

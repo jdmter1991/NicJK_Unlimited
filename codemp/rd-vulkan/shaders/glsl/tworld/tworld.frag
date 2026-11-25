@@ -4,9 +4,20 @@
 // tiling detail layer (mean grey 0.5, applied as a x2 multiply). Water (animation type 1) uses the second
 // texture as a ripple pattern: two layers scroll over world-space coordinates and modulate the brightness.
 // Alpha test uses the same specialization constants as the generic fragment shader.
+// Sun shadows: a baked depth map seen from the sun (16-bit, one channel). The fragment's depth in sun space
+// is compared against a 4x4 block of texels with bilinear weights (a 3x3 box of bilinear lookups).
 
 layout(set = 1, binding = 0) uniform sampler2D texture0;
 layout(set = 2, binding = 0) uniform sampler2D texture1;	// detail or ripple pattern; a white image when unused
+layout(set = 3, binding = 0) uniform sampler2D texture2;	// sun shadow depth map; a white image when unused
+
+layout(set = 0, binding = 2) uniform Entity {
+	vec4 ambientLight;
+	vec4 directedLight;
+	vec4 localLightOrigin;
+	vec4 localViewOrigin;
+	mat4 modelMatrix;		// [3] x: receiver offset, y: depth bias, z: shadow strength (0 = off)
+} u_entity;
 
 layout(location = 0) in vec2 frag_tex_coord;
 layout(location = 1) in vec4 frag_color;
@@ -15,6 +26,32 @@ layout(location = 3) flat in float frag_detail;
 layout(location = 4) flat in vec4 frag_texscale;
 layout(location = 5) in vec2 frag_world_xy;
 layout(location = 6) flat in vec2 frag_anim;		// x animation type, y time
+layout(location = 7) in vec3 frag_sun;
+layout(location = 8) in vec3 frag_shadow;
+
+// share of the sun that reaches the fragment: 1 = fully lit
+float sun_visibility() {
+	float strength = u_entity.modelMatrix[3].z;
+	if ( strength <= 0.0 )
+		return 1.0;
+	ivec2 size = textureSize( texture2, 0 );
+	vec2 uv = frag_shadow.xy - 0.5;
+	if ( uv.x < 1.0 || uv.y < 1.0 || uv.x > float( size.x ) - 3.0 || uv.y > float( size.y ) - 3.0 )
+		return 1.0;										// outside the baked region
+	ivec2 base = ivec2( floor( uv ) );
+	vec2 f = fract( uv );
+	float ref = frag_shadow.z - u_entity.modelMatrix[3].y;
+	vec4 wx = vec4( 1.0 - f.x, 1.0, 1.0, f.x );
+	vec4 wy = vec4( 1.0 - f.y, 1.0, 1.0, f.y );
+	float lit = 0.0;
+	for ( int j = 0; j < 4; j++ ) {
+		for ( int i = 0; i < 4; i++ ) {
+			float d = texelFetch( texture2, base + ivec2( i - 1, j - 1 ), 0 ).r;
+			lit += ( ref <= d ) ? wx[i] * wy[j] : 0.0;
+		}
+	}
+	return 1.0 - strength * ( 1.0 - lit / 9.0 );
+}
 
 layout(location = 0) out vec4 out_color;
 
@@ -42,7 +79,7 @@ void main() {
 		base.rgb *= texture( texture1, frag_detail_coord ).rgb * 2.0;
 	}
 
-	vec4 color = base * frag_color;
+	vec4 color = vec4( base.rgb * ( frag_color.rgb + frag_sun * sun_visibility() ), base.a * frag_color.a );
 
 	if ( frag_anim.x > 0.5 && frag_anim.x < 1.5 ) {
 		float t = frag_anim.y;

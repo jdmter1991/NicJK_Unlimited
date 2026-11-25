@@ -1011,6 +1011,12 @@ static int vk_bc_block_bytes( int format )
 	}
 }
 
+// bytes per texel for uncompressed formats that are uploaded exactly as stored (no conversion), 0 otherwise
+static int vk_raw_texel_bytes( int format )
+{
+	return ( format == VK_FORMAT_R16_UNORM ) ? 2 : 0;
+}
+
 void vk_upload_image_data( image_t *image, int x, int y, int width, 
 	int height, int mipmaps, byte *pixels, int size, qboolean update )
 {
@@ -1018,6 +1024,7 @@ void vk_upload_image_data( image_t *image, int x, int y, int width,
 	VkBufferImageCopy regions[16];
 	VkBufferImageCopy region;
 	const int blockBytes = vk_bc_block_bytes( image->internalFormat );
+	const int rawBytes = vk_raw_texel_bytes( image->internalFormat );
 
 	byte *buf;
 	int n, mip_level_size;
@@ -1029,6 +1036,10 @@ void vk_upload_image_data( image_t *image, int x, int y, int width,
 	if ( blockBytes ) {
 		compressed = qtrue;
 		buf = pixels;
+	}
+	else if ( rawBytes ) {
+		buf = pixels;
+		n = rawBytes;
 	}
 	else {
 		buf = vk_resample_image_data( image->internalFormat, pixels, size, &n /*bpp*/ );
@@ -1474,7 +1485,7 @@ static image_t *R_LoadDDSImage( const char *name, imgFlags_t flags, int hash )
 	long		len;
 	uint32_t	hdr[37];
 	uint32_t	width, height, mips, fourcc, dataOfs, need, w, h, i;
-	int			format = 0, blockBytes;
+	int			format = 0, blockBytes, rawBytes;
 	VkFormatProperties props;
 	image_t		*image;
 	int			namelen;
@@ -1507,12 +1518,16 @@ static image_t *R_LoadDDSImage( const char *name, imgFlags_t flags, int hash )
 		if ( dxgi == 70 || dxgi == 71 || dxgi == 72 )		format = VK_FORMAT_BC1_RGBA_UNORM_BLOCK;
 		else if ( dxgi == 76 || dxgi == 77 || dxgi == 78 )	format = VK_FORMAT_BC3_UNORM_BLOCK;
 		else if ( dxgi == 97 || dxgi == 98 || dxgi == 99 )	format = VK_FORMAT_BC7_UNORM_BLOCK;
+		else if ( dxgi == 56 )								format = VK_FORMAT_R16_UNORM;	// data maps (cooked-world sun shadows)
 	}
 	else if ( fourcc == 0x31545844 /* DXT1 */ )	format = VK_FORMAT_BC1_RGBA_UNORM_BLOCK;
 	else if ( fourcc == 0x35545844 /* DXT5 */ )	format = VK_FORMAT_BC3_UNORM_BLOCK;
 
 	blockBytes = vk_bc_block_bytes( format );
-	if ( !blockBytes || width < 1 || height < 1 || width > 16384 || height > 16384 ) {
+	rawBytes = vk_raw_texel_bytes( format );
+	if ( rawBytes )
+		mips = 1;
+	if ( ( !blockBytes && !rawBytes ) || width < 1 || height < 1 || width > 16384 || height > 16384 ) {
 		ri.Printf( PRINT_WARNING, "R_LoadDDSImage: %s: unsupported format or size\n", ddsName );
 		ri.FS_FreeFile( buf );
 		return NULL;
@@ -1530,7 +1545,7 @@ static image_t *R_LoadDDSImage( const char *name, imgFlags_t flags, int hash )
 		mips = 16;
 
 	for ( i = 0, need = 0, w = width, h = height; i < mips; i++ ) {
-		need += ( ( w + 3 ) / 4 ) * ( ( h + 3 ) / 4 ) * blockBytes;
+		need += rawBytes ? w * h * rawBytes : ( ( w + 3 ) / 4 ) * ( ( h + 3 ) / 4 ) * blockBytes;
 		if ( w == 1 && h == 1 ) {
 			mips = i + 1;
 			break;
