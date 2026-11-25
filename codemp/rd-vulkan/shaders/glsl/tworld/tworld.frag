@@ -31,7 +31,8 @@ layout(set = 0, binding = 0) uniform TWorld {
 	vec4 eye;				// xyz: camera position (world units), w: metres per world unit
 	vec4 skyZenith;			// rgb: sky colour straight up, a: water ripple slope scale
 	vec4 skyHorizon;		// rgb: sky colour just above the horizon
-	vec4 spare;				// x: 1 = physically based path, y: foliage light (vertex shader)
+	vec4 spare;				// x: 1 = physically based path, y: foliage light (vertex shader),
+							// z: haze, share of the view lost per world unit (0 = off)
 } u_tw;
 
 layout(set = 0, binding = 2) uniform Entity {
@@ -217,6 +218,15 @@ void main() {
 		}
 		a = clamp( a * frag_fade * 0.75, 0.0, 1.0 );
 		color = vec4( lit + vec3( 0.25, 0.28, 0.30 ) * a, a );
+	}
+
+	// distance haze towards the sky's horizon colour, as the source's height fog greys the far city and hills
+	if ( u_tw.spare.z > 0.0 ) {
+		float clear = exp( -distance( u_tw.eye.xyz, frag_world ) * u_tw.spare.z );
+		if ( frag_anim.x > 4.5 )
+			color.rgb *= clear;							// additive glow: fades out
+		else
+			color.rgb = mix( u_tw.skyHorizon.rgb, color.rgb, clear );
 	}
 
 	// debugging aid (r_tworldShadows 2 / 3): the stored map depth / the receiver depth as repeating grey bands
