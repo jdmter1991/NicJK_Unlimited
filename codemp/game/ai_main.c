@@ -199,6 +199,10 @@ vmCvar_t bot_abTest;
 #define BOTF_SWINGTRACK	16384
 // 32768: the distances, timings and chances listed in btDefs are tuned by play (see below)
 #define BOTF_TUNE		32768
+// 65536: all-round awareness: enemies close by are noticed in every direction (a player hears a
+//        saber and footsteps and sees round himself in third person), and the bot turns on whoever
+//        is the bigger threat instead of staying fixed on the enemy it picked first
+#define BOTF_AWARE		65536
 
 /*
 ==============
@@ -217,7 +221,7 @@ enum {
 	BT_EVADE_HORIZON, BT_EVADE_DIST, BT_EVADE_HOLD, BT_HEAVY_DIST, BT_HEAVY_HEALTH, BT_RETREAT_HEALTH,
 	BT_TRACK_NEAR, BT_TRACK_FAR, BT_TRACK_HORIZON,
 	BT_LIGHTNING_NEAR, BT_DRAIN_HEALTH, BT_PUSH_DIST, BT_PUSH_CHANCE, BT_PULL_CHANCE, BT_THROW_NEAR, BT_THROW_CHANCE,
-	BT_FORCE_PAUSE, BT_KATA_CHANCE,
+	BT_FORCE_PAUSE, BT_KATA_CHANCE, BT_AWARE_DIST,
 	BT_COUNT
 };
 typedef struct btDef_s { const char *name; float def, min, max, step; } btDef_t;
@@ -240,6 +244,7 @@ static const btDef_t btDefs[BT_COUNT] = {
 	{ "throwChance",	 20,   0, 100,  6 },
 	{ "forcePause",		100,  40, 300, 15 },	// pauses between force uses, percent of the hand-set ones
 	{ "kataChance",		 35,   0, 100,  8 },
+	{ "awareDist",		600, 250, 1000, 60 },	// enemies inside this distance are noticed in any direction
 };
 static float btMean[BT_COUNT];
 static float btVal[MAX_CLIENTS][BT_COUNT], btEps[MAX_CLIENTS][BT_COUNT];
@@ -404,6 +409,8 @@ static int botEvalStuckInSolid, botEvalLedgeHops;
 static int botEvalPredThreats, botEvalPredEvades, botEvalLearnSamples, botEvalLearnOverrides, botEvalLearnExplore;
 static int Bot_LearnTotal(void);
 static int botEvalPredChase, botEvalPredOnTarget;
+static int botEvalAwareFound, botEvalAwareSwitch, botEvalAwareHurtSwitch;
+static void Bot_Awareness(bot_state_t* bs);
 // every jump request is counted by the source line that asked for it
 // jumpTime values that only mean "no new jump before this time": the jump itself was already
 // pressed by the code that set them, so the jump key must not be tapped again until they run out
@@ -537,6 +544,8 @@ static void BotEval_Report(void) {
 		botEvalPredThreats, botEvalPredEvades, botEvalLearnSamples, botEvalLearnOverrides, botEvalLearnExplore, Bot_LearnTotal());
 	Bot_TuneReport();
 	BotJump_Report();
+	trap->Print("BOTEVAL awareness: enemies noticed outside the view %d, switched to a bigger threat %d of which to someone hitting the bot %d\n",
+		botEvalAwareFound, botEvalAwareSwitch, botEvalAwareHurtSwitch);
 	trap->Print("BOTEVAL machine attack: swing frames predicted to land %d, predicted to fall short and closed in %d\n", botEvalPredOnTarget, botEvalPredChase);
 	trap->Print("BOTEVAL force: started lightning %d drain %d pull %d push %d saber throw %d; stopped as out of range or pointless: lightning %d drain %d grip %d push %d pull %d throw %d\n",
 		botEvalForceUse[0], botEvalForceUse[1], botEvalForceUse[2], botEvalForceUse[3], botEvalForceUse[4],
@@ -2263,6 +2272,7 @@ int BotAI(int client, float thinktime) {
 		Bot_LearnResolve(bs);
 	}
 	Bot_TuneThink(bs->client, bs->features);
+	Bot_Awareness(bs);
 	Bot_ForceTactics(bs);
 #ifdef _DEBUG
 	end = trap->Milliseconds();
@@ -3987,6 +3997,118 @@ int ScanForEnemies(bot_state_t* bs)
 	}
 
 	return -1;
+}
+
+/*
+==============
+Bot_Awareness  (bot_features 65536)
+
+Ten times a second every enemy within awareDist is weighed, whatever direction he is in: how close
+he is, whether he is swinging at this bot from within reach, and whether he is the one who just
+hurt it. Walls still hide people: the enemy has to be in line of sight from the bot's position.
+- A bot with no enemy takes the most threatening one (so somebody running up behind is noticed).
+- A bot with an enemy turns on another one only when that one is clearly the bigger threat, and
+  then stays with the choice for a moment so it does not flip between two.
+==============
+*/
+static float Bot_AwareThreat(bot_state_t* bs, gentity_t* e, float d, int hurtBy, int hurtTime) {
+	float t = d;
+	if (d < 200 && e->client->ps.weapon == WP_SABER && BG_SaberInAttack(e->client->ps.saberMove)) {
+		vec3_t fw, to;
+		AngleVectors(e->client->ps.viewangles, fw, NULL, NULL);
+		VectorSubtract(bs->origin, e->client->ps.origin, to);
+		to[2] = 0; fw[2] = 0;
+		VectorNormalize(to);
+		VectorNormalize(fw);
+		if (DotProduct(fw, to) > 0.5f) {
+			t -= 160;	// swinging at this bot
+		}
+	}
+	if (e->s.number == hurtBy && level.time - hurtTime < 1500) {
+		t -= 160;		// just hit this bot
+	}
+	return t;
+}
+
+static void Bot_Awareness(bot_state_t* bs) {
+	static int nextCheck[MAX_CLIENTS], holdUntil[MAX_CLIENTS], lastHealth[MAX_CLIENTS], hurtTime[MAX_CLIENTS], hurtBy[MAX_CLIENTS];
+	const int c = bs->client;
+	gentity_t *me = &g_entities[c];
+	gentity_t *cur = bs->currentEnemy;
+	float curThreat = 99999.0f, bestThreat = 99999.0f, range;
+	int i, best = -1;
+	qboolean bestHurt = qfalse;
+	vec3_t eye;
+
+	if (!(bs->features & BOTF_AWARE) || !me->client || me->health <= 0 || me->client->sess.sessionTeam == TEAM_SPECTATOR
+		|| me->client->ps.duelInProgress) {
+		lastHealth[c] = me->health;
+		return;
+	}
+	if (me->health < lastHealth[c] && me->client->lasthurt_client >= 0 && me->client->lasthurt_client < MAX_CLIENTS
+		&& me->client->lasthurt_client != c) {
+		hurtTime[c] = level.time;
+		hurtBy[c] = me->client->lasthurt_client;
+	}
+	lastHealth[c] = me->health;
+	if (nextCheck[c] > level.time + 1000) nextCheck[c] = 0;		// map restart
+	if (holdUntil[c] > level.time + 5000) holdUntil[c] = 0;
+	if (hurtTime[c] > level.time) hurtTime[c] = 0;
+	if (level.time < nextCheck[c]) {
+		return;
+	}
+	nextCheck[c] = level.time + 100;
+	if (bs->seqType || (bs->intentFlags & BOTINTENT_KATA) || BG_SaberInSpecial(me->client->ps.saberMove)) {
+		return;	// committed to a move at the current enemy
+	}
+	range = (float)BT(bs, BT_AWARE_DIST);
+	if (cur && cur->client && cur->health > 0 && cur->inuse) {
+		if (bs->frame_Enemy_Vis) {
+			curThreat = Bot_AwareThreat(bs, cur, Distance(cur->client->ps.origin, bs->origin), hurtBy[c], hurtTime[c]);
+		} else {
+			curThreat = range;	// not in sight: anyone visible and near counts for more
+		}
+		if (level.time < holdUntil[c]) {
+			return;
+		}
+	} else {
+		cur = NULL;
+	}
+	for (i = 0; i < MAX_CLIENTS; i++) {
+		gentity_t *e = &g_entities[i];
+		float d, t;
+		if (i == c || e == cur || !e->inuse || !e->client || OnSameTeam(me, e)
+			|| !PassStandardEnemyChecks(bs, e) || !PassLovedOneCheck(bs, e)) {
+			continue;
+		}
+		d = Distance(e->client->ps.origin, bs->origin);
+		if (d > range) {
+			continue;
+		}
+		t = Bot_AwareThreat(bs, e, d, hurtBy[c], hurtTime[c]);
+		if (t < bestThreat) {
+			bestThreat = t;
+			best = i;
+			bestHurt = (i == hurtBy[c] && level.time - hurtTime[c] < 1500) ? qtrue : qfalse;
+		}
+	}
+	if (best < 0 || bestThreat > curThreat - (cur ? 70.0f : 0.0f)) {
+		return;
+	}
+	VectorCopy(bs->origin, eye);
+	eye[2] += 32;
+	if (!BotPVSCheck(g_entities[best].client->ps.origin, eye) || !OrgVisible(eye, g_entities[best].client->ps.origin, c)) {
+		return;
+	}
+	if (cur) {
+		botEvalAwareSwitch++;
+		if (bestHurt) botEvalAwareHurtSwitch++;
+	} else {
+		botEvalAwareFound++;
+	}
+	bs->currentEnemy = &g_entities[best];
+	bs->enemySeenTime = level.time + ENEMY_FORGET_MS;
+	holdUntil[c] = level.time + 900;
 }
 
 int WaitingForNow(bot_state_t* bs, vec3_t goalpos)
@@ -17633,7 +17755,7 @@ int BotAISetup(int restart) {
 	trap->Cvar_Register(&bot_profile, "bot_profile", "0", 0);
 	trap->Cvar_Register(&bot_fixes, "bot_fixes", "1", CVAR_ARCHIVE);
 	trap->Cvar_Register(&bot_abBase, "bot_abBase", "0", 0);	// features of the baseline group in an A/B test
-	trap->Cvar_Register(&bot_features, "bot_features", "59887", CVAR_ARCHIVE);	// 495 + 2048 blade prediction + 8192 force rules + 16384 swing tracking + 32768 tuning by play; 16, 512, 1024 lost their A/B tests, 4096 (swing table) showed no gain
+	trap->Cvar_Register(&bot_features, "bot_features", "125423", CVAR_ARCHIVE);	// 495 + 2048 blade prediction + 8192 force rules + 16384 swing tracking + 32768 tuning by play + 65536 all-round awareness; 16, 512, 1024 lost their A/B tests, 4096 (swing table) showed no gain
 	trap->Cvar_Register(&bot_abTest, "bot_abTest", "0", 0);
 	trap->Cvar_Register(&bot_attachments, "bot_attachments", "1", 0);
 	trap->Cvar_Register(&bot_camp, "bot_camp", "1", 0);
