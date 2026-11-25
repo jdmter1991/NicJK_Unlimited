@@ -53,6 +53,21 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "chars.h"
 #include "inv.h"
 
+// Declarations for functions this file uses that no header declares. MSVC accepts a call to an
+// undeclared function; GCC and Clang then reject the real declaration further down as a conflict.
+qboolean BG_InKnockDown(int anim);
+void trap_EA_Attack(int client);
+void trap_EA_ForcePower(int client);
+void trap_EA_MoveBack(int client);
+void trap_EA_Jump(int client);
+void Bot_UpdateEnemySwingMemory(bot_state_t* bs);
+#ifndef min
+#define min(a, b) (((a) < (b)) ? (a) : (b))
+#endif
+#ifndef max
+#define max(a, b) (((a) > (b)) ? (a) : (b))
+#endif
+
 /*
 #define BOT_CTF_DEBUG	1
 */
