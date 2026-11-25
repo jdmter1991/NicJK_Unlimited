@@ -32,10 +32,13 @@ layout(location = 3) in vec4 in_row0;		// per instance
 layout(location = 4) in vec4 in_row1;
 layout(location = 5) in vec4 in_row2;
 layout(location = 6) in vec4 in_tint;		// rgb tint, a opacity
-layout(location = 7) in vec4 in_params;		// x: detail texture repeats per unit of UV (0 = no detail layer)
+layout(location = 7) in vec4 in_params;		// x: > 0 detail texture repeats per unit of UV; < 0: the second texture is a
+											//    normal map with -x repeats per unit of UV (physically based path); 0: neither
 											// y: 1 = the base texture is pre-compressed and still needs the light scale
 											// z: animation type
-											// w: reference height in mesh space (base for vegetation, top for cloth)
+											// w: reference height in mesh space (base for vegetation, top for cloth);
+											//    foam: 1 = second noise texture; otherwise packed material values for the
+											//    physically based path: roughness * 255 + 256 * metallic * 255 + 65536 * flags
 
 layout(location = 0) out vec2 frag_tex_coord;
 layout(location = 1) out vec4 frag_color;
@@ -48,6 +51,8 @@ layout(location = 7) out vec3 frag_sun;				// sun part of the light times the ti
 layout(location = 8) out vec3 frag_shadow;			// shadow map texel x, y and depth
 layout(location = 9) out float frag_fade;			// foam: the mesh's fade factor
 layout(location = 10) flat out float frag_ref;		// in_params.w
+layout(location = 11) out vec3 frag_normal;			// world-space normal
+layout(location = 12) flat out vec3 frag_tint;
 
 out gl_PerVertex {
 	vec4 gl_Position;
@@ -94,6 +99,8 @@ void main() {
 	frag_world = world;
 	frag_fade = clamp( ( length( in_normal ) - 0.25 ) / 0.75, 0.0, 1.0 );
 	frag_ref = in_params.w;
+	frag_normal = n;
+	frag_tint = in_tint.rgb;
 	frag_anim = vec2( in_params.z, time );
 	gl_Position = mvp * vec4( world, 1.0 );
 }

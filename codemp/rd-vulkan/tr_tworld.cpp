@@ -149,6 +149,12 @@ typedef struct tworld_s {
 	vec3_t			skyZenith, skyHorizon;	// display-space sky colours for water reflections
 	float			metresPerUnit;
 
+	// physically based path: optional per-material maps and values (maps/<name>.tpbr)
+	image_t			**pbrImages;		// normal map per material, or NULL
+	float			*pbrScales;			// normal map repeats per unit of UV
+	float			*pbrPacks;			// roughness * 255 + 256 * metallic * 255 + 65536 * flags
+	int				numPbrMaps;
+
 	// baked sun shadow map (maps/<name>_shadow.dds + maps/<name>.tshadow), NULL when the map has none
 	image_t			*shadowImage;
 	float			shadowRow[3][4];	// world -> texel x, texel y, depth 0..1
@@ -175,6 +181,7 @@ static cvar_t	*r_tworldShadows;
 static cvar_t	*r_tworldShadowOffset;
 static cvar_t	*r_tworldShadowBias;
 static cvar_t	*r_tworldWaterBump;
+static cvar_t	*r_tworldPBR;
 
 static const tworldSub_t *s_sortSubs;
 static int TW_CompareSubs( const void *a, const void *b )
@@ -278,6 +285,70 @@ static float TW_SunVisibility( const tworld_t *tw, const vec3_t p )
 	return ( c[2] - 2.0f * tw->shadowTexel * tw->shadowLowScale[0] / tw->shadowRange <= tw->shadowLow[y * tw->shadowLowW + x] / 65535.0f ) ? 1.0f : 0.0f;
 }
 
+#pragma pack(push, 1)
+typedef struct {
+	char		image[64];		// normal map, empty = none
+	float		scale;			// its repeats per unit of UV
+	float		roughness, metallic;
+	uint32_t	flags;			// 1: roughness = 1 - base alpha, 2: metallic = normal map alpha, 4: metallic = normal map blue
+} twPbrMaterial_t;				// 80 bytes
+#pragma pack(pop)
+
+/*
+=================
+R_LoadTWorldPBR
+
+Optional maps/<name>.tpbr: "TPBR", version 1, material count, then one twPbrMaterial_t per material of the
+world file. Without it the physically based path still works, with default roughness and no normal maps.
+=================
+*/
+static void R_LoadTWorldPBR( tworld_t *tw, const char *bspName )
+{
+	char	name[MAX_QPATH];
+	byte	*buffer = NULL;
+	long	len;
+	int		i, n;
+	const twPbrMaterial_t *pm;
+
+	tw->pbrImages = (image_t **)ri.Hunk_Alloc( sizeof( image_t * ) * ( tw->numTints + 1 ), h_low );
+	tw->pbrScales = (float *)ri.Hunk_Alloc( sizeof( float ) * ( tw->numTints + 1 ), h_low );
+	tw->pbrPacks = (float *)ri.Hunk_Alloc( sizeof( float ) * ( tw->numTints + 1 ), h_low );
+
+	COM_StripExtension( bspName, name, sizeof( name ) );
+	Q_strcat( name, sizeof( name ), ".tpbr" );
+	len = ri.FS_ReadFile( name, (void **)&buffer );
+	if ( len <= 0 || !buffer )
+		return;
+	if ( len < 12 || memcmp( buffer, "TPBR", 4 ) || ( (const uint32_t *)buffer )[1] != 1
+		|| ( (const uint32_t *)buffer )[2] != (uint32_t)tw->numTints
+		|| (size_t)len != 12 + (size_t)tw->numTints * sizeof( twPbrMaterial_t ) ) {
+		ri.Printf( PRINT_WARNING, "R_LoadTWorldPBR: %s does not match the world file\n", name );
+		ri.FS_FreeFile( buffer );
+		return;
+	}
+	pm = (const twPbrMaterial_t *)( buffer + 12 );
+	n = 0;
+	for ( i = 0; i < tw->numTints; i++ ) {
+		char img[MAX_QPATH];
+		const int r = (int)( Com_Clamp( 0.0f, 1.0f, pm[i].roughness ) * 255.0f + 0.5f );
+		const int m = (int)( Com_Clamp( 0.0f, 1.0f, pm[i].metallic ) * 255.0f + 0.5f );
+		tw->pbrPacks[i] = (float)( ( r < 1 ? 1 : r ) + 256 * m + 65536 * (int)( pm[i].flags & 7 ) );
+		tw->pbrScales[i] = ( pm[i].scale > 0.0f ) ? pm[i].scale : 1.0f;
+		Q_strncpyz( img, pm[i].image, sizeof( img ) );
+		if ( img[0] ) {
+			image_t *im = R_FindImageFile( img, (imgFlags_t)( IMGFLAG_MIPMAP | IMGFLAG_NO_COMPRESSION | IMGFLAG_NOLIGHTSCALE ) );
+			// only data that reached the GPU unmodified is usable as a normal map: a pre-compressed .dds
+			if ( im && ( im->flags & IMGFLAG_NOSCALE ) ) {
+				tw->pbrImages[i] = im;
+				n++;
+			}
+		}
+	}
+	tw->numPbrMaps = n;
+	ri.Printf( PRINT_ALL, "R_LoadTWorldPBR: %s: %i materials, %i with a normal map\n", name, tw->numTints, n );
+	ri.FS_FreeFile( buffer );
+}
+
 #define TW_ERR( msg ) { ri.Printf( PRINT_WARNING, "R_LoadTWorld: %s: " msg "\n", name ); ri.FS_FreeFile( buffer ); return; }
 
 /*
@@ -319,6 +390,7 @@ void R_LoadTWorld( const char *bspName )
 	r_tworldShadowOffset = ri.Cvar_Get( "r_tworldShadowOffset", "2.0", CVAR_TEMP, "Cooked world shadows: receiver offset along its normal, in shadow map texels" );
 	r_tworldShadowBias = ri.Cvar_Get( "r_tworldShadowBias", "1.5", CVAR_TEMP, "Cooked world shadows: depth bias, in shadow map texels" );
 	r_tworldWaterBump = ri.Cvar_Get( "r_tworldWaterBump", "0.015", CVAR_ARCHIVE_ND, "Cooked world water: slope of the ripples (0 = mirror)" );
+	r_tworldPBR = ri.Cvar_Get( "r_tworldPBR", "1", CVAR_ARCHIVE_ND, "Cooked world: 1 = physically based shading (normal maps, roughness, metallic), 0 = classic shading" );
 	r_tworldInstancing = ri.Cvar_Get( "r_tworldInstancing", "1", CVAR_ARCHIVE_ND, "Cooked world: 1 = one instanced draw per mesh level and material, 0 = one draw per placement through the model path" );
 
 	if ( !vk.vboMdvActive )
@@ -540,6 +612,7 @@ void R_LoadTWorld( const char *bspName )
 
 	ri.FS_FreeFile( buffer );
 	R_LoadTWorldShadow( tw, bspName );
+	R_LoadTWorldPBR( tw, bspName );
 	s_tworld = tw;
 }
 
@@ -630,6 +703,7 @@ static qboolean RB_TWorldInstanced( tworld_t *tw, const int pass )
 	const int		mirror = ( backEnd.viewParms.portalView == PV_MIRROR ) ? 1 : 0;
 	int				i, j, p, numVis = 0, total = 0, run = 0, draws = 0, indexes = 0;
 	uint32_t		bufOffset, uboOffset, mainOffset = ~0U;
+	const qboolean	usePbr = (qboolean)( r_tworldPBR->integer != 0 );
 	twInstData_t	*data;
 	vkUniformEntity_t u = {};
 
@@ -726,6 +800,7 @@ static qboolean RB_TWorldInstanced( tworld_t *tw, const int pass )
 		VectorCopy( viewOrg, f );					f[3] = tw->metresPerUnit;
 		VectorCopy( tw->skyZenith, f + 4 );			f[7] = r_tworldWaterBump->value;
 		VectorCopy( tw->skyHorizon, f + 8 );
+		f[12] = usePbr ? 1.0f : 0.0f;
 		mainOffset = ( uboOffset != ~0U ) ? vk_append_uniform( &m, sizeof( m ), vk.uniform_item_size ) : ~0U;
 	}
 
@@ -765,7 +840,13 @@ static qboolean RB_TWorldInstanced( tworld_t *tw, const int pass )
 			out->params[0] = tw->details[sub->tintIndex];
 			out->params[1] = sub->texNoScale;
 			out->params[2] = (float)tw->anims[sub->tintIndex];
-			if ( tw->anims[sub->tintIndex] == 4 )
+			if ( tw->anims[sub->tintIndex] == 0 ) {
+				// physically based path: packed material values; a normal map takes the second texture slot
+				out->params[3] = tw->pbrPacks[sub->tintIndex];
+				if ( usePbr && out->params[0] <= 0.0f && tw->pbrImages[sub->tintIndex] )
+					out->params[0] = -tw->pbrScales[sub->tintIndex];
+			}
+			else if ( tw->anims[sub->tintIndex] == 4 )
 				out->params[3] = sub->shader->stages[1] ? 1.0f : 0.0f;		// foam: a second noise texture is present
 			else
 				out->params[3] = ( tw->anims[sub->tintIndex] == 3 ) ? mesh->zmax : mesh->zmin;
@@ -815,6 +896,8 @@ static qboolean RB_TWorldInstanced( tworld_t *tw, const int pass )
 		{
 			const shaderStage_t *ds = ( tw->details[sub->tintIndex] > 0.0f || tw->anims[sub->tintIndex] == 1 || tw->anims[sub->tintIndex] == 4 ) ? sub->shader->stages[1] : NULL;
 			image_t *detail = ( ds && ds->bundle[0].image[0] ) ? ds->bundle[0].image[0] : tr.whiteImage;
+			if ( !ds && usePbr && tw->anims[sub->tintIndex] == 0 && tw->pbrImages[sub->tintIndex] )
+				detail = tw->pbrImages[sub->tintIndex];
 			vk_update_descriptor( VK_DESC_TEXTURE0 + 1, detail->descriptor_set );
 		}
 		vk_update_descriptor( VK_DESC_TEXTURE0 + 2, ( tw->shadowImage ? tw->shadowImage : tr.whiteImage )->descriptor_set );

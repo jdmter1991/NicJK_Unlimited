@@ -6,6 +6,12 @@
 // holds a tiling noise (R height, G/B its gradient); two layers of it (0.35 and 1.3 per metre, drifting at
 // (0.4, 0.15) and (-0.25, 0.3) m/s) tilt the normal slightly. The surface shows its own dark colour looking down
 // and the sky colour towards the horizon (Fresnel), plus a tight sun glint.
+// Physically based path (u_tw.spare.x = 1, materials without animation): metallic / roughness shading with the
+// sun, a sky / ground ambient and a sky reflection, computed in linear light and returned to display space. The
+// light levels are chosen so that a rough, non-metallic surface comes out as bright as on the classic path.
+// The normal map (second texture, when in_params.x < 0) is applied through a tangent frame built from screen-space
+// derivatives, so meshes need no tangents. Roughness can come from the base texture's alpha (smoothness), metallic
+// from the normal map's alpha or blue channel; otherwise per-material constants.
 // Falling water / foam (animation type 4): white, alpha = (n1.r + n2.r) * n3.b [* m.g] * fade * 0.75 with three
 // scrolling samples of the first texture and optionally one of the second, as in the source material.
 // Alpha test uses the same specialization constants as the generic fragment shader.
@@ -20,7 +26,7 @@ layout(set = 0, binding = 0) uniform TWorld {
 	vec4 eye;				// xyz: camera position (world units), w: metres per world unit
 	vec4 skyZenith;			// rgb: sky colour straight up, a: water ripple slope scale
 	vec4 skyHorizon;		// rgb: sky colour just above the horizon
-	vec4 spare;
+	vec4 spare;				// x: 1 = physically based path
 } u_tw;
 
 layout(set = 0, binding = 2) uniform Entity {
@@ -42,6 +48,8 @@ layout(location = 7) in vec3 frag_sun;
 layout(location = 8) in vec3 frag_shadow;
 layout(location = 9) in float frag_fade;
 layout(location = 10) flat in float frag_ref;
+layout(location = 11) in vec3 frag_normal;
+layout(location = 12) flat in vec3 frag_tint;
 
 // share of the sun that reaches the fragment: 1 = fully lit
 float sun_visibility() {
@@ -93,9 +101,78 @@ void main() {
 		base.rgb *= texture( texture1, frag_detail_coord ).rgb * 2.0;
 	}
 
+	bool pbr = u_tw.spare.x > 0.5 && frag_anim.x < 0.5;
+
 	float vis = sun_visibility();
 	vec3 lit = frag_color.rgb + frag_sun * vis;
 	vec4 color = vec4( base.rgb * lit, base.a * frag_color.a );
+
+	if ( pbr ) {
+		float rough = 0.7, metal = 0.0;
+		int flags = 0;
+		if ( frag_ref > 0.5 ) {
+			float fl = floor( frag_ref / 65536.0 );
+			float rest = frag_ref - fl * 65536.0;
+			float mc = floor( rest / 256.0 );
+			rough = ( rest - mc * 256.0 ) / 255.0;
+			metal = mc / 255.0;
+			flags = int( fl + 0.5 );
+		}
+		vec3 Ng = normalize( frag_normal );
+		vec3 V = normalize( u_tw.eye.xyz - frag_world );
+		if ( dot( Ng, V ) < 0.0 )
+			Ng = -Ng;								// two-sided materials
+		vec3 N = Ng;
+		if ( frag_detail < 0.0 ) {
+			vec2 nuv = frag_tex_coord * ( -frag_detail );
+			vec4 nt = texture( texture1, nuv );
+			vec2 xy = nt.rg * 2.0 - 1.0;
+			float z = sqrt( max( 1.0 - dot( xy, xy ), 0.0 ) );
+			vec3 dp1 = dFdx( frag_world ), dp2 = dFdy( frag_world );
+			vec2 d1 = dFdx( nuv ), d2 = dFdy( nuv );
+			vec3 dp2p = cross( dp2, Ng ), dp1p = cross( Ng, dp1 );
+			vec3 T = dp2p * d1.x + dp1p * d2.x;
+			vec3 B = dp2p * d1.y + dp1p * d2.y;
+			float im = inversesqrt( max( max( dot( T, T ), dot( B, B ) ), 1e-20 ) );
+			N = normalize( T * ( xy.x * im ) + B * ( xy.y * im ) + Ng * z );
+			if ( ( flags & 2 ) != 0 )		metal = nt.a;
+			else if ( ( flags & 4 ) != 0 )	metal = nt.b;
+		}
+		if ( ( flags & 1 ) != 0 )
+			rough = clamp( 1.0 - base.a, 0.06, 1.0 );		// the base texture's alpha is smoothness
+		rough = clamp( rough, 0.06, 1.0 );
+
+		vec3 L = u_entity.localLightOrigin.xyz;
+		float ndl = max( dot( N, L ), 0.0 );
+		float ndv = max( dot( N, V ), 0.001 );
+		vec3 H = normalize( L + V );
+		float ndh = max( dot( N, H ), 0.0 ), vdh = max( dot( V, H ), 0.0 );
+
+		vec3 albedo = pow( min( base.rgb * frag_tint, vec3( 1.0 ) ), vec3( 2.2 ) );
+		vec3 ambL = u_entity.ambientLight.rgb * 1.7, sunL = u_entity.directedLight.rgb * 1.2;
+		vec3 Eamb = pow( ambL * ( 0.72 + 0.28 * N.z ), vec3( 2.2 ) );
+		vec3 Esun = ( pow( ambL + sunL, vec3( 2.2 ) ) - pow( ambL, vec3( 2.2 ) ) ) * ( ndl * vis );
+
+		vec3 F0 = mix( vec3( 0.04 ), albedo, metal );
+		float a2 = rough * rough; a2 *= a2;
+		float dd = ndh * ndh * ( a2 - 1.0 ) + 1.0;
+		float D = a2 / ( 3.14159265 * dd * dd );
+		float k = ( rough + 1.0 ); k = k * k * 0.125;
+		float G = ( ndl / ( ndl * ( 1.0 - k ) + k ) ) * ( ndv / ( ndv * ( 1.0 - k ) + k ) );
+		vec3 F = F0 + ( 1.0 - F0 ) * pow( 1.0 - vdh, 5.0 );
+		vec3 specSun = ( D * G / max( 4.0 * ndl * ndv, 0.001 ) ) * F * Esun * ( 1.0 / 3.14159265 );
+		specSun = min( specSun, vec3( 4.0 ) );
+
+		vec3 R = reflect( -V, N );
+		vec3 skyc = ( R.z > 0.0 ) ? mix( u_tw.skyHorizon.rgb, u_tw.skyZenith.rgb, pow( R.z, 0.5 ) ) : u_tw.skyHorizon.rgb * mix( 1.0, 0.35, clamp( -R.z * 4.0, 0.0, 1.0 ) );
+		vec3 env = pow( skyc * 0.7, vec3( 2.2 ) );
+		vec3 Fr = F0 + ( max( vec3( 1.0 - rough ), F0 ) - F0 ) * pow( 1.0 - ndv, 5.0 );
+		vec3 specAmb = env * Fr * ( 1.0 - 0.75 * rough );
+
+		vec3 kd = ( 1.0 - F0 ) * ( 1.0 - metal );
+		vec3 lin = kd * albedo * ( Eamb + Esun ) + specSun + specAmb;
+		color.rgb = pow( lin, vec3( 1.0 / 2.2 ) );
+	}
 
 	if ( frag_anim.x > 0.5 && frag_anim.x < 1.5 ) {
 		float t = frag_anim.y;
