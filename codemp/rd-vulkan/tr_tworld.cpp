@@ -121,6 +121,17 @@ typedef struct {
 	float			radius;
 } tworldInst_t;
 
+typedef struct twCell_s {
+	vec3_t	center;
+	float	radius;			// bounding sphere of the placements' spheres
+	float	maxInstRadius;
+	int		first, count;	// range in cellOrder
+} twCell_t;
+
+#define TW_SMALL_RADIUS		160.0f		// placements up to this radius go to the fine grid
+#define TW_CELL_SMALL		1024.0f
+#define TW_CELL_LARGE		8192.0f
+
 typedef struct tworld_s {
 	surfaceType_t	surfaceType;	// SF_TWORLD, must be first: the opaque pass
 	surfaceType_t	blendSurfaceType;	// SF_TWORLD again: the blended pass
@@ -142,6 +153,12 @@ typedef struct tworld_s {
 
 	// instanced path, per-frame scratch
 	int				*visInst;		// visible placement indexes
+
+	// placements grouped into cells of a grid, small ones and large ones separately, so that whole cells can be
+	// rejected by the view frustum and, for small placements, by distance
+	struct twCell_s	*cells;
+	int				numCells;
+	int				*cellOrder;		// placement indexes, cell after cell
 	byte			*visLod;
 	int				*batchCount, *batchStart, *batchCursor;	// per submesh
 	int				*subOrder;		// submesh indexes sorted by shader
@@ -185,6 +202,74 @@ static cvar_t	*r_tworldShadowBias;
 static cvar_t	*r_tworldWaterBump;
 static cvar_t	*r_tworldPBR;
 static cvar_t	*r_tworldFoliageLight;
+
+
+static const int64_t		*s_cellKeys;
+static int TW_CompareCellKeys( const void *a, const void *b )
+{
+	const int64_t ka = s_cellKeys[*(const int *)a], kb = s_cellKeys[*(const int *)b];
+	if ( ka != kb )
+		return ( ka < kb ) ? -1 : 1;
+	return *(const int *)a - *(const int *)b;
+}
+
+/*
+=================
+TW_BuildCells
+
+Sorts the placements by (size class, grid cell) and records each cell's bounding sphere.
+=================
+*/
+static void TW_BuildCells( tworld_t *tw )
+{
+	const int n = tw->numInstances;
+	int64_t *keys;
+	int i, numCells = 0, c = -1;
+
+	tw->cellOrder = (int *)ri.Hunk_Alloc( sizeof( int ) * ( n + 1 ), h_low );
+	if ( !n )
+		return;
+	keys = (int64_t *)Z_Malloc( sizeof( int64_t ) * n, TAG_TEMP_WORKSPACE, qtrue );
+	for ( i = 0; i < n; i++ ) {
+		const tworldInst_t *in = &tw->instances[i];
+		const int isSmall = ( in->radius <= TW_SMALL_RADIUS ) ? 1 : 0;
+		const float cs = isSmall ? TW_CELL_SMALL : TW_CELL_LARGE;
+		const int64_t cx = (int64_t)floorf( in->center[0] / cs ) + 100000, cy = (int64_t)floorf( in->center[1] / cs ) + 100000;
+		keys[i] = ( (int64_t)isSmall << 40 ) | ( cx << 20 ) | cy;
+		tw->cellOrder[i] = i;
+	}
+	s_cellKeys = keys;
+	qsort( tw->cellOrder, n, sizeof( int ), TW_CompareCellKeys );
+	for ( i = 0; i < n; i++ ) {
+		if ( i == 0 || keys[tw->cellOrder[i]] != keys[tw->cellOrder[i - 1]] )
+			numCells++;
+	}
+	tw->cells = (twCell_t *)ri.Hunk_Alloc( sizeof( twCell_t ) * numCells, h_low );
+	tw->numCells = numCells;
+	for ( i = 0; i < n; i++ ) {
+		if ( i == 0 || keys[tw->cellOrder[i]] != keys[tw->cellOrder[i - 1]] ) {
+			c++;
+			tw->cells[c].first = i;
+		}
+		tw->cells[c].count++;
+	}
+	for ( c = 0; c < numCells; c++ ) {
+		twCell_t *cell = &tw->cells[c];
+		vec3_t mins, maxs;
+		ClearBounds( mins, maxs );
+		for ( i = 0; i < cell->count; i++ ) {
+			const tworldInst_t *in = &tw->instances[tw->cellOrder[cell->first + i]];
+			AddPointToBounds( in->center, mins, maxs );
+			if ( in->radius > cell->maxInstRadius )
+				cell->maxInstRadius = in->radius;
+		}
+		VectorAdd( mins, maxs, cell->center );
+		VectorScale( cell->center, 0.5f, cell->center );
+		cell->radius = Distance( maxs, cell->center ) + cell->maxInstRadius;
+	}
+	Z_Free( keys );
+	ri.Printf( PRINT_ALL, "R_LoadTWorld: %i placements in %i culling cells\n", n, numCells );
+}
 
 static const tworldSub_t *s_sortSubs;
 static int TW_CompareSubs( const void *a, const void *b )
@@ -638,6 +723,7 @@ void R_LoadTWorld( const char *bspName )
 		len / ( 1024.0f * 1024.0f ), ri.Milliseconds() - startTime );
 
 	ri.FS_FreeFile( buffer );
+	TW_BuildCells( tw );
 	R_LoadTWorldShadow( tw, bspName );
 	R_LoadTWorldPBR( tw, bspName );
 	s_tworld = tw;
@@ -728,7 +814,7 @@ static qboolean RB_TWorldInstanced( tworld_t *tw, const int pass )
 	const float		light = r_tworldLight->value;
 	const float		*viewOrg = backEnd.viewParms.ori.origin;
 	const int		mirror = ( backEnd.viewParms.portalView == PV_MIRROR ) ? 1 : 0;
-	int				i, j, p, numVis = 0, total = 0, run = 0, draws = 0, indexes = 0;
+	int				i, j, p, ci, k, numVis = 0, total = 0, run = 0, draws = 0, indexes = 0;
 	uint32_t		bufOffset, uboOffset, mainOffset = ~0U;
 	const qboolean	usePbr = (qboolean)( r_tworldPBR->integer != 0 );
 	twInstData_t	*data;
@@ -744,7 +830,28 @@ static qboolean RB_TWorldInstanced( tworld_t *tw, const int pass )
 
 	Com_Memset( tw->batchCount, 0, sizeof( int ) * tw->numSubs );
 
-	for ( i = 0; i < tw->numInstances; i++ ) {
+	for ( ci = 0; ci < tw->numCells; ci++ ) {
+	const twCell_t *cell = &tw->cells[ci];
+	if ( cull ) {
+		vec3_t cd;
+		float cdist;
+		for ( p = 0; p < 4; p++ ) {
+			if ( DotProduct( cell->center, frustum[p].normal ) - frustum[p].dist < -cell->radius )
+				break;
+		}
+		if ( p < 4 )
+			continue;
+		// too far for even the largest placement of the cell to pass the size test
+		VectorSubtract( cell->center, viewOrg, cd );
+		cdist = VectorLength( cd ) - cell->radius;
+		if ( cdist > 1.0f && cell->maxInstRadius < cullSize * cdist ) {
+			if ( pass == 0 )
+				tw->c_small += cell->count;
+			continue;
+		}
+	}
+	for ( k = 0; k < cell->count; k++ ) {
+		const int i = tw->cellOrder[cell->first + k];
 		const tworldInst_t *inst = &tw->instances[i];
 		const tworldMesh_t *mesh = &tw->meshes[inst->mesh];
 		vec3_t	d;
@@ -794,6 +901,7 @@ static qboolean RB_TWorldInstanced( tworld_t *tw, const int pass )
 			tw->c_instances++;
 			tw->c_lod[lod]++;
 		}
+	}
 	}
 
 	if ( !total )
