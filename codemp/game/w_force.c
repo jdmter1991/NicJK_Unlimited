@@ -25,6 +25,8 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "ai_main.h"
 #include "ghoul2/G2.h"
 
+extern qboolean BG_SabersOff( playerState_t *ps );	// used below; Clang rejects a call to an undeclared function
+
 #define METROID_JUMP 1
 
 //NEEDED FOR MIND-TRICK on NPCS=========================================================

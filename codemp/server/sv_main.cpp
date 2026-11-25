@@ -1202,6 +1202,9 @@ sv_hitch_stacks.log in the working directory. 0 = off (no thread is created).
 #include <windows.h>
 #include <dbghelp.h>
 #include <cstdio>
+#ifndef UNW_FLAG_NHANDLER
+#define UNW_FLAG_NHANDLER 0x0	// missing from the Windows 7.1 SDK the XP toolchain uses
+#endif
 #pragma comment( lib, "dbghelp.lib" )
 
 static HANDLE			svWatchMainThread = NULL;

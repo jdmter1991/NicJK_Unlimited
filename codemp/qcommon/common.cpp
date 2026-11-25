@@ -1724,6 +1724,9 @@ Windows x64 only, debugging aid, 0 = off. Summarize with tools/hitch_stacks.py.
 #include <dbghelp.h>
 #include <unordered_map>
 #include <string>
+#ifndef UNW_FLAG_NHANDLER
+#define UNW_FLAG_NHANDLER 0x0	// missing from the Windows 7.1 SDK the XP toolchain uses
+#endif
 #pragma comment( lib, "dbghelp.lib" )
 
 static HANDLE			comSampleMainThread = NULL;
