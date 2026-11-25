@@ -14,6 +14,8 @@
 // from the normal map's alpha or blue channel; otherwise per-material constants.
 // Glow (animation type 5), the source's emissive light decorations: unlit, the texture's alpha is the intensity,
 // the tint its colour and gain; drawn additively (blend state from the material's shader script).
+// Tiling colour layer (frag_tile > 0): materials whose source formula is a repeating colour texture times
+// everything else keep that texture as a layer of its own; colour = base x tile x 2.
 // Falling water / foam (animation type 4): white, alpha = (n1.r + n2.r) * n3.b [* m.g] * fade * 0.75 with three
 // scrolling samples of the first texture and optionally one of the second, as in the source material.
 // Alpha test uses the same specialization constants as the generic fragment shader.
@@ -23,6 +25,7 @@
 layout(set = 1, binding = 0) uniform sampler2D texture0;
 layout(set = 2, binding = 0) uniform sampler2D texture1;	// detail or ripple pattern; a white image when unused
 layout(set = 3, binding = 0) uniform sampler2D texture2;	// sun shadow depth map; a white image when unused
+layout(set = 4, binding = 0) uniform sampler2D texture3;	// tiling colour layer; a white image when unused
 
 layout(set = 0, binding = 0) uniform TWorld {
 	vec4 eye;				// xyz: camera position (world units), w: metres per world unit
@@ -52,6 +55,7 @@ layout(location = 9) in float frag_fade;
 layout(location = 10) flat in float frag_ref;
 layout(location = 11) in vec3 frag_normal;
 layout(location = 12) flat in vec3 frag_tint;
+layout(location = 13) flat in vec2 frag_tile;
 
 // share of the sun that reaches the fragment: 1 = fully lit
 float sun_visibility() {
@@ -91,6 +95,10 @@ void main() {
 		if ( base.a >= alpha_test_value ) discard;
 	} else if ( alpha_test_func == 3 ) {
 		if ( base.a < alpha_test_value ) discard;
+	}
+
+	if ( frag_tile.x > 0.5 ) {
+		base.rgb = min( base.rgb * texture( texture3, frag_tex_coord * frag_tile ).rgb * 2.0, vec3( 1.0 ) );
 	}
 
 	// The engine brightens uncompressed textures on upload (intensity, and gamma / overbright when the

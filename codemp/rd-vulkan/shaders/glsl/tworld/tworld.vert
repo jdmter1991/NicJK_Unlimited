@@ -34,7 +34,8 @@ layout(location = 5) in vec4 in_row2;
 layout(location = 6) in vec4 in_tint;		// rgb tint, a opacity
 layout(location = 7) in vec4 in_params;		// x: > 0 detail texture repeats per unit of UV; < 0: the second texture is a
 											//    normal map with -x repeats per unit of UV (physically based path); 0: neither
-											// y: 1 = the base texture is pre-compressed and still needs the light scale
+											// y: packed: bit 0 = the base texture is pre-compressed and still needs the light
+											//    scale; + 2 * tile repeats in U + 1024 * tile repeats in V (0 = no tiling layer)
 											// z: animation type
 											// w: reference height in mesh space (base for vegetation, top for cloth);
 											//    foam: 1 = second noise texture; otherwise packed material values for the
@@ -53,6 +54,7 @@ layout(location = 9) out float frag_fade;			// foam: the mesh's fade factor
 layout(location = 10) flat out float frag_ref;		// in_params.w
 layout(location = 11) out vec3 frag_normal;			// world-space normal
 layout(location = 12) flat out vec3 frag_tint;
+layout(location = 13) flat out vec2 frag_tile;		// repeats of the tiling colour layer per unit of UV, 0 = none
 
 out gl_PerVertex {
 	vec4 gl_Position;
@@ -95,7 +97,11 @@ void main() {
 	frag_tex_coord = in_tex_coord;
 	frag_detail_coord = in_tex_coord * in_params.x;
 	frag_detail = in_params.x;
-	frag_texscale = vec4( u_entity.localViewOrigin.xyz, in_params.y );
+	float py = in_params.y;
+	float tv = floor( py / 1024.0 );
+	float tu = floor( ( py - tv * 1024.0 ) * 0.5 );
+	frag_tile = vec2( tu, tv );
+	frag_texscale = vec4( u_entity.localViewOrigin.xyz, py - tv * 1024.0 - tu * 2.0 );
 	frag_world = world;
 	frag_fade = clamp( ( length( in_normal ) - 0.25 ) / 0.75, 0.0, 1.0 );
 	frag_ref = in_params.w;

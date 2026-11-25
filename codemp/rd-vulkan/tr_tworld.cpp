@@ -153,6 +153,8 @@ typedef struct tworld_s {
 	image_t			**pbrImages;		// normal map per material, or NULL
 	float			*pbrScales;			// normal map repeats per unit of UV
 	float			*pbrPacks;			// roughness * 255 + 256 * metallic * 255 + 65536 * flags
+	image_t			**tileImages;		// tiling colour layer per material, or NULL
+	float			*tilePacks;			// 2 * repeats in U + 1024 * repeats in V
 	int				numPbrMaps;
 
 	// baked sun shadow map (maps/<name>_shadow.dds + maps/<name>.tshadow), NULL when the map has none
@@ -292,6 +294,12 @@ typedef struct {
 	float		roughness, metallic;
 	uint32_t	flags;			// 1: roughness = 1 - base alpha, 2: metallic = normal map alpha, 4: metallic = normal map blue
 } twPbrMaterial_t;				// 80 bytes
+
+typedef struct {
+	twPbrMaterial_t	pbr;
+	char		tile[64];		// tiling colour layer, empty = none
+	float		tileU, tileV;	// its repeats per unit of UV (whole numbers up to 255)
+} twPbrMaterial2_t;				// 152 bytes, file version 2
 #pragma pack(pop)
 
 /*
@@ -307,34 +315,51 @@ static void R_LoadTWorldPBR( tworld_t *tw, const char *bspName )
 	char	name[MAX_QPATH];
 	byte	*buffer = NULL;
 	long	len;
-	int		i, n;
-	const twPbrMaterial_t *pm;
+	int		i, n, nt = 0, version;
+	size_t	stride;
 
 	tw->pbrImages = (image_t **)ri.Hunk_Alloc( sizeof( image_t * ) * ( tw->numTints + 1 ), h_low );
 	tw->pbrScales = (float *)ri.Hunk_Alloc( sizeof( float ) * ( tw->numTints + 1 ), h_low );
 	tw->pbrPacks = (float *)ri.Hunk_Alloc( sizeof( float ) * ( tw->numTints + 1 ), h_low );
+	tw->tileImages = (image_t **)ri.Hunk_Alloc( sizeof( image_t * ) * ( tw->numTints + 1 ), h_low );
+	tw->tilePacks = (float *)ri.Hunk_Alloc( sizeof( float ) * ( tw->numTints + 1 ), h_low );
 
 	COM_StripExtension( bspName, name, sizeof( name ) );
 	Q_strcat( name, sizeof( name ), ".tpbr" );
 	len = ri.FS_ReadFile( name, (void **)&buffer );
 	if ( len <= 0 || !buffer )
 		return;
-	if ( len < 12 || memcmp( buffer, "TPBR", 4 ) || ( (const uint32_t *)buffer )[1] != 1
+	version = ( len >= 12 ) ? (int)( (const uint32_t *)buffer )[1] : 0;
+	stride = ( version == 2 ) ? sizeof( twPbrMaterial2_t ) : sizeof( twPbrMaterial_t );
+	if ( len < 12 || memcmp( buffer, "TPBR", 4 ) || ( version != 1 && version != 2 )
 		|| ( (const uint32_t *)buffer )[2] != (uint32_t)tw->numTints
-		|| (size_t)len != 12 + (size_t)tw->numTints * sizeof( twPbrMaterial_t ) ) {
+		|| (size_t)len != 12 + (size_t)tw->numTints * stride ) {
 		ri.Printf( PRINT_WARNING, "R_LoadTWorldPBR: %s does not match the world file\n", name );
 		ri.FS_FreeFile( buffer );
 		return;
 	}
-	pm = (const twPbrMaterial_t *)( buffer + 12 );
 	n = 0;
 	for ( i = 0; i < tw->numTints; i++ ) {
 		char img[MAX_QPATH];
-		const int r = (int)( Com_Clamp( 0.0f, 1.0f, pm[i].roughness ) * 255.0f + 0.5f );
-		const int m = (int)( Com_Clamp( 0.0f, 1.0f, pm[i].metallic ) * 255.0f + 0.5f );
-		tw->pbrPacks[i] = (float)( ( r < 1 ? 1 : r ) + 256 * m + 65536 * (int)( pm[i].flags & 7 ) );
-		tw->pbrScales[i] = ( pm[i].scale > 0.0f ) ? pm[i].scale : 1.0f;
-		Q_strncpyz( img, pm[i].image, sizeof( img ) );
+		const twPbrMaterial_t *pmi = (const twPbrMaterial_t *)( buffer + 12 + (size_t)i * stride );
+		const int r = (int)( Com_Clamp( 0.0f, 1.0f, pmi->roughness ) * 255.0f + 0.5f );
+		const int m = (int)( Com_Clamp( 0.0f, 1.0f, pmi->metallic ) * 255.0f + 0.5f );
+		tw->pbrPacks[i] = (float)( ( r < 1 ? 1 : r ) + 256 * m + 65536 * (int)( pmi->flags & 7 ) );
+		tw->pbrScales[i] = ( pmi->scale > 0.0f ) ? pmi->scale : 1.0f;
+		if ( version == 2 ) {
+			const twPbrMaterial2_t *p2 = (const twPbrMaterial2_t *)pmi;
+			const int tu = (int)( Com_Clamp( 0.0f, 255.0f, p2->tileU ) + 0.5f ), tv = (int)( Com_Clamp( 0.0f, 255.0f, p2->tileV ) + 0.5f );
+			Q_strncpyz( img, p2->tile, sizeof( img ) );
+			if ( img[0] && tu > 0 && tv > 0 && vk.maxBoundDescriptorSets >= 5 ) {
+				image_t *im = R_FindImageFile( img, (imgFlags_t)( IMGFLAG_MIPMAP | IMGFLAG_NO_COMPRESSION | IMGFLAG_NOLIGHTSCALE ) );
+				if ( im && ( im->flags & IMGFLAG_NOSCALE ) ) {
+					tw->tileImages[i] = im;
+					tw->tilePacks[i] = (float)( 2 * tu + 1024 * tv );
+					nt++;
+				}
+			}
+		}
+		Q_strncpyz( img, pmi->image, sizeof( img ) );
 		if ( img[0] ) {
 			image_t *im = R_FindImageFile( img, (imgFlags_t)( IMGFLAG_MIPMAP | IMGFLAG_NO_COMPRESSION | IMGFLAG_NOLIGHTSCALE ) );
 			// only data that reached the GPU unmodified is usable as a normal map: a pre-compressed .dds
@@ -345,7 +370,7 @@ static void R_LoadTWorldPBR( tworld_t *tw, const char *bspName )
 		}
 	}
 	tw->numPbrMaps = n;
-	ri.Printf( PRINT_ALL, "R_LoadTWorldPBR: %s: %i materials, %i with a normal map\n", name, tw->numTints, n );
+	ri.Printf( PRINT_ALL, "R_LoadTWorldPBR: %s: %i materials, %i with a normal map, %i with a tiling colour layer\n", name, tw->numTints, n, nt );
 	ri.FS_FreeFile( buffer );
 }
 
@@ -838,7 +863,7 @@ static qboolean RB_TWorldInstanced( tworld_t *tw, const int pass )
 			VectorCopy( tw->tints[sub->tintIndex], out->tint );
 			out->tint[3] = tw->alphas[sub->tintIndex];
 			out->params[0] = tw->details[sub->tintIndex];
-			out->params[1] = sub->texNoScale;
+			out->params[1] = sub->texNoScale + tw->tilePacks[sub->tintIndex];
 			out->params[2] = (float)tw->anims[sub->tintIndex];
 			if ( tw->anims[sub->tintIndex] == 0 ) {
 				// physically based path: packed material values; a normal map takes the second texture slot
@@ -901,6 +926,8 @@ static qboolean RB_TWorldInstanced( tworld_t *tw, const int pass )
 			vk_update_descriptor( VK_DESC_TEXTURE0 + 1, detail->descriptor_set );
 		}
 		vk_update_descriptor( VK_DESC_TEXTURE0 + 2, ( tw->shadowImage ? tw->shadowImage : tr.whiteImage )->descriptor_set );
+		if ( vk.maxBoundDescriptorSets >= 5 )
+			vk_update_descriptor( VK_DESC_TEXTURE0 + 3, ( tw->tileImages[sub->tintIndex] ? tw->tileImages[sub->tintIndex] : tr.whiteImage )->descriptor_set );
 		vk_bind_descriptor_sets();
 
 		if ( sub->shader->polygonOffset )
