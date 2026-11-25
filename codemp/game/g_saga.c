@@ -1039,7 +1039,7 @@ void SiegeObjectiveCompleted(int team, int objective, int final, int client)
 {
 	int goals_completed, goals_required;
 
-	BotEval_NoteEvent(3);
+	if (!gSiegeRoundEnded && !G_SiegeGetCompletionStatus(team, objective)) BotEval_NoteEvent(3);	// counted once per objective
 
 	if (gSiegeRoundEnded)
 	{

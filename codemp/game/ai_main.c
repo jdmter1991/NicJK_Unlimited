@@ -469,17 +469,44 @@ static int botUseAimUntil[MAX_CLIENTS];		// the view is put on botUseAim until t
 static vec3_t botUseAim[MAX_CLIENTS];
 static void Bot_WorldUse(bot_state_t* bs);
 static int Bot_ObjectiveGoal(bot_state_t* bs, vec3_t goal);
+static int botObjEnt[MAX_CLIENTS];		// the entity the current objective is about (siege), or 0
+static int botEvalSiegeClass[6];			// bots given each kind of class: infantry, vanguard, support, jedi, demolitions, heavy weapons
+static int botEvalSiege[4];				// objective things: stood in a trigger, attacked, item picked up, item delivered
 static void Bot_ObjectiveThink(bot_state_t* bs);
 static int botEvalObj[8];		// thinks by job: none, carry home, get our dropped flag, chase their carrier, escort, go for their flag, guard
 static int botEvalObjDirect, botEvalObjWp, botEvalWpThinks, botEvalNoWpThinks;
-static int botEvalCliffStops, botEvalFallDeaths;
+static int botEvalCliffStops, botEvalFallDeaths, botEvalCliffJumps;
+// for working out why bots fall: where each bot last stood on the ground, and its last navigation jump
+static vec3_t botLastGround[MAX_CLIENTS];
+static int botLastGroundTime[MAX_CLIENTS], botLastNavJumpTime[MAX_CLIENTS], botLastNavJumpHold[MAX_CLIENTS], botLastHurtBy[MAX_CLIENTS], botLastHurtTime[MAX_CLIENTS];
+static int botEvalFallAfterJump, botEvalFallAfterHit, botEvalFallOther;
+static int botGapJumpUntil[MAX_CLIENTS];	// a jump across a gap that was measured before it was made
+static struct { int time, up, fwd, right, intent, seq, hold, jumpT; } botTakeoff[MAX_CLIENTS];	// the last command given on high ground
+extern bot_state_t* botstates[MAX_CLIENTS];
 static int botEvalKillMeans[5];	// saber, gun, explosive, force, other
 static int botEvalTeamKills, botEvalSelfDeaths;
 void BotEval_NoteEvent(int kind) {
 	if (kind >= 0 && kind < 8) botEvalEvents[kind]++;
 }
 void BotEval_NoteKill(int attacker, int victim, int mod) {
-	if (mod == MOD_FALLING) botEvalFallDeaths++;
+	if (mod == MOD_FALLING) {
+		botEvalFallDeaths++;
+		if (victim >= 0 && victim < MAX_CLIENTS && botstates[victim] && g_entities[victim].client) {
+			const int sinceJump = level.time - botLastNavJumpTime[victim];
+			const int sinceHit = level.time - botLastHurtTime[victim];
+			const int sinceGround = level.time - botLastGroundTime[victim];
+			if (sinceJump >= 0 && sinceJump < sinceGround + 600) botEvalFallAfterJump++;
+			else if (sinceHit >= 0 && sinceHit < sinceGround + 800) botEvalFallAfterHit++;
+			else botEvalFallOther++;
+			trap->Print("FALLDBG bot %d left the ground at (%.0f %.0f %.0f) %d ms ago, died at (%.0f %.0f %.0f); last nav jump %d ms ago (hold %d), last hurt %d ms ago by %d, intent %d seq %d\n",
+				victim, botLastGround[victim][0], botLastGround[victim][1], botLastGround[victim][2], sinceGround,
+				g_entities[victim].client->ps.origin[0], g_entities[victim].client->ps.origin[1], g_entities[victim].client->ps.origin[2],
+				sinceJump, botLastNavJumpHold[victim], sinceHit, botLastHurtBy[victim], botstates[victim]->intentFlags, botstates[victim]->seqType);
+			trap->Print("FALLDBG   last command on the high ground, %d ms ago: up %d fwd %d right %d intent %d seq %d jump-hold %d jumpTime %d\n",
+				level.time - botTakeoff[victim].time, botTakeoff[victim].up, botTakeoff[victim].fwd, botTakeoff[victim].right,
+				botTakeoff[victim].intent, botTakeoff[victim].seq, botTakeoff[victim].hold, botTakeoff[victim].jumpT);
+		}
+	}
 	if (attacker < 0 || attacker >= MAX_CLIENTS || attacker == victim || !g_entities[attacker].client) {
 		botEvalSelfDeaths++;
 		return;
@@ -654,7 +681,28 @@ static void BotEval_Report(void) {
 		botEvalWorld[0], botEvalWorld[1], botEvalWorld[2], botEvalWorld[3], botEvalWorld[4], botEvalWorld[5], botEvalEvents[5], botEvalEvents[6]);
 	trap->Print("BOTEVAL objectives (thinks by job): none %d, carry flag home %d, get our dropped flag %d, chase their carrier %d, escort our carrier %d, go for their flag %d, guard base %d; walked straight at it %d, waypoint goals set %d; thinks on a waypoint path %d, without %d\n",
 		botEvalObj[0], botEvalObj[1], botEvalObj[2], botEvalObj[3], botEvalObj[4], botEvalObj[5], botEvalObj[6], botEvalObjDirect, botEvalObjWp, botEvalWpThinks, botEvalNoWpThinks);
-	trap->Print("BOTEVAL cliffs: steps over an edge refused %d; deaths by falling %d\n", botEvalCliffStops, botEvalFallDeaths);
+	{
+		int shots[2] = { 0, 0 }, hits[2] = { 0, 0 }, ci;
+		for (ci = 0; ci < MAX_CLIENTS; ci++) {
+			int g2 = 1;
+			if (!botstates[ci] || !botstates[ci]->inuse || !g_entities[ci].client) continue;
+			if (bot_abTest.integer > 0) {
+				if (ci >= 2 * bot_abTest.integer) continue;
+				g2 = (ci < bot_abTest.integer) ? 0 : 1;
+			}
+			shots[g2] += g_entities[ci].client->accuracy_shots;
+			hits[g2] += g_entities[ci].client->accuracy_hits;
+		}
+		trap->Print("BOTEVAL shooting: baseline group shots %d hits %d (%d%%) | feature group shots %d hits %d (%d%%)\n",
+			shots[0], hits[0], shots[0] ? hits[0] * 100 / shots[0] : 0, shots[1], hits[1], shots[1] ? hits[1] * 100 / shots[1] : 0);
+	}
+	trap->Print("BOTEVAL siege (thinks): attacking an objective %d, defending one %d; thinks inside an objective trigger %d, attacking an objective that breaks %d, carrying an objective item %d\n",
+		botEvalObj[7], botEvalObj[6], botEvalSiege[0], botEvalSiege[1], botEvalSiege[2]);
+	trap->Print("BOTEVAL siege classes handed to bots: infantry %d, vanguard %d, support %d, jedi %d, demolitions %d, heavy weapons %d; thinks firing something heavy at an objective %d\n",
+		botEvalSiegeClass[0], botEvalSiegeClass[1], botEvalSiegeClass[2], botEvalSiegeClass[3], botEvalSiegeClass[4], botEvalSiegeClass[5], botEvalSiege[3]);
+	trap->Print("BOTEVAL cliffs: jumps with nothing to land on refused %d\n", botEvalCliffJumps);
+	trap->Print("BOTEVAL cliffs: steps over an edge refused %d; deaths by falling %d, of which right after a navigation jump %d, after being hit %d, other %d\n",
+		botEvalCliffStops, botEvalFallDeaths, botEvalFallAfterJump, botEvalFallAfterHit, botEvalFallOther);
 	trap->Print("BOTEVAL kills by saber %d, gun %d, explosive %d, force %d, other %d; kills of a teammate %d; deaths with no killer %d\n",
 		botEvalKillMeans[0], botEvalKillMeans[1], botEvalKillMeans[2], botEvalKillMeans[3], botEvalKillMeans[4], botEvalTeamKills, botEvalSelfDeaths);
 	trap->Print("BOTEVAL awareness: enemies noticed outside the view %d, switched to a bigger threat %d of which to someone hitting the bot %d\n",
@@ -1560,18 +1608,58 @@ void BotInputToUserCommand(bot_state_t* bs, bot_input_t* bi, usercmd_t* ucmd, in
 	const gclient_t *cl = g_entities[bs->client].client;
 
 	BotInputToUserCommand_Inner(bs, bi, ucmd, delta_angles, time, useTime);
+	if (cl && cl->ps.groundEntityNum != ENTITYNUM_NONE && cl->ps.stats[STAT_HEALTH] > 0
+		&& (cl->ps.origin[2] > botLastGround[bs->client][2] - 250.0f || level.time - botLastGroundTime[bs->client] > 6000)) {
+		VectorCopy(cl->ps.origin, botLastGround[bs->client]);
+		botLastGroundTime[bs->client] = level.time;
+	}
 	// last of all: is the step this command takes a step over a cliff?
 	if ((bs->features & BOTF_CLIFF) && cl && cl->ps.stats[STAT_HEALTH] > 0 && cl->ps.groundEntityNum != ENTITYNUM_NONE
-		&& (ucmd->forwardmove || ucmd->rightmove) && bs->jumpTime <= level.time && bs->inputHoldUpUntil <= level.time && ucmd->upmove <= 0) {
+		&& (ucmd->forwardmove || ucmd->rightmove)) {
 		vec3_t a, fw, rt, dir, top, bottom;
 		trace_t tr;
 		int i;
+		const qboolean jumping = (ucmd->upmove > 0 || bs->inputHoldUpUntil > level.time) ? qtrue : qfalse;
 		VectorSet(a, 0, bi->viewangles[YAW], 0);
 		AngleVectors(a, fw, rt, NULL);
 		VectorScale(fw, (float)ucmd->forwardmove, dir);
 		VectorMA(dir, (float)ucmd->rightmove, rt, dir);
 		dir[2] = 0;
-		if (VectorNormalize(dir) > 0.01f) {
+		if (jumping && VectorNormalize(dir) > 0.01f) {
+			// Taking off: a jump is only made when there is something to come down on. The falls
+			// logged in CTF and Siege were hops over a railing or off a wall top with nothing
+			// within reach below. Ground has to exist, no more than 320 down, somewhere along the
+			// next 120 to 280 units of the jump (a gap with a far side passes, a cliff does not).
+			static const float ahead[3] = { 100.0f, 180.0f, 260.0f };
+			const qboolean measuredGap = (botGapJumpUntil[bs->client] > level.time && botGapJumpUntil[bs->client] < level.time + 5000) ? qtrue : qfalse;
+			qboolean land = qfalse;
+			int misses = 0;
+			for (i = 0; i < 3; i++) {
+				// look down from as high as this jump rises (a held force jump goes higher), so a
+				// parapet or the thing being jumped over is not mistaken for the landing
+				const float rise = 96.0f + ((level.time - botLastNavJumpTime[bs->client] < 300) ? botLastNavJumpHold[bs->client] * 0.225f : 0.0f);
+				VectorMA(bs->origin, ahead[i], dir, top);
+				top[2] += rise;
+				VectorCopy(top, bottom);
+				bottom[2] -= 320.0f + 24.0f + rise;
+				JP_Trace(&tr, top, NULL, NULL, bottom, bs->client, MASK_PLAYERSOLID & ~CONTENTS_BODY, qfalse, 0, 0);
+				if (tr.fraction < 1.0f && !tr.startsolid && tr.plane.normal[2] >= 0.7f) {
+					land = qtrue;	// ground that can be stood on (a steep face is a slide, not a landing)
+				} else {
+					misses++;
+				}
+			}
+			// an ordinary jump comes down within this stretch, so all of it has to be safe; only a
+			// jump across a gap that was measured beforehand may have a hole in the middle
+			if (!land || (misses && !measuredGap)) {
+				ucmd->forwardmove = 0;
+				ucmd->rightmove = 0;
+				ucmd->upmove = 0;
+				bs->inputHoldUpUntil = 0;
+				bs->jumpHoldTime = 0;
+				botEvalCliffJumps++;
+			}
+		} else if (!jumping && VectorNormalize(dir) > 0.01f) {
 			for (i = 0; i < 2; i++) {
 				VectorMA(bs->origin, i ? 72.0f : 36.0f, dir, top);
 				// only where the bot could actually walk to: nothing solid between here and there
@@ -1582,7 +1670,8 @@ void BotInputToUserCommand(bot_state_t* bs, bot_input_t* bi, usercmd_t* ucmd, in
 				VectorCopy(top, bottom);
 				bottom[2] -= 320.0f + 24.0f;
 				JP_Trace(&tr, top, NULL, NULL, bottom, bs->client, MASK_PLAYERSOLID & ~CONTENTS_BODY, qfalse, 0, 0);
-				if (tr.fraction >= 1.0f) {
+				// nothing below, or only a face too steep to stand on with nothing level under it
+				if (tr.fraction >= 1.0f || (tr.plane.normal[2] < 0.45f && top[2] - tr.endpos[2] > 120.0f)) {	// (only a near-vertical face well below counts as a drop: refusing every slope left bots stuck on hilly maps)
 					ucmd->forwardmove = 0;
 					ucmd->rightmove = 0;
 					botEvalCliffStops++;
@@ -1590,6 +1679,16 @@ void BotInputToUserCommand(bot_state_t* bs, bot_input_t* bi, usercmd_t* ucmd, in
 				}
 			}
 		}
+	}
+	if (cl && cl->ps.groundEntityNum != ENTITYNUM_NONE && botLastGroundTime[bs->client] == level.time) {
+		botTakeoff[bs->client].time = level.time;
+		botTakeoff[bs->client].up = ucmd->upmove;
+		botTakeoff[bs->client].fwd = ucmd->forwardmove;
+		botTakeoff[bs->client].right = ucmd->rightmove;
+		botTakeoff[bs->client].intent = (level.time <= bs->intentUntil) ? bs->intentFlags : 0;
+		botTakeoff[bs->client].seq = bs->seqType;
+		botTakeoff[bs->client].hold = (bs->inputHoldUpUntil > level.time) ? 1 : 0;
+		botTakeoff[bs->client].jumpT = (bs->jumpTime > level.time) ? 1 : 0;
 	}
 }
 
@@ -4428,6 +4527,73 @@ flags are, which every player sees on the HUD:
 Returns the job number and the place to go, or 0 when there is nothing to do but fight.
 ==============
 */
+// What has to be touched, used, destroyed or fetched to complete a siege objective. Maps wire an
+// objective up through relays and counters; follow "who targets this" back until something with a
+// place in the world turns up (a trigger, a breakable, a usable, a door). If that is a trigger an
+// objective item has to be carried into, the thing to go for is the nearest such item lying free.
+static gentity_t *Bot_SiegeResolve(gentity_t *obj, vec3_t from, int myTeam) {
+	gentity_t *queue[32], *best = NULL, *src;
+	int depth[32], head = 0, tail = 0, i;
+	float bestD = 0;
+
+	queue[tail] = obj;
+	depth[tail++] = 0;
+	while (head < tail) {
+		gentity_t *e = queue[head];
+		const int d = depth[head++];
+		if (!e->targetname || !e->targetname[0] || d >= 5) {
+			continue;
+		}
+		src = NULL;
+		while ((src = G_Find(src, FOFS(target), e->targetname)) != NULL) {
+			qboolean physical;
+			if (!src->inuse || src == obj || !src->classname) {
+				continue;
+			}
+			physical = (src->r.bmodel || src->s.eType == ET_MOVER || !Q_stricmpn(src->classname, "trigger_", 8)
+				|| !Q_stricmpn(src->classname, "func_", 5)) ? qtrue : qfalse;
+			if (physical) {
+				vec3_t ctr;
+				float dd;
+				if ((src->flags & FL_INACTIVE) || (src->takedamage && src->health <= 0 && !Q_stricmp(src->classname, "func_breakable"))) {
+					continue;
+				}
+				VectorAdd(src->r.absmin, src->r.absmax, ctr);
+				VectorScale(ctr, 0.5f, ctr);
+				dd = Distance(ctr, from);
+				if (!best || dd < bestD) {
+					best = src;
+					bestD = dd;
+				}
+			} else if (tail < 32) {
+				queue[tail] = src;
+				depth[tail++] = d + 1;
+			}
+		}
+	}
+	if (best && best->targetname && best->targetname[0] && !Q_stricmpn(best->classname, "trigger_", 8)) {
+		gentity_t *item = NULL;
+		float itemD = 0;
+		for (i = MAX_CLIENTS; i < level.num_entities; i++) {
+			gentity_t *it = &g_entities[i];
+			float dd;
+			if (!it->inuse || !it->classname || Q_stricmp(it->classname, "misc_siege_item") || !it->goaltarget
+				|| Q_stricmp(it->goaltarget, best->targetname) || it->genericValue2 || it->genericValue6 == myTeam) {
+				continue;	// not for this trigger, already carried, or not ours to pick up
+			}
+			dd = Distance(it->r.currentOrigin, from);
+			if (!item || dd < itemD) {
+				item = it;
+				itemD = dd;
+			}
+		}
+		if (item) {
+			return item;
+		}
+	}
+	return best;
+}
+
 static int Bot_ObjectiveGoal(bot_state_t* bs, vec3_t goal) {
 	static int cacheTime = -1;
 	static vec3_t basePos[2], flagPos[2];		// [0] red, [1] blue: the stand, and where the flag is now if it lies dropped
@@ -4438,6 +4604,84 @@ static int Bot_ObjectiveGoal(bot_state_t* bs, vec3_t goal) {
 	int my, their, i;
 	qboolean guard;
 
+	botObjEnt[c] = 0;
+	if ((bs->features & BOTF_OBJECTIVE) && level.gametype == GT_SIEGE && me->client && me->health > 0
+		&& (me->client->sess.sessionTeam == TEAM_RED || me->client->sess.sessionTeam == TEAM_BLUE)) {
+		// Siege. The objectives in play are the ones shown on the radar, which is all a player has
+		// to go by too. Each is completed through the thing that targets it: a trigger to stand in
+		// (and use), something to destroy, or an item to carry to its goal. The side an objective
+		// belongs to attacks it; the other side goes there to stop them.
+		extern qboolean G_SiegeGetCompletionStatus(int team, int objective);
+		extern gentity_t *GetObjectThatTargets(gentity_t *ent);
+		static int sCache[MAX_CLIENTS], sCacheTime[MAX_CLIENTS], sCacheMine[MAX_CLIENTS];
+		const int myTeam = me->client->sess.sessionTeam;
+		gentity_t *act = NULL;
+		qboolean mine = qfalse;
+
+		// carrying an objective item: take it to its goal
+		if (me->client->holdingObjectiveItem > 0 && me->client->holdingObjectiveItem < MAX_GENTITIES) {
+			gentity_t *item = &g_entities[me->client->holdingObjectiveItem];
+			if (item->inuse && item->goaltarget && item->goaltarget[0]) {
+				gentity_t *g = G_Find(NULL, FOFS(targetname), item->goaltarget);
+				if (g) {
+					VectorAdd(g->r.absmin, g->r.absmax, goal);
+					VectorScale(goal, 0.5f, goal);
+					botObjEnt[c] = g->s.number;
+					botEvalSiege[2]++;
+					return 7;
+				}
+			}
+		}
+		if (level.time - sCacheTime[c] > 1500 || sCacheTime[c] > level.time) {
+			float best = 0;
+			int bestEnt = 0;
+			sCacheTime[c] = level.time;
+			for (i = MAX_CLIENTS; i < level.num_entities; i++) {
+				gentity_t *o = &g_entities[i];
+				gentity_t *t;
+				vec3_t ctr;
+				float d;
+				qboolean om;
+				if (!o->inuse || !o->classname || Q_stricmp(o->classname, "info_siege_objective") || !(o->s.eFlags & EF_RADAROBJECT)
+					|| G_SiegeGetCompletionStatus(o->side, o->objective)) {
+					continue;
+				}
+				t = Bot_SiegeResolve(o, bs->origin, myTeam);
+				if (!t) {
+					continue;	// nothing that can be acted on yet (switched off, or already destroyed)
+				}
+				VectorAdd(t->r.absmin, t->r.absmax, ctr);
+				VectorScale(ctr, 0.5f, ctr);
+				d = Distance(ctr, bs->origin);
+				om = (o->side == myTeam) ? qtrue : qfalse;
+				// the nearest objective in play; our own before somebody else's
+				if (!bestEnt || (om && !mine) || (om == mine && d < best)) {
+					bestEnt = t->s.number;
+					best = d;
+					mine = om;
+				}
+			}
+			sCache[c] = bestEnt;
+			sCacheMine[c] = mine;
+		}
+		if (sCache[c] > 0 && g_entities[sCache[c]].inuse) {
+			act = &g_entities[sCache[c]];
+			mine = sCacheMine[c] ? qtrue : qfalse;
+			VectorAdd(act->r.absmin, act->r.absmax, goal);
+			VectorScale(goal, 0.5f, goal);
+			if (!Q_stricmp(act->classname, "misc_siege_item")) {
+				VectorCopy(act->r.currentOrigin, goal);
+			}
+			botObjEnt[c] = sCache[c];
+			if (mine) {
+				return 7;
+			}
+			if (Distance(goal, bs->origin) > 800) {
+				return 6;	// get to where they have to come
+			}
+		}
+		return 0;
+	}
 	if (!(bs->features & BOTF_OBJECTIVE) || (level.gametype != GT_CTF && level.gametype != GT_CTY) || !me->client || me->health <= 0) {
 		return 0;
 	}
@@ -4515,6 +4759,44 @@ static void Bot_ObjectiveThink(bot_state_t* bs) {
 	float d;
 
 	if (bs->wpCurrent) botEvalWpThinks++; else botEvalNoWpThinks++;
+	if (g_entities[bs->client].client) {
+		static int lastHp[MAX_CLIENTS];
+		const gclient_t *fc = g_entities[bs->client].client;
+		(void)fc;
+		if (g_entities[bs->client].health < lastHp[bs->client]) {
+			botLastHurtTime[bs->client] = level.time;
+			botLastHurtBy[bs->client] = fc->lasthurt_client;
+		}
+		lastHp[bs->client] = g_entities[bs->client].health;
+	}
+	if ((bs->features & BOTF_OBJECTIVE) && level.gametype == GT_SIEGE && g_entities[bs->client].client) {
+		// A siege team needs its classes: walls and gates only give way to explosives, so a team of
+		// riflemen cannot get past the first objective. Bots are spread over the kinds of class the
+		// team has, by slot. The class takes effect when the bot next spawns.
+		static int classSet[MAX_CLIENTS];
+		gclient_t *scl = g_entities[bs->client].client;
+		const int team = scl->sess.siegeDesiredTeam ? scl->sess.siegeDesiredTeam : scl->sess.sessionTeam;
+		if (classSet[bs->client] != team + 1 && (team == TEAM_RED || team == TEAM_BLUE)) {
+			static const int want[8] = { SPC_DEMOLITIONIST, SPC_HEAVY_WEAPONS, SPC_INFANTRY, SPC_JEDI, SPC_DEMOLITIONIST, SPC_SUPPORT, SPC_HEAVY_WEAPONS, SPC_VANGUARD };
+			siegeTeam_t *stm = BG_SiegeFindThemeForTeam(team);
+			classSet[bs->client] = team + 1;
+			if (stm && stm->numClasses > 0) {
+				const int kind = want[(bs->client / 2) % 8];	// slots alternate between the teams, so pair them up
+				int k, pick = -1;
+				for (k = 0; k < stm->numClasses; k++) {
+					if (stm->classes[k] && stm->classes[k]->playerClass == kind) {
+						pick = k;
+						break;
+					}
+				}
+				if (pick < 0) pick = bs->client % stm->numClasses;
+				if (stm->classes[pick] && stm->classes[pick]->name[0]) {
+					Q_strncpyz(scl->sess.siegeClass, stm->classes[pick]->name, sizeof(scl->sess.siegeClass));
+					if (stm->classes[pick]->playerClass >= 0 && stm->classes[pick]->playerClass < 6) botEvalSiegeClass[stm->classes[pick]->playerClass]++;
+				}
+			}
+		}
+	}
 	job = Bot_ObjectiveGoal(bs, goal);
 	{
 		static int dbgNext[MAX_CLIENTS];
@@ -4529,9 +4811,71 @@ static void Bot_ObjectiveThink(bot_state_t* bs) {
 				bs->currentEnemy ? bs->currentEnemy->s.number : -1, bs->frame_Enemy_Vis, (int)bs->frame_Enemy_Len, g_entities[bs->client].health, bs->cur_ps.weapon);
 		}
 	}
-	if (job >= 0 && job < 8 && (level.gametype == GT_CTF || level.gametype == GT_CTY)) botEvalObj[job]++;
+	if (job >= 0 && job < 8 && (level.gametype == GT_CTF || level.gametype == GT_CTY || level.gametype == GT_SIEGE)) botEvalObj[job]++;
 	if (!job || job == 6) {
 		return;
+	}
+	if (job == 7 && botObjEnt[bs->client] > 0) {
+		// at a siege objective: give it what it needs
+		gentity_t *t = &g_entities[botObjEnt[bs->client]];
+		const qboolean inside = (bs->origin[0] > t->r.absmin[0] - 8 && bs->origin[0] < t->r.absmax[0] + 8
+			&& bs->origin[1] > t->r.absmin[1] - 8 && bs->origin[1] < t->r.absmax[1] + 8
+			&& bs->origin[2] + 40 > t->r.absmin[2] && bs->origin[2] - 24 < t->r.absmax[2]) ? qtrue : qfalse;
+		if (t->takedamage && t->health > 0 && Q_stricmp(t->classname, "misc_siege_item")) {
+			// something to destroy: with a gun from where it can be seen, with a saber from beside it
+			vec3_t e2;
+			trace_t tr2;
+			int heavy = 0, heavyButton = BUTTON_ATTACK;
+			if (t->flags & FL_DMG_BY_HEAVY_WEAP_ONLY) {
+				// only explosives (and sabers) hurt this: G_Damage lets through rockets, thermals,
+				// concussion shots, the repeater's and flechette's secondary fire, mines and det packs
+				const int have = bs->cur_ps.stats[STAT_WEAPONS];
+				const int *ammo = bs->cur_ps.ammo;
+				if ((have & (1 << WP_ROCKET_LAUNCHER)) && ammo[weaponData[WP_ROCKET_LAUNCHER].ammoIndex] >= weaponData[WP_ROCKET_LAUNCHER].energyPerShot) heavy = WP_ROCKET_LAUNCHER;
+				else if ((have & (1 << WP_CONCUSSION)) && ammo[weaponData[WP_CONCUSSION].ammoIndex] >= weaponData[WP_CONCUSSION].energyPerShot) heavy = WP_CONCUSSION;
+				else if ((have & (1 << WP_THERMAL)) && ammo[weaponData[WP_THERMAL].ammoIndex] >= weaponData[WP_THERMAL].energyPerShot) heavy = WP_THERMAL;
+				else if ((have & (1 << WP_REPEATER)) && ammo[weaponData[WP_REPEATER].ammoIndex] >= weaponData[WP_REPEATER].altEnergyPerShot) { heavy = WP_REPEATER; heavyButton = BUTTON_ALT_ATTACK; }
+				else if ((have & (1 << WP_FLECHETTE)) && ammo[weaponData[WP_FLECHETTE].ammoIndex] >= weaponData[WP_FLECHETTE].altEnergyPerShot) { heavy = WP_FLECHETTE; heavyButton = BUTTON_ALT_ATTACK; }
+				else if (have & (1 << WP_SABER)) heavy = WP_SABER;
+				if (!heavy) {
+					return;	// nothing this bot carries can hurt it: no point standing there shooting
+				}
+				if (bs->cur_ps.weapon != heavy) {
+					BotSelectWeapon(bs->client, heavy);
+				}
+			}
+			VectorCopy(bs->origin, e2);
+			e2[2] += 32;
+			JP_Trace(&tr2, e2, NULL, NULL, goal, bs->client, MASK_SHOT, qfalse, 0, 0);
+			if ((tr2.fraction >= 0.97f || tr2.entityNum == t->s.number)
+				&& (bs->cur_ps.weapon != WP_SABER ? (Distance(goal, bs->origin) < 900 && (!heavy || Distance(goal, bs->origin) > 230)) : Distance(goal, bs->origin) < 90)
+				&& !(bs->currentEnemy && bs->frame_Enemy_Vis && bs->frame_Enemy_Len < 300)
+				&& (!heavy || bs->cur_ps.weapon == heavy)) {
+				VectorCopy(goal, botUseAim[bs->client]);
+				botUseAimUntil[bs->client] = level.time + 300;
+				bs->intentFlags = BOTINTENT_MOVE | BOTINTENT_NOJUMP;
+				bs->intentForward = 0;
+				bs->intentRight = 0;
+				// thermals are thrown by letting go, so tap; everything else is held
+				bs->intentButtons = (bs->cur_ps.weapon == WP_THERMAL && (level.time / 400) % 2) ? 0 : heavyButton;
+				bs->intentUntil = level.time + 200;
+				botEvalSiege[1]++;
+				if (heavy) botEvalSiege[3]++;
+				return;
+			}
+		} else if (inside) {
+			// a trigger: stand in it, with the use key down in case it wants that
+			botEvalSiege[0]++;
+			botUsePress[bs->client] = level.time + 300;
+			if (!(bs->currentEnemy && bs->frame_Enemy_Vis && bs->frame_Enemy_Len < 200)) {
+				bs->intentFlags = BOTINTENT_MOVE | BOTINTENT_NOJUMP;
+				bs->intentForward = 0;
+				bs->intentRight = 0;
+				bs->intentButtons = 0;
+				bs->intentUntil = level.time + 200;
+			}
+			return;
+		}
 	}
 	// a fight right on top of the bot comes first, except for the flag carrier, who runs
 	if (bs->currentEnemy && bs->frame_Enemy_Vis && bs->frame_Enemy_Len < ((job == 1) ? 90 : 220)) {
@@ -7091,6 +7435,64 @@ trace between us and this new point, if there is something there, see how far aw
 if no LOS, aim at someone else if LOS.. ?
 */
 //offset the desired view angles with aim leading in mind
+/*
+==============
+Bot_GunAim  (bot_features 262144)
+
+Where to point a gun so the shot meets the enemy. A bolt takes time to arrive: the aim point is
+where the enemy will be after the flight time at this weapon's bolt speed, found by stepping the
+estimate twice. A falling or jumping enemy is carried along his arc and not below the floor.
+Lobbed shots are raised by their drop. Weapons that burst on impact are aimed at the floor by
+the enemy's feet when he is on the ground and not above the bot, so a near miss still hurts.
+Hit-scan weapons (the disruptor) need no lead.
+==============
+*/
+float G_NewBotAIGetProjectileSpeed(int weapon, qboolean altFire);
+static void Bot_GunAim(bot_state_t* bs, vec3_t out) {
+	const playerState_t *ep = &bs->currentEnemy->client->ps;
+	const int weapon = bs->cur_ps.weapon;
+	const qboolean alt = bs->doAltAttack ? qtrue : qfalse;
+	const float speed = G_NewBotAIGetProjectileSpeed(weapon, alt);
+	const qboolean airborne = (ep->groundEntityNum == ENTITYNUM_NONE) ? qtrue : qfalse;
+	const qboolean splash = (weapon == WP_ROCKET_LAUNCHER || weapon == WP_THERMAL || (weapon == WP_REPEATER && alt)
+		|| (weapon == WP_FLECHETTE && alt) || (weapon == WP_CONCUSSION && !alt)) ? qtrue : qfalse;
+	const qboolean lobbed = (weapon == WP_THERMAL || (weapon == WP_REPEATER && alt) || (weapon == WP_FLECHETTE && alt)) ? qtrue : qfalse;
+	vec3_t pos;
+	float eta = 0;
+	int i;
+
+	VectorCopy(ep->origin, pos);
+	if (speed > 0) {
+		for (i = 0; i < 2; i++) {
+			eta = Distance(pos, bs->eye) / speed;
+			if (eta > 1.5f) eta = 1.5f;
+			VectorMA(ep->origin, eta, ep->velocity, pos);
+			if (airborne) {
+				trace_t tr;
+				vec3_t from;
+				pos[2] -= 0.5f * g_gravity.value * eta * eta;
+				VectorCopy(ep->origin, from);
+				JP_Trace(&tr, from, NULL, NULL, pos, bs->currentEnemy->s.number, MASK_PLAYERSOLID & ~CONTENTS_BODY, qfalse, 0, 0);
+				if (tr.fraction < 1.0f) {
+					VectorCopy(tr.endpos, pos);	// he lands before the bolt arrives
+					pos[2] += 24;
+				}
+			} else {
+				pos[2] = ep->origin[2];	// running on the ground: no vertical lead
+			}
+		}
+	}
+	if (splash && !airborne && ep->origin[2] <= bs->origin[2] + 40.0f) {
+		pos[2] -= 22.0f;	// the floor at his feet
+	} else {
+		pos[2] += 6.0f;		// the middle of the body
+	}
+	if (lobbed) {
+		pos[2] += 0.5f * 800.0f * eta * eta;
+	}
+	VectorCopy(pos, out);
+}
+
 void G_NewBotAIAimLeading(bot_state_t* bs, vec3_t headlevel) {
 	vec3_t predictedSpot, a, ang;
 	float eta = 0, projectileDrop = 0;
@@ -7690,6 +8092,8 @@ static qboolean BotNav_PathClear(bot_state_t* bs, vec3_t dir, float dist, float 
 // Start a jump along the flat direction "dir": jump held for holdMs (0 = a tap), and the bot keeps
 // moving in that direction for moveMs so it does not steer away in mid-air.
 static void BotNav_Jump(bot_state_t* bs, vec3_t dir, int holdMs, int moveMs) {
+	botLastNavJumpTime[bs->client] = level.time;
+	botLastNavJumpHold[bs->client] = holdMs;
 	bs->jumpTime = level.time + moveMs + 300; botJumpNoTap[bs->client] = bs->jumpTime;
 	bs->inputHoldUpUntil = level.time + (holdMs > 60 ? holdMs : 60);
 	bs->intentFlags = BOTINTENT_WORLD;
@@ -7759,6 +8163,7 @@ static qboolean BotNav_TryGapJump(bot_state_t* bs, vec3_t dir) {
 		// hold long enough to rise to the apex (a held force jump climbs at about jump speed)
 		BotNav_Jump(bs, dir, (need <= 34.0f) ? 0 : (int)((need - 32.0f) * 1000.0f / 225.0f) + 120, (int)(t * 1000.0f) + 350);
 		botEvalNavGapJumps++;
+		botGapJumpUntil[bs->client] = level.time + 1200;
 		return qtrue;
 	}
 	return qfalse;
@@ -16256,7 +16661,7 @@ void NewBotAI_DoAloneStuff(bot_state_t* bs, float thinktime) {
 	// FALLBACK NAVIGATION WITH FENCE/WALL JUMPS
 	// ========================================
 	if (!destination) {
-		if (bs->cur_ps.weapon == WP_SABER || (bs->features & BOTF_GUNS)) {
+		if (bs->cur_ps.weapon == WP_SABER || (bs->features & (BOTF_GUNS | BOTF_NAV))) {
 			if (BotFallbackNavigation(bs)) {
 				return;
 			}
@@ -16773,6 +17178,7 @@ void NewBotAI(bot_state_t* bs, float thinktime) //BOT START // Niksata Edit - FI
 				// ENHANCED AIMING SYSTEM
 				if (bs->currentEnemy && bs->frame_Enemy_Vis) {
 					vec3_t predictedPos;
+					if ((bs->features & BOTF_GUNS) && bs->cur_ps.weapon != WP_SABER && bs->currentEnemy->client) Bot_GunAim(bs, predictedPos); else
 					BotPredictEnemyPosition(bs, predictedPos);
 					VectorSubtract(predictedPos, bs->eye, a);
 					vectoangles(a, ang);
@@ -17574,7 +17980,7 @@ void StandardBotAI(bot_state_t* bs, float thinktime)
 	}
 	else //We can't find a waypoint, going to need a fallback routine.
 	{
-		if (bs->cur_ps.weapon == WP_SABER || (bs->features & BOTF_GUNS)) // Niksata Edit
+		if (bs->cur_ps.weapon == WP_SABER || (bs->features & (BOTF_GUNS | BOTF_NAV))) // Niksata Edit
 		{
 			doingFallback = BotFallbackNavigation(bs);
 		} // Niksata Edit
@@ -17735,6 +18141,7 @@ void StandardBotAI(bot_state_t* bs, float thinktime)
 			// ENHANCED AIMING SYSTEM // Niksata Edit
 			if (bs->currentEnemy && bs->frame_Enemy_Vis) {
 				vec3_t predictedPos;
+				if ((bs->features & BOTF_GUNS) && bs->cur_ps.weapon != WP_SABER && bs->currentEnemy->client) Bot_GunAim(bs, predictedPos); else
 				BotPredictEnemyPosition(bs, predictedPos);
 				VectorSubtract(predictedPos, bs->eye, a);
 				vectoangles(a, ang);
@@ -18542,7 +18949,7 @@ int BotAISetup(int restart) {
 	trap->Cvar_Register(&bot_profile, "bot_profile", "0", 0);
 	trap->Cvar_Register(&bot_fixes, "bot_fixes", "1", CVAR_ARCHIVE);
 	trap->Cvar_Register(&bot_abBase, "bot_abBase", "0", 0);	// features of the baseline group in an A/B test
-	trap->Cvar_Register(&bot_features, "bot_features", "3926527", CVAR_ARCHIVE);	// everything measured to help or do no harm: all bits except 512 (guide tactics), 1024 (counters), 4096 (swing table) and 262144 (gun distances), which lost their A/B tests
+	trap->Cvar_Register(&bot_features, "bot_features", "4188671", CVAR_ARCHIVE);	// everything measured to help or do no harm: all bits except 512 (guide tactics), 1024 (counters) and 4096 (swing table), which lost their A/B tests
 	trap->Cvar_Register(&bot_abTest, "bot_abTest", "0", 0);
 	trap->Cvar_Register(&bot_attachments, "bot_attachments", "1", 0);
 	trap->Cvar_Register(&bot_camp, "bot_camp", "1", 0);
