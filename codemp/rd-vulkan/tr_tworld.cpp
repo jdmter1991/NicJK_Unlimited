@@ -146,6 +146,8 @@ typedef struct tworld_s {
 	int				*batchCount, *batchStart, *batchCursor;	// per submesh
 	int				*subOrder;		// submesh indexes sorted by shader
 	vec3_t			sunDir, sunColor, ambientColor;
+	vec3_t			skyZenith, skyHorizon;	// display-space sky colours for water reflections
+	float			metresPerUnit;
 
 	// baked sun shadow map (maps/<name>_shadow.dds + maps/<name>.tshadow), NULL when the map has none
 	image_t			*shadowImage;
@@ -172,6 +174,7 @@ static cvar_t	*r_tworldInstancing;
 static cvar_t	*r_tworldShadows;
 static cvar_t	*r_tworldShadowOffset;
 static cvar_t	*r_tworldShadowBias;
+static cvar_t	*r_tworldWaterBump;
 
 static const tworldSub_t *s_sortSubs;
 static int TW_CompareSubs( const void *a, const void *b )
@@ -315,6 +318,7 @@ void R_LoadTWorld( const char *bspName )
 	r_tworldShadows = ri.Cvar_Get( "r_tworldShadows", "1", CVAR_ARCHIVE_ND, "Cooked world: baked sun shadows, 0 = off, up to 1 = sun fully removed in shadow" );
 	r_tworldShadowOffset = ri.Cvar_Get( "r_tworldShadowOffset", "2.0", CVAR_TEMP, "Cooked world shadows: receiver offset along its normal, in shadow map texels" );
 	r_tworldShadowBias = ri.Cvar_Get( "r_tworldShadowBias", "1.5", CVAR_TEMP, "Cooked world shadows: depth bias, in shadow map texels" );
+	r_tworldWaterBump = ri.Cvar_Get( "r_tworldWaterBump", "0.015", CVAR_ARCHIVE_ND, "Cooked world water: slope of the ripples (0 = mirror)" );
 	r_tworldInstancing = ri.Cvar_Get( "r_tworldInstancing", "1", CVAR_ARCHIVE_ND, "Cooked world: 1 = one instanced draw per mesh level and material, 0 = one draw per placement through the model path" );
 
 	if ( !vk.vboMdvActive )
@@ -391,6 +395,16 @@ void R_LoadTWorld( const char *bspName )
 	VectorNormalize( tw->sunDir );
 	VectorCopy( h->sunColor, tw->sunColor );
 	VectorCopy( h->ambientColor, tw->ambientColor );
+	tw->metresPerUnit = ( h->unitsPerMetre > 0.001f ) ? 1.0f / h->unitsPerMetre : 0.0254f;
+	if ( h->reserved[0] || h->reserved[1] ) {
+		for ( i = 0; i < 3; i++ ) {
+			tw->skyZenith[i] = ( ( h->reserved[0] >> ( 16 - 8 * i ) ) & 255 ) / 255.0f;
+			tw->skyHorizon[i] = ( ( h->reserved[1] >> ( 16 - 8 * i ) ) & 255 ) / 255.0f;
+		}
+	} else {
+		VectorSet( tw->skyZenith, 0.35f, 0.50f, 0.80f );
+		VectorSet( tw->skyHorizon, 0.75f, 0.80f, 0.85f );
+	}
 	tw->meshes = (tworldMesh_t *)ri.Hunk_Alloc( sizeof( tworldMesh_t ) * h->numMeshes, h_low );
 	tw->subs = (tworldSub_t *)ri.Hunk_Alloc( sizeof( tworldSub_t ) * ( h->numSubmeshes + 1 ), h_low );
 	tw->instances = (tworldInst_t *)ri.Hunk_Alloc( sizeof( tworldInst_t ) * ( h->numInstances + 1 ), h_low );
@@ -615,7 +629,7 @@ static qboolean RB_TWorldInstanced( tworld_t *tw, const int pass )
 	const float		*viewOrg = backEnd.viewParms.ori.origin;
 	const int		mirror = ( backEnd.viewParms.portalView == PV_MIRROR ) ? 1 : 0;
 	int				i, j, p, numVis = 0, total = 0, run = 0, draws = 0, indexes = 0;
-	uint32_t		bufOffset, uboOffset;
+	uint32_t		bufOffset, uboOffset, mainOffset = ~0U;
 	twInstData_t	*data;
 	vkUniformEntity_t u = {};
 
@@ -702,11 +716,20 @@ static qboolean RB_TWorldInstanced( tworld_t *tw, const int pass )
 		Com_Memcpy( u.modelMatrix, tw->shadowRow, sizeof( tw->shadowRow ) );
 		u.modelMatrix[12] = r_tworldShadowOffset->value * tw->shadowTexel;
 		u.modelMatrix[13] = r_tworldShadowBias->value * tw->shadowTexel / tw->shadowRange;
-		u.modelMatrix[14] = ( r_tworldShadows->value > 1.0f ) ? 1.0f : r_tworldShadows->value;
+		u.modelMatrix[14] = r_tworldShadows->value;		// above 1: debug views, see tworld.frag
 	}
 	uboOffset = data ? vk_append_uniform( &u, sizeof( u ), vk.uniform_entity_item_size ) : ~0U;
+	{
+		// the pass's own block in the main uniform slot: camera and sky, for water reflections
+		vkUniform_t m = {};
+		float *f = (float *)&m;
+		VectorCopy( viewOrg, f );					f[3] = tw->metresPerUnit;
+		VectorCopy( tw->skyZenith, f + 4 );			f[7] = r_tworldWaterBump->value;
+		VectorCopy( tw->skyHorizon, f + 8 );
+		mainOffset = ( uboOffset != ~0U ) ? vk_append_uniform( &m, sizeof( m ), vk.uniform_item_size ) : ~0U;
+	}
 
-	if ( !data || uboOffset == ~0U ) {
+	if ( !data || uboOffset == ~0U || mainOffset == ~0U ) {
 		// per-frame buffer too small: skip the cooked world this frame and ask for a bigger buffer
 		tw->c_uboFail++;
 		if ( !vk.geometry_buffer_size_new && vk.geometry_buffer_size < ( 256u << 20 ) )
@@ -742,7 +765,10 @@ static qboolean RB_TWorldInstanced( tworld_t *tw, const int pass )
 			out->params[0] = tw->details[sub->tintIndex];
 			out->params[1] = sub->texNoScale;
 			out->params[2] = (float)tw->anims[sub->tintIndex];
-			out->params[3] = ( tw->anims[sub->tintIndex] == 3 ) ? mesh->zmax : mesh->zmin;
+			if ( tw->anims[sub->tintIndex] == 4 )
+				out->params[3] = sub->shader->stages[1] ? 1.0f : 0.0f;		// foam: a second noise texture is present
+			else
+				out->params[3] = ( tw->anims[sub->tintIndex] == 3 ) ? mesh->zmax : mesh->zmin;
 		}
 	}
 
@@ -753,6 +779,7 @@ static qboolean RB_TWorldInstanced( tworld_t *tw, const int pass )
 	vk_tworld_reset_descriptors();
 	vk_update_descriptor( VK_DESC_UNIFORM, vk.cmd->uniform_descriptor );
 	vk_update_descriptor_offset( VK_DESC_UNIFORM_ENTITY_BINDING, uboOffset );
+	vk_update_descriptor_offset( VK_DESC_UNIFORM_MAIN_BINDING, mainOffset );
 
 	for ( i = 0; i < tw->numSubs; i++ ) {
 		const int s = tw->subOrder[i];
@@ -786,7 +813,7 @@ static qboolean RB_TWorldInstanced( tworld_t *tw, const int pass )
 		vk_bind_pipeline( sub->pipeline[mirror] - 1 );
 		vk_update_descriptor( VK_DESC_TEXTURE0, image->descriptor_set );
 		{
-			const shaderStage_t *ds = ( tw->details[sub->tintIndex] > 0.0f || tw->anims[sub->tintIndex] == 1 ) ? sub->shader->stages[1] : NULL;
+			const shaderStage_t *ds = ( tw->details[sub->tintIndex] > 0.0f || tw->anims[sub->tintIndex] == 1 || tw->anims[sub->tintIndex] == 4 ) ? sub->shader->stages[1] : NULL;
 			image_t *detail = ( ds && ds->bundle[0].image[0] ) ? ds->bundle[0].image[0] : tr.whiteImage;
 			vk_update_descriptor( VK_DESC_TEXTURE0 + 1, detail->descriptor_set );
 		}

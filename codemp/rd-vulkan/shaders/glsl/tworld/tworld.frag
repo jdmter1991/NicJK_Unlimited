@@ -1,8 +1,13 @@
 #version 450
 
 // Cooked static world, instanced path: one texture times the lit, tinted vertex colour, with an optional
-// tiling detail layer (mean grey 0.5, applied as a x2 multiply). Water (animation type 1) uses the second
-// texture as a ripple pattern: two layers scroll over world-space coordinates and modulate the brightness.
+// tiling detail layer (mean grey 0.5, applied as a x2 multiply).
+// Water (animation type 1), after the source scene's material: a dark, mirror-like surface. The second texture
+// holds a tiling noise (R height, G/B its gradient); two layers of it (0.35 and 1.3 per metre, drifting at
+// (0.4, 0.15) and (-0.25, 0.3) m/s) tilt the normal slightly. The surface shows its own dark colour looking down
+// and the sky colour towards the horizon (Fresnel), plus a tight sun glint.
+// Falling water / foam (animation type 4): white, alpha = (n1.r + n2.r) * n3.b [* m.g] * fade * 0.75 with three
+// scrolling samples of the first texture and optionally one of the second, as in the source material.
 // Alpha test uses the same specialization constants as the generic fragment shader.
 // Sun shadows: a baked depth map seen from the sun (16-bit, one channel). The fragment's depth in sun space
 // is compared against a 4x4 block of texels with bilinear weights (a 3x3 box of bilinear lookups).
@@ -10,6 +15,13 @@
 layout(set = 1, binding = 0) uniform sampler2D texture0;
 layout(set = 2, binding = 0) uniform sampler2D texture1;	// detail or ripple pattern; a white image when unused
 layout(set = 3, binding = 0) uniform sampler2D texture2;	// sun shadow depth map; a white image when unused
+
+layout(set = 0, binding = 0) uniform TWorld {
+	vec4 eye;				// xyz: camera position (world units), w: metres per world unit
+	vec4 skyZenith;			// rgb: sky colour straight up, a: water ripple slope scale
+	vec4 skyHorizon;		// rgb: sky colour just above the horizon
+	vec4 spare;
+} u_tw;
 
 layout(set = 0, binding = 2) uniform Entity {
 	vec4 ambientLight;
@@ -24,14 +36,16 @@ layout(location = 1) in vec4 frag_color;
 layout(location = 2) in vec2 frag_detail_coord;
 layout(location = 3) flat in float frag_detail;
 layout(location = 4) flat in vec4 frag_texscale;
-layout(location = 5) in vec2 frag_world_xy;
+layout(location = 5) in vec3 frag_world;
 layout(location = 6) flat in vec2 frag_anim;		// x animation type, y time
 layout(location = 7) in vec3 frag_sun;
 layout(location = 8) in vec3 frag_shadow;
+layout(location = 9) in float frag_fade;
+layout(location = 10) flat in float frag_ref;
 
 // share of the sun that reaches the fragment: 1 = fully lit
 float sun_visibility() {
-	float strength = u_entity.modelMatrix[3].z;
+	float strength = min( u_entity.modelMatrix[3].z, 1.0 );
 	if ( strength <= 0.0 )
 		return 1.0;
 	ivec2 size = textureSize( texture2, 0 );
@@ -79,15 +93,44 @@ void main() {
 		base.rgb *= texture( texture1, frag_detail_coord ).rgb * 2.0;
 	}
 
-	vec4 color = vec4( base.rgb * ( frag_color.rgb + frag_sun * sun_visibility() ), base.a * frag_color.a );
+	float vis = sun_visibility();
+	vec3 lit = frag_color.rgb + frag_sun * vis;
+	vec4 color = vec4( base.rgb * lit, base.a * frag_color.a );
 
 	if ( frag_anim.x > 0.5 && frag_anim.x < 1.5 ) {
 		float t = frag_anim.y;
-		float r1 = texture( texture1, frag_world_xy * 0.0040 + vec2( t * 0.030, t * 0.021 ) ).r;
-		float r2 = texture( texture1, frag_world_xy * 0.0093 + vec2( -t * 0.027, t * 0.035 ) ).r;
-		float ripple = r1 * r2 * 4.0;					// mean about 1
-		color.rgb *= 0.70 + 0.30 * ripple;
-		color.rgb += vec3( 0.55, 0.60, 0.62 ) * pow( clamp( ripple - 1.15, 0.0, 1.0 ), 2.0 ) * 1.6;	// glints
+		vec2 pm = frag_world.xy * u_tw.eye.w;			// metres
+		vec3 n1 = texture( texture1, ( pm + t * vec2( 0.40, 0.15 ) ) * ( 0.35 / 8.0 ) ).rgb;
+		vec3 n2 = texture( texture1, ( pm + t * vec2( -0.25, 0.30 ) ) * ( 1.30 / 8.0 ) ).rgb;
+		vec2 grad = ( ( n1.gb - 0.5 ) * 0.35 + ( n2.gb - 0.5 ) * 1.30 ) / 0.08;	// height change per metre
+		vec3 N = normalize( vec3( -grad * u_tw.skyZenith.a, 1.0 ) );
+		vec3 V = normalize( u_tw.eye.xyz - frag_world );
+		float F = 0.02 + 0.98 * pow( 1.0 - max( dot( N, V ), 0.0 ), 5.0 );
+		vec3 R = reflect( -V, N );
+		vec3 sky = mix( u_tw.skyHorizon.rgb, u_tw.skyZenith.rgb, pow( clamp( R.z, 0.0, 1.0 ), 0.5 ) );
+		float glint = pow( max( dot( R, u_entity.localLightOrigin.xyz ), 0.0 ), 1500.0 ) * 3.0 * vis;
+		color.rgb = lit * ( 1.0 - F ) + sky * ( F * 0.7 ) + u_entity.directedLight.rgb * glint;	// 0.7: part of what a real surface would mirror is buildings, not sky
+		color.a = mix( frag_color.a, 1.0, F );
+	} else if ( frag_anim.x > 3.5 ) {
+		float t = frag_anim.y;
+		vec2 uv = vec2( frag_tex_coord.x, 1.0 - frag_tex_coord.y );		// the source's UV space (V up)
+		vec2 c1 = uv * vec2( 1.50, 0.50 ) + t * vec2( -0.012, 0.06 );
+		vec2 c2 = uv * vec2( 1.25, 0.25 ) + t * vec2( 0.006, 0.12 );
+		vec2 c3 = uv * vec2( 0.80, 0.20 ) + t * vec2( 0.012, 0.12 );
+		float a = ( texture( texture0, vec2( c1.x, 1.0 - c1.y ) ).r + texture( texture0, vec2( c2.x, 1.0 - c2.y ) ).r )
+				* texture( texture0, vec2( c3.x, 1.0 - c3.y ) ).b;
+		if ( frag_ref > 0.5 ) {
+			vec2 c4 = uv * vec2( 0.50, 0.05 ) + t * vec2( 0.0024, 0.012 );
+			a *= texture( texture1, vec2( c4.x, 1.0 - c4.y ) ).g;
+		}
+		a = clamp( a * frag_fade * 0.75, 0.0, 1.0 );
+		color = vec4( lit + vec3( 0.25, 0.28, 0.30 ) * a, a );
+	}
+
+	// debugging aid (r_tworldShadows 2 / 3): the stored map depth / the receiver depth as repeating grey bands
+	if ( u_entity.modelMatrix[3].z >= 1.5 ) {
+		float v = ( u_entity.modelMatrix[3].z >= 2.5 ) ? frag_shadow.z : texelFetch( texture2, ivec2( floor( frag_shadow.xy ) ), 0 ).r;
+		color = vec4( vec3( fract( v * 64.0 ) ), 1.0 );
 	}
 
 	out_color = color;

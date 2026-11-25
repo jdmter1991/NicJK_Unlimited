@@ -8,7 +8,8 @@
 // shadow map says the point is occluded.
 //
 // Animation (in_params.z): 0 none, 1 water (fragment shader), 2 vegetation swaying in the wind,
-// 3 cloth hanging from its top edge. Driven by the time in u_entity.localViewOrigin.w.
+// 3 cloth hanging from its top edge, 4 falling water / foam (fragment shader). Time is u_entity.ambientLight.a.
+// Foam meshes carry a fade factor in the length of their normals (0.25 = fully faded .. 1).
 
 layout(push_constant) uniform Transform {
 	mat4 mvp;				// world -> clip
@@ -41,10 +42,12 @@ layout(location = 1) out vec4 frag_color;
 layout(location = 2) out vec2 frag_detail_coord;
 layout(location = 3) flat out float frag_detail;
 layout(location = 4) flat out vec4 frag_texscale;	// x intensity, y 1/gamma, z overbright scale, w 1 = apply
-layout(location = 5) out vec2 frag_world_xy;
+layout(location = 5) out vec3 frag_world;
 layout(location = 6) flat out vec2 frag_anim;		// x animation type, y time
 layout(location = 7) out vec3 frag_sun;				// sun part of the light times the tint
 layout(location = 8) out vec3 frag_shadow;			// shadow map texel x, y and depth
+layout(location = 9) out float frag_fade;			// foam: the mesh's fade factor
+layout(location = 10) flat out float frag_ref;		// in_params.w
 
 out gl_PerVertex {
 	vec4 gl_Position;
@@ -88,7 +91,9 @@ void main() {
 	frag_detail_coord = in_tex_coord * in_params.x;
 	frag_detail = in_params.x;
 	frag_texscale = vec4( u_entity.localViewOrigin.xyz, in_params.y );
-	frag_world_xy = world.xy;
+	frag_world = world;
+	frag_fade = clamp( ( length( in_normal ) - 0.25 ) / 0.75, 0.0, 1.0 );
+	frag_ref = in_params.w;
 	frag_anim = vec2( in_params.z, time );
 	gl_Position = mvp * vec4( world, 1.0 );
 }
