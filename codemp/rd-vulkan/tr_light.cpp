@@ -287,6 +287,9 @@ void R_SetupEntityLighting( const trRefdef_t *refdef, trRefEntity_t *ent ) {
 		&& tr.world->lightGridData) {
 		R_SetupEntityLightingGrid(ent);
 	}
+	else if ( !( refdef->rdflags & RDF_NOWORLDMODEL ) && R_TWorldEntityLight( ent ) ) {
+		// no light grid, but a cooked world: its sun and ambient light the entity like the world around it
+	}
 	else {
 		ent->ambientLight[0] = ent->ambientLight[1] =
 			ent->ambientLight[2] = tr.identityLight * 150;

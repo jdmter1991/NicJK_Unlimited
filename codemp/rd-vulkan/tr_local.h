@@ -1994,6 +1994,7 @@ void		R_AddDrawSurf( surfaceType_t *surface, shader_t *shader, int fogIndex, int
 void		R_LoadTWorld( const char *bspName );
 void		R_AddTWorldSurface( void );
 void		RB_SurfaceTWorld( void *surface );
+qboolean	R_TWorldEntityLight( trRefEntity_t *ent );
 #ifdef USE_VBO_MDV
 void		RB_SurfaceVBOMDVMesh( srfVBOMDVMesh_t *surf );
 #endif

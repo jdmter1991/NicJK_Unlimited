@@ -422,6 +422,29 @@ void R_LoadTWorld( const char *bspName )
 
 /*
 =================
+R_TWorldEntityLight
+
+Entity lighting on a map whose BSP has no light grid: use the cooked world's sun and ambient colour, so
+players and other models are shaded like the geometry around them (same response curve in both shaders).
+There is no occlusion: an entity under a roof is lit like one in the open.
+=================
+*/
+qboolean R_TWorldEntityLight( trRefEntity_t *ent )
+{
+	float scale;
+
+	if ( !s_tworld || !r_tworld || !r_tworld->integer )
+		return qfalse;
+
+	scale = 255.0f * tr.identityLight * r_tworldLight->value;
+	VectorScale( s_tworld->ambientColor, scale, ent->ambientLight );
+	VectorScale( s_tworld->sunColor, scale, ent->directedLight );
+	VectorCopy( s_tworld->sunDir, ent->lightDir );
+	return qtrue;
+}
+
+/*
+=================
 R_AddTWorldSurface
 
 Front end: one draw surface for the whole cooked world, and its bounds added
