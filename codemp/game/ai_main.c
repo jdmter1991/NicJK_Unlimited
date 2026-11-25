@@ -203,6 +203,51 @@ vmCvar_t bot_abTest;
 //        saber and footsteps and sees round himself in third person), and the bot turns on whoever
 //        is the bigger threat instead of staying fixed on the enemy it picked first
 #define BOTF_AWARE		65536
+// 131072: force economy: at low Force the bot stops using powers and switches off the ones that
+//         block regeneration until it has recovered; a grip is broken by a push at the gripper
+//         (or Absorb when the push is too weak to break it)
+#define BOTF_FPMGMT		131072
+// 262144: guns: a bot holding a gun keeps a distance that suits that gun instead of running into
+//         saber reach, is not forced back to the saber while it has an enemy, lets go of a charged
+//         shot when the charge is ready, does not fire explosives at its own feet, and explores
+//         the map with a gun in hand as it does with a saber
+#define BOTF_GUNS		262144
+// 524288: the world: the use key is pressed on purpose at doors and buttons that need it, touch
+//         buttons are walked into, lifts are boarded and ridden, things that open when shot are
+//         shot, use-triggers are used; doors that are locked or opened from elsewhere are not
+//         treated as a way through
+#define BOTF_WORLD		524288
+// 1048576: objectives: in Capture the Flag / Ysalamiri every bot has a job that follows from where
+//          the flags are (bring the enemy flag home, get our dropped flag, chase our flag's
+//          carrier, escort our carrier, go for the enemy flag, or guard the base) and walks to it,
+//          over waypoints where the map has them and by exploring toward it where it has none
+#define BOTF_OBJECTIVE	1048576
+// 2097152: no walking off cliffs: a step that leads over an edge with no ground within 320 units
+//          below is not taken, whatever asked for it (a fight, an evasion, a path)
+#define BOTF_CLIFF		2097152
+
+// the distance band a bot wants to fight in with this weapon; qfalse for the saber and melee
+static qboolean Bot_GunBand(int weapon, qboolean enemyHasSaber, float *min, float *max) {
+	switch (weapon) {
+	case WP_BRYAR_PISTOL: case WP_BRYAR_OLD: case WP_BLASTER: case WP_REPEATER: case WP_BOWCASTER: case WP_DEMP2:
+		*min = 260; *max = 620; break;
+	case WP_DISRUPTOR:
+		*min = 500; *max = 1500; break;
+	case WP_FLECHETTE:
+		*min = 130; *max = 320; break;		// a shotgun: close, but outside saber reach
+	case WP_ROCKET_LAUNCHER: case WP_CONCUSSION:
+		*min = 380; *max = 950; break;		// splash damage: never close
+	case WP_THERMAL:
+		*min = 320; *max = 620; break;
+	default:
+		return qfalse;
+	}
+	if (enemyHasSaber && *min < 220) {
+		*min = 220;							// he needs to reach us, we do not need to reach him
+		if (*max < 360) *max = 360;
+	}
+	return qtrue;
+}
 
 /*
 ==============
@@ -221,7 +266,7 @@ enum {
 	BT_EVADE_HORIZON, BT_EVADE_DIST, BT_EVADE_HOLD, BT_HEAVY_DIST, BT_HEAVY_HEALTH, BT_RETREAT_HEALTH,
 	BT_TRACK_NEAR, BT_TRACK_FAR, BT_TRACK_HORIZON,
 	BT_LIGHTNING_NEAR, BT_DRAIN_HEALTH, BT_PUSH_DIST, BT_PUSH_CHANCE, BT_PULL_CHANCE, BT_THROW_NEAR, BT_THROW_CHANCE,
-	BT_FORCE_PAUSE, BT_KATA_CHANCE, BT_AWARE_DIST,
+	BT_FORCE_PAUSE, BT_KATA_CHANCE, BT_AWARE_DIST, BT_FP_LOW, BT_FP_OK,
 	BT_COUNT
 };
 typedef struct btDef_s { const char *name; float def, min, max, step; } btDef_t;
@@ -245,6 +290,8 @@ static const btDef_t btDefs[BT_COUNT] = {
 	{ "forcePause",		100,  40, 300, 15 },	// pauses between force uses, percent of the hand-set ones
 	{ "kataChance",		 35,   0, 100,  8 },
 	{ "awareDist",		600, 250, 1000, 60 },	// enemies inside this distance are noticed in any direction
+	{ "fpLow",			 25,  20,  50,  5 },	// below this much Force: stop using powers and recover (20 is always kept for a push out of a grip)
+	{ "fpOk",			 60,  35,  95,  8 },	// ... until there is this much again
 };
 static float btMean[BT_COUNT];
 static float btVal[MAX_CLIENTS][BT_COUNT], btEps[MAX_CLIENTS][BT_COUNT];
@@ -410,6 +457,54 @@ static int botEvalPredThreats, botEvalPredEvades, botEvalLearnSamples, botEvalLe
 static int Bot_LearnTotal(void);
 static int botEvalPredChase, botEvalPredOnTarget;
 static int botEvalAwareFound, botEvalAwareSwitch, botEvalAwareHurtSwitch;
+static int botEvalFpRecover, botEvalFpPowersOff, botEvalGripSeen, botEvalGripPush, botEvalGripAbsorb, botEvalGripFree;
+static int botEvalStyleKills[8], botEvalStyleDeaths[8], botEvalStyleThinks[8];	// by the style the bot was in
+static int botEvalStyleWhy[6];
+// what happened in the match, whatever the game type: flags taken / captured / returned, siege
+// objectives completed, siege rounds ended; kills by means; kills of a teammate; deaths with no killer
+static int botEvalEvents[8];	// ... 5: a door, lift or button set going by a bot, 6: a use-trigger fired by a bot
+static int botEvalWorld[6];		// use on a mover, use in a trigger, touch button reached, shot open, lift boarded, lift ridden up
+static int botUsePress[MAX_CLIENTS];		// the use key is held until this time
+static int botUseAimUntil[MAX_CLIENTS];		// the view is put on botUseAim until this time
+static vec3_t botUseAim[MAX_CLIENTS];
+static void Bot_WorldUse(bot_state_t* bs);
+static int Bot_ObjectiveGoal(bot_state_t* bs, vec3_t goal);
+static void Bot_ObjectiveThink(bot_state_t* bs);
+static int botEvalObj[8];		// thinks by job: none, carry home, get our dropped flag, chase their carrier, escort, go for their flag, guard
+static int botEvalObjDirect, botEvalObjWp, botEvalWpThinks, botEvalNoWpThinks;
+static int botEvalCliffStops, botEvalFallDeaths;
+static int botEvalKillMeans[5];	// saber, gun, explosive, force, other
+static int botEvalTeamKills, botEvalSelfDeaths;
+void BotEval_NoteEvent(int kind) {
+	if (kind >= 0 && kind < 8) botEvalEvents[kind]++;
+}
+void BotEval_NoteKill(int attacker, int victim, int mod) {
+	if (mod == MOD_FALLING) botEvalFallDeaths++;
+	if (attacker < 0 || attacker >= MAX_CLIENTS || attacker == victim || !g_entities[attacker].client) {
+		botEvalSelfDeaths++;
+		return;
+	}
+	if (victim >= 0 && victim < MAX_CLIENTS && g_entities[victim].client && OnSameTeam(&g_entities[attacker], &g_entities[victim])) {
+		botEvalTeamKills++;
+	}
+	switch (mod) {
+	case MOD_SABER:
+		botEvalKillMeans[0]++; break;
+	case MOD_BRYAR_PISTOL: case MOD_BRYAR_PISTOL_ALT: case MOD_BLASTER: case MOD_TURBLAST: case MOD_DISRUPTOR: case MOD_DISRUPTOR_SPLASH:
+	case MOD_DISRUPTOR_SNIPER: case MOD_BOWCASTER: case MOD_REPEATER: case MOD_DEMP2: case MOD_FLECHETTE: case MOD_CONC: case MOD_CONC_ALT:
+		botEvalKillMeans[1]++; break;
+	case MOD_REPEATER_ALT: case MOD_REPEATER_ALT_SPLASH: case MOD_DEMP2_ALT: case MOD_FLECHETTE_ALT_SPLASH: case MOD_ROCKET: case MOD_ROCKET_SPLASH:
+	case MOD_ROCKET_HOMING: case MOD_ROCKET_HOMING_SPLASH: case MOD_THERMAL: case MOD_THERMAL_SPLASH: case MOD_TRIP_MINE_SPLASH:
+	case MOD_TIMED_MINE_SPLASH: case MOD_DET_PACK_SPLASH:
+		botEvalKillMeans[2]++; break;
+	case MOD_FORCE_DARK:
+		botEvalKillMeans[3]++; break;
+	default:
+		botEvalKillMeans[4]++; break;
+	}
+}	// finish him, hurt, inside heavy swings, outreach light swings, break a passive guard, keeps away
+static qboolean botFpRecover[MAX_CLIENTS];
+static qboolean botGenCmdBypass;
 static void Bot_Awareness(bot_state_t* bs);
 // every jump request is counted by the source line that asked for it
 // jumpTime values that only mean "no new jump before this time": the jump itself was already
@@ -544,6 +639,24 @@ static void BotEval_Report(void) {
 		botEvalPredThreats, botEvalPredEvades, botEvalLearnSamples, botEvalLearnOverrides, botEvalLearnExplore, Bot_LearnTotal());
 	Bot_TuneReport();
 	BotJump_Report();
+	trap->Print("BOTEVAL force economy: went into recovery %d, powers switched off to regenerate %d; grips noticed %d, push at the gripper %d, absorb instead %d, got free %d\n",
+		botEvalFpRecover, botEvalFpPowersOff, botEvalGripSeen, botEvalGripPush, botEvalGripAbsorb, botEvalGripFree);
+	trap->Print("BOTEVAL stance chosen: (unused %d %d) strong against an enemy who keeps swinging %d, (unused %d) heaviest style against one who does not press %d, medium against one who keeps away %d\n",
+		botEvalStyleWhy[0], botEvalStyleWhy[1], botEvalStyleWhy[2], botEvalStyleWhy[3], botEvalStyleWhy[4], botEvalStyleWhy[5]);
+	trap->Print("BOTEVAL by style (kills/deaths/close-combat thinks): fast %d/%d/%d medium %d/%d/%d strong %d/%d/%d desann %d/%d/%d tavion %d/%d/%d dual %d/%d/%d staff %d/%d/%d\n",
+		botEvalStyleKills[SS_FAST], botEvalStyleDeaths[SS_FAST], botEvalStyleThinks[SS_FAST], botEvalStyleKills[SS_MEDIUM], botEvalStyleDeaths[SS_MEDIUM], botEvalStyleThinks[SS_MEDIUM],
+		botEvalStyleKills[SS_STRONG], botEvalStyleDeaths[SS_STRONG], botEvalStyleThinks[SS_STRONG], botEvalStyleKills[SS_DESANN], botEvalStyleDeaths[SS_DESANN], botEvalStyleThinks[SS_DESANN],
+		botEvalStyleKills[SS_TAVION], botEvalStyleDeaths[SS_TAVION], botEvalStyleThinks[SS_TAVION], botEvalStyleKills[SS_DUAL], botEvalStyleDeaths[SS_DUAL], botEvalStyleThinks[SS_DUAL],
+		botEvalStyleKills[SS_STAFF], botEvalStyleDeaths[SS_STAFF], botEvalStyleThinks[SS_STAFF]);
+	trap->Print("BOTEVAL match: gametype %d, team score red %d blue %d; flags taken %d captured %d returned %d; siege objectives completed %d, rounds ended %d\n",
+		level.gametype, level.teamScores[TEAM_RED], level.teamScores[TEAM_BLUE], botEvalEvents[0], botEvalEvents[1], botEvalEvents[2], botEvalEvents[3], botEvalEvents[4]);
+	trap->Print("BOTEVAL world: use key on a door or button %d, in a use-trigger %d, touch buttons reached %d, shot open %d, lifts boarded %d, lifts ridden up %d; movers set going by bots %d, use-triggers fired by bots %d\n",
+		botEvalWorld[0], botEvalWorld[1], botEvalWorld[2], botEvalWorld[3], botEvalWorld[4], botEvalWorld[5], botEvalEvents[5], botEvalEvents[6]);
+	trap->Print("BOTEVAL objectives (thinks by job): none %d, carry flag home %d, get our dropped flag %d, chase their carrier %d, escort our carrier %d, go for their flag %d, guard base %d; walked straight at it %d, waypoint goals set %d; thinks on a waypoint path %d, without %d\n",
+		botEvalObj[0], botEvalObj[1], botEvalObj[2], botEvalObj[3], botEvalObj[4], botEvalObj[5], botEvalObj[6], botEvalObjDirect, botEvalObjWp, botEvalWpThinks, botEvalNoWpThinks);
+	trap->Print("BOTEVAL cliffs: steps over an edge refused %d; deaths by falling %d\n", botEvalCliffStops, botEvalFallDeaths);
+	trap->Print("BOTEVAL kills by saber %d, gun %d, explosive %d, force %d, other %d; kills of a teammate %d; deaths with no killer %d\n",
+		botEvalKillMeans[0], botEvalKillMeans[1], botEvalKillMeans[2], botEvalKillMeans[3], botEvalKillMeans[4], botEvalTeamKills, botEvalSelfDeaths);
 	trap->Print("BOTEVAL awareness: enemies noticed outside the view %d, switched to a bigger threat %d of which to someone hitting the bot %d\n",
 		botEvalAwareFound, botEvalAwareSwitch, botEvalAwareHurtSwitch);
 	trap->Print("BOTEVAL machine attack: swing frames predicted to land %d, predicted to fall short and closed in %d\n", botEvalPredOnTarget, botEvalPredChase);
@@ -1194,6 +1307,24 @@ static qboolean Bot_ForceCrowded(bot_state_t* bs, float radius) {
 	return qfalse;
 }
 
+// Low on Force: nothing is used until it has come back. Force only regenerates while no power is
+// running, so this is what gets a drained bot its powers back.
+static qboolean Bot_ForceRecovering(bot_state_t* bs) {
+	const gclient_t *cl = g_entities[bs->client].client;
+	const int c = bs->client;
+	if (!(bs->features & BOTF_FPMGMT) || !cl || cl->ps.stats[STAT_HEALTH] <= 0) {
+		botFpRecover[c] = qfalse;
+		return qfalse;
+	}
+	if (!botFpRecover[c] && cl->ps.fd.forcePower < BT(bs, BT_FP_LOW)) {
+		botFpRecover[c] = qtrue;
+		botEvalFpRecover++;
+	} else if (botFpRecover[c] && cl->ps.fd.forcePower >= BT(bs, BT_FP_OK)) {
+		botFpRecover[c] = qfalse;
+	}
+	return botFpRecover[c];
+}
+
 static qboolean Bot_ForceOK(bot_state_t* bs, int power, qboolean cont) {
 	gentity_t *me = &g_entities[bs->client];
 	gentity_t *en = bs->currentEnemy;
@@ -1207,6 +1338,9 @@ static qboolean Bot_ForceOK(bot_state_t* bs, int power, qboolean cont) {
 	ps = &me->client->ps;
 	if (power == FP_PUSH && ps->fd.forceGripBeingGripped > level.time) {
 		return qtrue;	// push breaks a grip
+	}
+	if (Bot_ForceRecovering(bs)) {
+		return qfalse;
 	}
 	if (!en || !en->client || en->health <= 0 || !bs->frame_Enemy_Vis) {
 		return qfalse;
@@ -1287,6 +1421,95 @@ static void Bot_ForceTactics(bot_state_t* bs) {
 	const playerState_t *ps;
 	int known, d, dur, pause;
 
+	if ((bs->features & BOTF_FPMGMT) && me->client && me->health > 0) {
+		static int gripSince[MAX_CLIENTS], offNext[MAX_CLIENTS];
+		const int c = bs->client;
+		const playerState_t *mp = &me->client->ps;
+		int skill = (int)bs->settings.skill;
+		if (skill < 1) skill = 1;
+		if (skill > 5) skill = 5;
+		if (gripSince[c] > level.time) gripSince[c] = 0;	// map restart
+		if (offNext[c] > level.time + 5000) offNext[c] = 0;
+		if (mp->fd.forceGripBeingGripped > level.time) {
+			// Gripped. The game lets a push end the grip when the gripper is caught by it (in front
+			// of the pusher; within 60 degrees at push level 1) and the push level is at least his
+			// grip level. Otherwise Absorb ends it. Low skill takes longer to react.
+			gentity_t *g = NULL;
+			int i;
+			for (i = 0; i < MAX_CLIENTS; i++) {
+				gentity_t *o = &g_entities[i];
+				if (i != c && o->inuse && o->client && o->health > 0 && (o->client->ps.fd.forcePowersActive & (1 << FP_GRIP))
+					&& o->client->ps.fd.forceGripEntityNum == c) {
+					g = o;
+					break;
+				}
+			}
+			if (!gripSince[c]) {
+				gripSince[c] = level.time;
+				botEvalGripSeen++;
+			}
+			if (g) {
+				const int pushLvl = (mp->fd.forcePowersKnown & (1 << FP_PUSH)) ? mp->fd.forcePowerLevel[FP_PUSH] : 0;
+				vec3_t to, ang, fw;
+				float dot;
+				bs->currentEnemy = g;	// turn to him
+				bs->enemySeenTime = level.time + ENEMY_FORGET_MS;
+				VectorSubtract(g->client->ps.origin, bs->origin, to);
+				vectoangles(to, ang);
+				VectorCopy(ang, bs->ideal_viewangles);
+				VectorNormalize(to);
+				AngleVectors(mp->viewangles, fw, NULL, NULL);
+				dot = DotProduct(fw, to);
+				if (level.time - gripSince[c] >= (5 - skill) * 90) {
+					if (pushLvl > 0 && pushLvl >= g->client->ps.fd.forcePowerLevel[FP_GRIP] && mp->fd.forcePower >= 20
+						&& !(g_forcePowerDisable.integer & (1 << FP_PUSH))) {
+						if (dot > ((pushLvl >= 2) ? 0.15f : 0.88f) && Bot_SendGenCmd(bs, GENCMD_FORCE_THROW, 250)) {
+							botEvalGripPush++;
+						}
+					} else if ((mp->fd.forcePowersKnown & (1 << FP_ABSORB)) && !(mp->fd.forcePowersActive & (1 << FP_ABSORB))
+						&& mp->fd.forcePower >= 10 && !(g_forcePowerDisable.integer & (1 << FP_ABSORB))) {
+						botGenCmdBypass = qtrue;
+						if (Bot_SendGenCmd(bs, GENCMD_FORCE_ABSORB, 400)) {
+							botEvalGripAbsorb++;
+						}
+						botGenCmdBypass = qfalse;
+					}
+				}
+			}
+			return;
+		}
+		if (gripSince[c]) {
+			gripSince[c] = 0;
+			if (me->health > 0) botEvalGripFree++;
+		}
+		if (Bot_ForceRecovering(bs) && level.time >= offNext[c]) {
+			// a running power stops regeneration: switch off what can be switched off. Absorb stays
+			// on while somebody near is using lightning, drain or grip, because then it earns Force.
+			int cmd = 0, i;
+			qboolean underForce = qfalse;
+			for (i = 0; i < MAX_CLIENTS && !underForce; i++) {
+				const gentity_t *o = &g_entities[i];
+				if (i != c && o->inuse && o->client && o->health > 0
+					&& (o->client->ps.fd.forcePowersActive & ((1 << FP_LIGHTNING) | (1 << FP_DRAIN) | (1 << FP_GRIP)))
+					&& DistanceSquared(o->client->ps.origin, bs->origin) < 600 * 600) {
+					underForce = qtrue;
+				}
+			}
+			if (mp->fd.forcePowersActive & (1 << FP_SPEED)) cmd = GENCMD_FORCE_SPEED;
+			else if (mp->fd.forcePowersActive & (1 << FP_SEE)) cmd = GENCMD_FORCE_SEEING;
+			else if (mp->fd.forcePowersActive & (1 << FP_PROTECT)) cmd = GENCMD_FORCE_PROTECT;
+			else if ((mp->fd.forcePowersActive & (1 << FP_ABSORB)) && !underForce) cmd = GENCMD_FORCE_ABSORB;
+			if (cmd && mp->forceAllowDeactivateTime < level.time) {
+				botGenCmdBypass = qtrue;
+				if (Bot_SendGenCmd(bs, cmd, 300)) {
+					botEvalFpPowersOff++;
+					offNext[c] = level.time + 700;
+				}
+				botGenCmdBypass = qfalse;
+			}
+		}
+	}
+
 	if (!(bs->features & BOTF_FORCE) || !me->client || me->health <= 0 || !en || !en->client || !bs->frame_Enemy_Vis) {
 		return;
 	}
@@ -1332,7 +1555,45 @@ static void Bot_ForceTactics(bot_state_t* bs) {
 	}
 }
 
+static void BotInputToUserCommand_Inner(bot_state_t* bs, bot_input_t* bi, usercmd_t* ucmd, int delta_angles[3], int time, int useTime);
 void BotInputToUserCommand(bot_state_t* bs, bot_input_t* bi, usercmd_t* ucmd, int delta_angles[3], int time, int useTime) {
+	const gclient_t *cl = g_entities[bs->client].client;
+
+	BotInputToUserCommand_Inner(bs, bi, ucmd, delta_angles, time, useTime);
+	// last of all: is the step this command takes a step over a cliff?
+	if ((bs->features & BOTF_CLIFF) && cl && cl->ps.stats[STAT_HEALTH] > 0 && cl->ps.groundEntityNum != ENTITYNUM_NONE
+		&& (ucmd->forwardmove || ucmd->rightmove) && bs->jumpTime <= level.time && bs->inputHoldUpUntil <= level.time && ucmd->upmove <= 0) {
+		vec3_t a, fw, rt, dir, top, bottom;
+		trace_t tr;
+		int i;
+		VectorSet(a, 0, bi->viewangles[YAW], 0);
+		AngleVectors(a, fw, rt, NULL);
+		VectorScale(fw, (float)ucmd->forwardmove, dir);
+		VectorMA(dir, (float)ucmd->rightmove, rt, dir);
+		dir[2] = 0;
+		if (VectorNormalize(dir) > 0.01f) {
+			for (i = 0; i < 2; i++) {
+				VectorMA(bs->origin, i ? 72.0f : 36.0f, dir, top);
+				// only where the bot could actually walk to: nothing solid between here and there
+				JP_Trace(&tr, bs->origin, NULL, NULL, top, bs->client, MASK_PLAYERSOLID & ~CONTENTS_BODY, qfalse, 0, 0);
+				if (tr.fraction < 1.0f) {
+					break;
+				}
+				VectorCopy(top, bottom);
+				bottom[2] -= 320.0f + 24.0f;
+				JP_Trace(&tr, top, NULL, NULL, bottom, bs->client, MASK_PLAYERSOLID & ~CONTENTS_BODY, qfalse, 0, 0);
+				if (tr.fraction >= 1.0f) {
+					ucmd->forwardmove = 0;
+					ucmd->rightmove = 0;
+					botEvalCliffStops++;
+					break;
+				}
+			}
+		}
+	}
+}
+
+static void BotInputToUserCommand_Inner(bot_state_t* bs, bot_input_t* bi, usercmd_t* ucmd, int delta_angles[3], int time, int useTime) {
 	vec3_t angles, forward, right;
 	short temp;
 	int j;
@@ -1342,6 +1603,13 @@ void BotInputToUserCommand(bot_state_t* bs, bot_input_t* bi, usercmd_t* ucmd, in
 	memset(ucmd, 0, sizeof(usercmd_t));
 	//the duration for the user command in milli seconds
 	ucmd->serverTime = time;
+	if (botUseAimUntil[bs->client] > level.time && botUseAimUntil[bs->client] < level.time + 3000) {
+		// looking at the thing being used or shot (the use key works along the view)
+		vec3_t to;
+		VectorSubtract(botUseAim[bs->client], bs->eye, to);
+		vectoangles(to, bi->viewangles);
+		bi->viewangles[PITCH] = AngleNormalize180(bi->viewangles[PITCH]);
+	}
 	//
 	if (bi->actionflags & ACTION_DELAYEDJUMP) {
 		bi->actionflags |= ACTION_JUMP;
@@ -1384,6 +1652,9 @@ void BotInputToUserCommand(bot_state_t* bs, bot_input_t* bi, usercmd_t* ucmd, in
 
 	if (useTime < level.time && Q_irand(1, 10) < 5)
 	{ //for now just hit use randomly in case there's something useable around
+		ucmd->buttons |= BUTTON_USE;
+	}
+	if (botUsePress[bs->client] > level.time && botUsePress[bs->client] < level.time + 3000) {
 		ucmd->buttons |= BUTTON_USE;
 	}
 
@@ -1797,6 +2068,11 @@ qboolean Bot_SendGenCmd(bot_state_t* bs, int genCmd, int debounceMs) {
 	if (level.time < bs->inputGenCmdTime || bs->inputGenCmd) {
 		return qfalse;
 	}
+	if (botFpRecover[bs->client] && !botGenCmdBypass && genCmd >= GENCMD_FORCE_HEAL && genCmd <= GENCMD_FORCE_SEEING
+		&& !(genCmd == GENCMD_FORCE_THROW && g_entities[bs->client].client
+			&& g_entities[bs->client].client->ps.fd.forceGripBeingGripped > level.time)) {
+		return qfalse;	// recovering Force: no powers
+	}
 	bs->inputGenCmd = genCmd;
 	bs->inputGenCmdTime = level.time + debounceMs;
 	return qtrue;
@@ -1983,6 +2259,10 @@ static qboolean BotNav_PathClear(bot_state_t* bs, vec3_t dir, float dist, float 
 static void BotNav_Jump(bot_state_t* bs, vec3_t dir, int holdMs, int moveMs);
 
 extern void Cmd_Kill_f(gentity_t *ent);
+static qboolean Bot_HoldsFlag(int client) {
+	const gclient_t *cl = g_entities[client].client;
+	return (cl && (cl->ps.powerups[PW_REDFLAG] || cl->ps.powerups[PW_BLUEFLAG] || cl->ps.powerups[PW_NEUTRALFLAG])) ? qtrue : qfalse;
+}
 
 // one recovery attempt; "level" rises with every failed attempt in the same stuck episode
 static void BotAntiIdle_Recover(bot_state_t* bs, int level_) {
@@ -2116,7 +2396,7 @@ static void BotAntiIdle(bot_state_t* bs) {
 		bs->stuckEpisodeTime = 0;
 		bs->stuckKicks = 0;
 		botEvalStuckSuicides++;
-		Cmd_Kill_f(&g_entities[bs->client]);
+		if (!Bot_HoldsFlag(bs->client)) Cmd_Kill_f(&g_entities[bs->client]);
 		return;
 	}
 	BotAntiIdle_Recover(bs, bs->stuckKicks);
@@ -2272,7 +2552,23 @@ int BotAI(int client, float thinktime) {
 		Bot_LearnResolve(bs);
 	}
 	Bot_TuneThink(bs->client, bs->features);
+	{	// kills and deaths credited to the saber style the bot is in
+		static int lastK[MAX_CLIENTS], lastD[MAX_CLIENTS];
+		const gclient_t *sc = g_entities[bs->client].client;
+		if (sc && sc->ps.weapon == WP_SABER) {
+			const int st = sc->ps.fd.saberAnimLevel, k = sc->ps.persistant[PERS_SCORE], dd = sc->ps.persistant[PERS_KILLED];
+			if (st >= 0 && st < 8) {
+				if (sc->ps.stats[STAT_HEALTH] > 0 && bs->currentEnemy && bs->frame_Enemy_Vis && bs->frame_Enemy_Len < 200) botEvalStyleThinks[st]++;
+				if (k == lastK[bs->client] + 1) botEvalStyleKills[st]++;
+				if (dd == lastD[bs->client] + 1) botEvalStyleDeaths[st]++;
+			}
+			lastK[bs->client] = k;
+			lastD[bs->client] = dd;
+		}
+	}
 	Bot_Awareness(bs);
+	Bot_WorldUse(bs);
+	Bot_ObjectiveThink(bs);
 	Bot_ForceTactics(bs);
 #ifdef _DEBUG
 	end = trap->Milliseconds();
@@ -3551,6 +3847,12 @@ int PassStandardEnemyChecks(bot_state_t* bs, gentity_t* en)
 	{ //he's already dead
 		return 0;
 	}
+	if ((bs->features & BOTF_OBJECTIVE) && (level.gametype == GT_CTF || level.gametype == GT_CTY) && g_entities[bs->client].client
+		&& (g_entities[bs->client].client->ps.powerups[PW_REDFLAG] || g_entities[bs->client].client->ps.powerups[PW_BLUEFLAG])
+		&& DistanceSquared(en->client->ps.origin, bs->origin) > 170.0f * 170.0f)
+	{ //carrying the flag: run it home, fight only who is in the way
+		return 0;
+	}
 
 	if (!en->takedamage)
 	{ //a client that can't take damage?
@@ -4109,6 +4411,410 @@ static void Bot_Awareness(bot_state_t* bs) {
 	bs->currentEnemy = &g_entities[best];
 	bs->enemySeenTime = level.time + ENEMY_FORGET_MS;
 	holdUntil[c] = level.time + 900;
+}
+
+/*
+==============
+Objectives  (bot_features 1048576)
+
+Capture the Flag and Capture the Ysalamiri. What a bot should be doing follows from where the two
+flags are, which every player sees on the HUD:
+  1 carrying the enemy flag       -> take it to our flag stand
+  2 our flag lies dropped         -> touch it (that returns it); everyone near it and the guards
+  3 an enemy carries our flag     -> go after the carrier
+  4 a teammate carries their flag -> attackers go with him
+  5 otherwise attackers           -> go for the enemy flag, where it stands or lies
+  6 guards (one bot in three)     -> stay within reach of our flag stand
+Returns the job number and the place to go, or 0 when there is nothing to do but fight.
+==============
+*/
+static int Bot_ObjectiveGoal(bot_state_t* bs, vec3_t goal) {
+	static int cacheTime = -1;
+	static vec3_t basePos[2], flagPos[2];		// [0] red, [1] blue: the stand, and where the flag is now if it lies dropped
+	static qboolean haveBase[2], dropped[2];
+	static int carrier[2];						// client carrying that team's flag, or -1
+	const int c = bs->client;
+	gentity_t *me = &g_entities[c];
+	int my, their, i;
+	qboolean guard;
+
+	if (!(bs->features & BOTF_OBJECTIVE) || (level.gametype != GT_CTF && level.gametype != GT_CTY) || !me->client || me->health <= 0) {
+		return 0;
+	}
+	if (me->client->sess.sessionTeam == TEAM_RED) { my = 0; their = 1; }
+	else if (me->client->sess.sessionTeam == TEAM_BLUE) { my = 1; their = 0; }
+	else return 0;
+
+	if (cacheTime != level.time) {
+		cacheTime = level.time;
+		haveBase[0] = haveBase[1] = dropped[0] = dropped[1] = qfalse;
+		carrier[0] = carrier[1] = -1;
+		for (i = MAX_CLIENTS; i < level.num_entities; i++) {
+			gentity_t *e = &g_entities[i];
+			int t;
+			if (!e->inuse || !e->classname) continue;
+			if (!Q_stricmp(e->classname, "team_CTF_redflag")) t = 0;
+			else if (!Q_stricmp(e->classname, "team_CTF_blueflag")) t = 1;
+			else continue;
+			if (e->flags & FL_DROPPED_ITEM) {
+				VectorCopy(e->r.currentOrigin, flagPos[t]);
+				dropped[t] = qtrue;
+			} else {
+				VectorCopy(e->r.currentOrigin, basePos[t]);
+				haveBase[t] = qtrue;
+			}
+		}
+		for (i = 0; i < MAX_CLIENTS; i++) {
+			gentity_t *o = &g_entities[i];
+			if (!o->inuse || !o->client || o->health <= 0) continue;
+			if (o->client->ps.powerups[PW_REDFLAG]) carrier[0] = i;
+			if (o->client->ps.powerups[PW_BLUEFLAG]) carrier[1] = i;
+		}
+	}
+	if (!haveBase[0] || !haveBase[1]) {
+		return 0;	// not a flag map
+	}
+	guard = ((c % 3) == 0) ? qtrue : qfalse;
+
+	if (carrier[their] == c) {
+		VectorCopy(basePos[my], goal);
+		return 1;
+	}
+	if (dropped[my] && (guard || Distance(flagPos[my], bs->origin) < 2500)) {
+		VectorCopy(flagPos[my], goal);
+		return 2;
+	}
+	if (carrier[my] >= 0 && (guard || Distance(g_entities[carrier[my]].client->ps.origin, bs->origin) < 3500)) {
+		VectorCopy(g_entities[carrier[my]].client->ps.origin, goal);
+		return 3;
+	}
+	if (guard) {
+		if (Distance(basePos[my], bs->origin) > 700) {
+			VectorCopy(basePos[my], goal);
+			return 6;
+		}
+		return 0;
+	}
+	if (carrier[their] >= 0) {
+		if (Distance(g_entities[carrier[their]].client->ps.origin, bs->origin) > 250) {
+			VectorCopy(g_entities[carrier[their]].client->ps.origin, goal);
+			return 4;
+		}
+		return 0;
+	}
+	VectorCopy(dropped[their] ? flagPos[their] : basePos[their], goal);
+	return 5;
+}
+
+// once per think: count the job, and when the place is close and in plain sight walk straight to it
+// (a path or an exploring bot gets near a flag, but a flag has to be touched)
+static void Bot_ObjectiveThink(bot_state_t* bs) {
+	vec3_t goal, eye, to, top;
+	trace_t tr;
+	int job;
+	float d;
+
+	if (bs->wpCurrent) botEvalWpThinks++; else botEvalNoWpThinks++;
+	job = Bot_ObjectiveGoal(bs, goal);
+	{
+		static int dbgNext[MAX_CLIENTS];
+		static vmCvar_t bot_objDebug;
+		static int reg;
+		if (!reg) { trap->Cvar_Register(&bot_objDebug, "bot_objDebug", "0", 0); reg = 1; }
+		if (bot_objDebug.integer && (bs->client % 4) == 1 && level.time >= dbgNext[bs->client]) {
+			dbgNext[bs->client] = level.time + 2000;
+			trap->Print("OBJDBG t=%d bot %d job %d pos (%.0f %.0f %.0f) goal (%.0f %.0f %.0f) dist %.0f wpCur %d wpDest %d enemy %d vis %d elen %d hp %d weapon %d\n",
+				level.time, bs->client, job, bs->origin[0], bs->origin[1], bs->origin[2], goal[0], goal[1], goal[2], job ? Distance(goal, bs->origin) : 0.0f,
+				bs->wpCurrent ? bs->wpCurrent->index : -1, bs->wpDestination ? bs->wpDestination->index : -1,
+				bs->currentEnemy ? bs->currentEnemy->s.number : -1, bs->frame_Enemy_Vis, (int)bs->frame_Enemy_Len, g_entities[bs->client].health, bs->cur_ps.weapon);
+		}
+	}
+	if (job >= 0 && job < 8 && (level.gametype == GT_CTF || level.gametype == GT_CTY)) botEvalObj[job]++;
+	if (!job || job == 6) {
+		return;
+	}
+	// a fight right on top of the bot comes first, except for the flag carrier, who runs
+	if (bs->currentEnemy && bs->frame_Enemy_Vis && bs->frame_Enemy_Len < ((job == 1) ? 90 : 220)) {
+		return;
+	}
+	if (bs->seqType || (bs->intentFlags & BOTINTENT_KATA) || bs->jumpTime > level.time) {
+		return;
+	}
+	VectorSubtract(goal, bs->origin, to);
+	d = VectorLength(to);
+	if (d > 600 || d < 8 || fabs(to[2]) > 90) {
+		return;
+	}
+	VectorCopy(bs->origin, eye);
+	eye[2] += 32;
+	VectorCopy(goal, top);
+	top[2] += 24;
+	JP_Trace(&tr, eye, NULL, NULL, top, bs->client, MASK_PLAYERSOLID & ~CONTENTS_BODY, qfalse, 0, 0);
+	if (tr.fraction < 0.97f && tr.entityNum >= MAX_CLIENTS) {
+		return;
+	}
+	to[2] = 0;
+	VectorNormalize(to);
+	bs->intentFlags = BOTINTENT_WORLD;
+	VectorCopy(to, bs->intentWorldDir);
+	bs->intentButtons = 0;
+	bs->intentUntil = level.time + 200;
+	botEvalObjDirect++;
+}
+
+/*
+==============
+Bot_WorldUse  (bot_features 524288)
+
+What each thing on a map answers to, from the game code (g_mover.c, g_trigger.c, g_utils.c TryUse):
+- a door, button or func_usable marked "player use": the use key, from within 64 units, looking at it
+- a plain func_button: being walked into
+- a door or button with health: being damaged
+- a func_plat without a targetname: standing on it while it is down; it goes up by itself
+- a trigger with the "use button" flag: the use key held while standing in it (facing its
+  direction when it has the "facing" flag)
+A bot that is not fighting looks for these near by, in sight and on its own floor, goes to the
+nearest one it has not dealt with lately and gives it what it needs.
+==============
+*/
+#define BWK_USE		1
+#define BWK_TOUCH	2
+#define BWK_SHOOT	3
+#define BWK_PLAT	4
+static void Bot_WorldUse(bot_state_t* bs) {
+	static int nextScan[MAX_CLIENTS], tgtEnt[MAX_CLIENTS], tgtUntil[MAX_CLIENTS], tgtKind[MAX_CLIENTS], tgtActSince[MAX_CLIENTS];
+	static int doneEnt[MAX_CLIENTS][4], doneTime[MAX_CLIENTS][4], doneNext[MAX_CLIENTS];
+	static int platWaitSince[MAX_CLIENTS], platRiding[MAX_CLIENTS];
+	const int c = bs->client;
+	gentity_t *me = &g_entities[c];
+	gclient_t *cl = me->client;
+	qboolean fighting;
+	int ground, i, k;
+	vec3_t eye;
+
+	if (!(bs->features & BOTF_WORLD) || !cl || me->health <= 0 || cl->sess.sessionTeam == TEAM_SPECTATOR) {
+		tgtUntil[c] = 0;
+		return;
+	}
+	if (nextScan[c] > level.time + 2000) nextScan[c] = 0;	// map restart
+	if (tgtUntil[c] > level.time + 10000) tgtUntil[c] = 0;
+	fighting = (bs->currentEnemy && bs->frame_Enemy_Vis && bs->frame_Enemy_Len < 500) ? qtrue : qfalse;
+	VectorCopy(bs->origin, eye);
+	eye[2] += 32;
+
+	// on a lift: stand still until it has gone up
+	ground = cl->ps.groundEntityNum;
+	if (ground >= MAX_CLIENTS && ground < ENTITYNUM_WORLD && g_entities[ground].inuse && g_entities[ground].classname
+		&& !Q_stricmp(g_entities[ground].classname, "func_plat") && !fighting) {
+		gentity_t *g = &g_entities[ground];
+		if (tgtUntil[c] > level.time && tgtKind[c] == BWK_PLAT && tgtEnt[c] == ground) {
+			botEvalWorld[4]++;
+			tgtUntil[c] = 0;
+			doneEnt[c][doneNext[c] & 3] = ground;
+			doneTime[c][doneNext[c] & 3] = level.time;
+			doneNext[c]++;
+		}
+		if (g->moverState == MOVER_POS1) {
+			if (!platWaitSince[c] || platWaitSince[c] > level.time) platWaitSince[c] = level.time;
+		} else {
+			platWaitSince[c] = 0;
+		}
+		if (g->moverState == MOVER_1TO2 && platRiding[c] != ground) {
+			platRiding[c] = ground;
+			botEvalWorld[5]++;
+		}
+		if (g->moverState == MOVER_1TO2 || (g->moverState == MOVER_POS1 && level.time - platWaitSince[c] < 2500)) {
+			bs->intentFlags = BOTINTENT_MOVE | BOTINTENT_NOJUMP;
+			bs->intentForward = 0;
+			bs->intentRight = 0;
+			bs->intentButtons = 0;
+			bs->intentUntil = level.time + 200;
+			return;
+		}
+	} else {
+		platWaitSince[c] = 0;
+		platRiding[c] = 0;
+	}
+	if (fighting) {
+		tgtUntil[c] = 0;
+		return;
+	}
+
+	if (level.time >= nextScan[c]) {
+		int list[96], num;
+		vec3_t mins, maxs;
+		float best = 520.0f;
+		int bestEnt = -1, bestKind = 0;
+
+		nextScan[c] = level.time + 400;
+		VectorSet(mins, bs->origin[0] - 520, bs->origin[1] - 520, bs->origin[2] - 90);
+		VectorSet(maxs, bs->origin[0] + 520, bs->origin[1] + 520, bs->origin[2] + 130);
+		num = trap->EntitiesInBox(mins, maxs, list, 96);
+		for (i = 0; i < num; i++) {
+			gentity_t *e = &g_entities[list[i]];
+			int kind = 0;
+			vec3_t ctr;
+			float d;
+			trace_t tr;
+			qboolean recent = qfalse;
+
+			if (list[i] < MAX_CLIENTS || !e->inuse || !e->classname || (e->flags & FL_INACTIVE)) {
+				continue;
+			}
+			if (!Q_stricmp(e->classname, "trigger_multiple") || !Q_stricmp(e->classname, "trigger_once")) {
+				// standing in a trigger that wants the use key
+				if ((e->spawnflags & 4) && bs->origin[0] > e->r.absmin[0] && bs->origin[0] < e->r.absmax[0]
+					&& bs->origin[1] > e->r.absmin[1] && bs->origin[1] < e->r.absmax[1]
+					&& bs->origin[2] + 40 > e->r.absmin[2] && bs->origin[2] - 24 < e->r.absmax[2]) {
+					if (botUsePress[c] <= level.time) botEvalWorld[1]++;
+					botUsePress[c] = level.time + 700;
+					if ((e->spawnflags & 2) && (e->movedir[0] != 0 || e->movedir[1] != 0)) {
+						VectorMA(bs->eye, 200, e->movedir, botUseAim[c]);
+						botUseAimUntil[c] = level.time + 700;
+					}
+				}
+				continue;
+			}
+			if (e->s.eType != ET_MOVER || tgtUntil[c] > level.time) {
+				continue;
+			}
+			for (k = 0; k < 4; k++) {
+				if (doneEnt[c][k] == list[i] && doneTime[c][k] <= level.time && level.time - doneTime[c][k] < 20000) recent = qtrue;
+			}
+			if (recent) {
+				continue;
+			}
+			{
+				const qboolean isDoor = !Q_stricmp(e->classname, "func_door") ? qtrue : qfalse;
+				const qboolean isButton = !Q_stricmp(e->classname, "func_button") ? qtrue : qfalse;
+				const qboolean isPlat = !Q_stricmp(e->classname, "func_plat") ? qtrue : qfalse;
+				const qboolean isUsable = !Q_stricmp(e->classname, "func_usable") ? qtrue : qfalse;
+				const qboolean shut = (e->moverState == MOVER_POS1) ? qtrue : qfalse;
+				if (isPlat && shut && !(e->targetname && e->targetname[0]) && fabs(e->r.absmax[2] - (bs->origin[2] - 24.0f)) < 40.0f) {
+					kind = BWK_PLAT;
+				} else if ((e->r.svFlags & SVF_PLAYER_USABLE) && (isUsable || ((isButton || isDoor) && shut && !(e->spawnflags & 16)))) {
+					kind = BWK_USE;
+				} else if (isButton && shut && e->health <= 0) {
+					kind = BWK_TOUCH;
+				} else if (e->health > 0 && e->takedamage && shut && (isButton || isDoor)) {
+					kind = BWK_SHOOT;
+				}
+			}
+			if (!kind) {
+				continue;
+			}
+			VectorAdd(e->r.absmin, e->r.absmax, ctr);
+			VectorScale(ctr, 0.5f, ctr);
+			d = Distance(ctr, bs->origin);
+			if (d >= best) {
+				continue;
+			}
+			JP_Trace(&tr, eye, NULL, NULL, ctr, c, MASK_PLAYERSOLID & ~CONTENTS_BODY, qfalse, 0, 0);
+			if (tr.fraction < 0.98f && tr.entityNum != list[i]) {
+				continue;	// not in sight
+			}
+			best = d;
+			bestEnt = list[i];
+			bestKind = kind;
+		}
+		if (bestEnt >= 0) {
+			tgtEnt[c] = bestEnt;
+			tgtKind[c] = bestKind;
+			tgtUntil[c] = level.time + 6000;
+			tgtActSince[c] = 0;
+		}
+	}
+
+	if (tgtUntil[c] > level.time) {
+		gentity_t *e = &g_entities[tgtEnt[c]];
+		vec3_t ctr, flat;
+		float d2;
+		qboolean done = qfalse;
+
+		if (!e->inuse || (e->flags & FL_INACTIVE)) {
+			tgtUntil[c] = 0;
+			return;
+		}
+		VectorAdd(e->r.absmin, e->r.absmax, ctr);
+		VectorScale(ctr, 0.5f, ctr);
+		if (tgtKind[c] == BWK_PLAT) ctr[2] = e->r.absmax[2];
+		VectorSubtract(ctr, bs->origin, flat);
+		flat[2] = 0;
+		d2 = VectorNormalize(flat);
+		// how far from the nearest face rather than from the middle, for wide doors
+		{
+			float dx = 0, dy = 0;
+			if (bs->origin[0] < e->r.absmin[0]) dx = e->r.absmin[0] - bs->origin[0]; else if (bs->origin[0] > e->r.absmax[0]) dx = bs->origin[0] - e->r.absmax[0];
+			if (bs->origin[1] < e->r.absmin[1]) dy = e->r.absmin[1] - bs->origin[1]; else if (bs->origin[1] > e->r.absmax[1]) dy = bs->origin[1] - e->r.absmax[1];
+			if (tgtKind[c] != BWK_PLAT) d2 = sqrt(dx * dx + dy * dy);
+		}
+		switch (tgtKind[c]) {
+		case BWK_PLAT:
+			if (e->moverState != MOVER_POS1) {
+				tgtUntil[c] = 0;	// it left without us
+				return;
+			}
+			break;
+		case BWK_TOUCH:
+			if (e->moverState != MOVER_POS1) {
+				botEvalWorld[2]++;
+				done = qtrue;
+			}
+			break;
+		case BWK_USE:
+			if (e->moverState != MOVER_POS1 && Q_stricmp(e->classname, "func_usable")) {
+				done = qtrue;	// it is moving: used
+			} else if (d2 <= 46.0f) {
+				VectorCopy(ctr, botUseAim[c]);
+				botUseAimUntil[c] = level.time + 300;
+				botUsePress[c] = level.time + 300;
+				if (!tgtActSince[c]) {
+					tgtActSince[c] = level.time;
+					botEvalWorld[0]++;
+				} else if (level.time - tgtActSince[c] > 900) {
+					done = qtrue;
+				}
+				bs->intentFlags = BOTINTENT_MOVE | BOTINTENT_NOJUMP;
+				bs->intentForward = 0;
+				bs->intentRight = 0;
+				bs->intentButtons = 0;
+				bs->intentUntil = level.time + 200;
+				if (!done) return;
+			}
+			break;
+		case BWK_SHOOT:
+			if (e->moverState != MOVER_POS1 || e->health <= 0) {
+				botEvalWorld[3]++;
+				done = qtrue;
+			} else if (cl->ps.weapon != WP_SABER || d2 <= 60.0f) {
+				VectorCopy(ctr, botUseAim[c]);
+				botUseAimUntil[c] = level.time + 300;
+				if (!tgtActSince[c]) tgtActSince[c] = level.time;
+				bs->intentFlags = BOTINTENT_MOVE | BOTINTENT_NOJUMP;
+				bs->intentForward = 0;
+				bs->intentRight = 0;
+				bs->intentButtons = BUTTON_ATTACK;
+				bs->intentUntil = level.time + 200;
+				if (level.time - tgtActSince[c] > 3500) done = qtrue;
+				if (!done) return;
+			}
+			break;
+		}
+		if (done) {
+			doneEnt[c][doneNext[c] & 3] = tgtEnt[c];
+			doneTime[c][doneNext[c] & 3] = level.time;
+			doneNext[c]++;
+			tgtUntil[c] = 0;
+			return;
+		}
+		// go to it
+		if (!bs->seqType && !(bs->intentFlags & BOTINTENT_KATA) && bs->jumpTime < level.time) {
+			bs->intentFlags = BOTINTENT_WORLD;
+			VectorCopy(flat, bs->intentWorldDir);
+			bs->intentButtons = 0;
+			bs->intentUntil = level.time + 250;
+		}
+	}
 }
 
 int WaitingForNow(bot_state_t* bs, vec3_t goalpos)
@@ -5557,6 +6263,29 @@ void GetIdealDestination(bot_state_t* bs)
 	if (!bs->wpCurrent)
 	{
 		return;
+	}
+	{
+		// an objective decides where the path leads
+		static int objWp[MAX_CLIENTS], objWpTime[MAX_CLIENTS];
+		vec3_t og;
+		if (Bot_ObjectiveGoal(bs, og)) {
+			const int c = bs->client;
+			if (level.time - objWpTime[c] > 1500 || objWpTime[c] > level.time || objWp[c] < 0 || objWp[c] >= gWPNum) {
+				vec3_t up;
+				VectorCopy(og, up);
+				up[2] += 16;
+				objWp[c] = GetNearestVisibleWP(up, -1);
+				objWpTime[c] = level.time;
+			}
+			if (objWp[c] >= 0 && objWp[c] < gWPNum && gWPArray[objWp[c]] && gWPArray[objWp[c]]->inuse) {
+				if (bs->wpDestination != gWPArray[objWp[c]]) {
+					bs->wpDestination = gWPArray[objWp[c]];
+					bs->wpDestSwitchTime = level.time + 3000;
+					botEvalObjWp++;
+				}
+				return;
+			}
+		}
 	}
 
 	if ((level.time - bs->escapeDirTime) > 4000)
@@ -7107,6 +7836,10 @@ static void BotNav_RoamGoal(bot_state_t* bs, vec3_t goal) {
 	static int numSpots = -1;
 	int i;
 
+	if (Bot_ObjectiveGoal(bs, goal)) {
+		return;	// the objective comes before looking for a fight
+	}
+
 	if (numSpots < 0) {
 		numSpots = 0;
 		for (i = MAX_CLIENTS; i < level.num_entities && numSpots < (int)ARRAY_LEN(spots); i++) {
@@ -7242,6 +7975,10 @@ static qboolean BotNav_PickOpenTarget(bot_state_t* bs, float goalYaw, vec3_t out
 
 		if (!d->inuse || d->s.eType != ET_MOVER || !d->classname || Q_stricmp(d->classname, "func_door")) {
 			continue;
+		}
+		if ((bs->features & BOTF_WORLD) && d->moverState == MOVER_POS1
+			&& ((d->flags & FL_INACTIVE) || (d->spawnflags & 16) || (d->targetname && d->targetname[0] && !(d->spawnflags & 64)))) {
+			continue;	// shut, and switched off, locked or opened from somewhere else: not a way through
 		}
 		// the doorway is where the door is drawn (its spawn position); on this map the door's
 		// collision box is somewhere else, so absmin/absmax cannot be used
@@ -10026,7 +10763,7 @@ int NewBotAI_GetWeapon(bot_state_t* bs)
 				bestWeapon = WP_DISRUPTOR;
 			else if (BotWeaponSelectable(bs, WP_BLASTER))
 				bestWeapon = WP_BLASTER;
-			else if (bs->cur_ps.stats[STAT_WEAPONS] & WP_SABER)
+			else if (bs->cur_ps.stats[STAT_WEAPONS] & (1 << WP_SABER))
 				bestWeapon = WP_SABER;
 			else if (BotWeaponSelectableAltFire(bs, WP_BRYAR_OLD)) {
 				bestWeapon = WP_BRYAR_OLD;
@@ -10060,7 +10797,7 @@ int NewBotAI_GetWeapon(bot_state_t* bs)
 			else if (BotWeaponSelectableAltFire(bs, WP_STUN_BATON) && (g_tweakWeapons.integer & WT_STUN_LG) && !(g_tweakWeapons.integer & WT_STUN_HEAL)) {
 				bestWeapon = WP_STUN_BATON;
 			}
-			else if (bs->cur_ps.stats[STAT_WEAPONS] & WP_SABER)
+			else if (bs->cur_ps.stats[STAT_WEAPONS] & (1 << WP_SABER))
 				bestWeapon = WP_SABER;
 			else if (BotWeaponSelectableAltFire(bs, WP_BRYAR_OLD)) {
 				bestWeapon = WP_BRYAR_OLD;
@@ -10104,7 +10841,7 @@ int NewBotAI_GetWeapon(bot_state_t* bs)
 				bestWeapon = WP_STUN_BATON;
 				bs->doAltAttack = 1;
 			}
-			else if (bs->cur_ps.stats[STAT_WEAPONS] & WP_SABER)
+			else if (bs->cur_ps.stats[STAT_WEAPONS] & (1 << WP_SABER))
 				bestWeapon = WP_SABER;
 			else if (BotWeaponSelectableAltFire(bs, WP_BRYAR_OLD)) {
 				bestWeapon = WP_BRYAR_OLD;
@@ -10634,6 +11371,14 @@ float BotGetOptimalCombatDistance(bot_state_t* bs)
 {
 	//float baseDistance = 80.0f;
 	float baseDistance = 64.0f; // Increase for more spacing // mouse wiggle tuning
+
+	if (bs->features & BOTF_GUNS) {
+		float gmin, gmax;
+		const qboolean enemySaber = (bs->currentEnemy && bs->currentEnemy->client && bs->currentEnemy->client->ps.weapon == WP_SABER) ? qtrue : qfalse;
+		if (Bot_GunBand(bs->cur_ps.weapon, enemySaber, &gmin, &gmax)) {
+			return (gmin + gmax) * 0.5f;
+		}
+	}
 
 	switch (bs->cur_ps.fd.saberAnimLevel) {
 	case SS_FAST:
@@ -11407,35 +12152,58 @@ static void Bot_SelectStyleTargeted(bot_state_t* bs) {
 	// the style we will have once a queued change is applied
 	current = cl->saberCycleQueue ? cl->saberCycleQueue : cl->ps.fd.saberAnimLevel;
 
-	if (level.time >= bs->styleDecisionTime) {
-		const int enemyStyle = bs->currentEnemy->client->ps.fd.saberAnimLevel;
-		const int myHealth = g_entities[bs->client].health;
+	{
+		// What the enemy has been doing over the last few seconds: how much of the time he is
+		// swinging, how far away he stays, how much he is in the air. The stance follows from that.
+		static float enAtk[MAX_CLIENTS], enDist[MAX_CLIENTS], enAir[MAX_CLIENTS];
+		static int enNum[MAX_CLIENTS], enLast[MAX_CLIENTS];
+		const int c = bs->client;
+		const playerState_t *ep = &bs->currentEnemy->client->ps;
+		const int enemyStyle = ep->fd.saberAnimLevel;
+		const int myHealth = g_entities[c].health;
+		const int offense = cl->ps.fd.forcePowerLevel[FP_SABER_OFFENSE];
+		const float swinging = (ep->weapon == WP_SABER && (BG_SaberInAttack(ep->saberMove) || BG_SaberInSpecial(ep->saberMove))) ? 1.0f : 0.0f;
+		const float inAir = (ep->groundEntityNum == ENTITYNUM_NONE) ? 1.0f : 0.0f;
+		float k;
+		int why = -1;
 
-		want = current;
-		if (myHealth < 40) {
-			want = SS_FAST;				// hurt: quick swings and no movement penalty
-		} else {
-			switch (enemyStyle) {
-			case SS_STRONG:
-			case SS_DESANN:
-				want = SS_FAST;			// slow heavy swings: get inside them
-				break;
-			case SS_FAST:
-				want = SS_MEDIUM;		// more damage and reach against light swings
-				break;
-			case SS_MEDIUM:
-			case SS_TAVION:
-				want = SS_STRONG;		// out-power the balanced styles
-				break;
-			default:					// dual, staff or unknown: balanced
-				want = SS_MEDIUM;
-				break;
-			}
+		if (enNum[c] != bs->currentEnemy->s.number || level.time - enLast[c] > 3000 || enLast[c] > level.time) {
+			enNum[c] = bs->currentEnemy->s.number;	// someone new: start from a neutral picture and decide soon
+			enAtk[c] = 0.35f;
+			enDist[c] = (float)bs->frame_Enemy_Len;
+			enAir[c] = 0.1f;
+			if (bs->styleDecisionTime > level.time + 1200) bs->styleDecisionTime = level.time + 1200;
+			enLast[c] = level.time;
 		}
-		// keep each decision for a while so two bots do not chase each other's style every second
-		bs->styleDecisionTime = level.time + Q_irand(6000, 11000);
-		bs->styleCyclePresses = 0;
-		bs->styleWanted = (want != current) ? want : 0;
+		k = (float)(level.time - enLast[c]) / 2500.0f;	// about 2.5 s of memory
+		if (k > 1.0f) k = 1.0f;
+		enLast[c] = level.time;
+		enAtk[c] += k * (swinging - enAtk[c]);
+		enDist[c] += k * ((float)bs->frame_Enemy_Len - enDist[c]);
+		enAir[c] += k * (inAir - enAir[c]);
+
+		if (level.time >= bs->styleDecisionTime) {
+			// Measured over a 9-minute match (kills / deaths while in each style): the heavy styles win
+			// (desann 51/21, strong 35/17), medium holds its own (18/12), fast loses badly (27/63).
+			// So a heavy style is the rule, and which one depends on what the enemy does.
+			want = current;
+			if (ep->weapon != WP_SABER || enDist[c] > 200.0f || enAir[c] > 0.35f) {
+				want = SS_MEDIUM; why = 5;		// a gunner, or keeps away, or jumps about: the mobile style
+			} else if (enAtk[c] > 0.5f) {
+				want = SS_STRONG; why = 2;		// he keeps swinging: the quicker of the heavy styles
+			} else {
+				want = SS_DESANN; why = 4;		// he is not pressing: the heaviest style, there is time for it
+			}
+			(void)myHealth; (void)enemyStyle;
+			if (want == SS_DESANN && bs->styleNoDesann) want = SS_STRONG;
+			if (want == SS_STRONG && offense < 3) want = SS_MEDIUM;
+			if (want == SS_MEDIUM && offense < 2) want = SS_FAST;
+			// a decision stands for a while so the bot is not forever cycling styles
+			bs->styleDecisionTime = level.time + 5000;
+			bs->styleCyclePresses = 0;
+			bs->styleWanted = (want != current) ? want : 0;
+			if (bs->styleWanted && why >= 0) botEvalStyleWhy[why]++;
+		}
 	}
 
 	if (!bs->styleWanted) {
@@ -11448,6 +12216,7 @@ static void Bot_SelectStyleTargeted(bot_state_t* bs) {
 		return;
 	}
 	if (bs->styleCyclePresses >= 6) {
+		if (bs->styleWanted == SS_DESANN) bs->styleNoDesann = qtrue;
 		bs->styleWanted = 0;	// the saber does not allow this style
 		return;
 	}
@@ -13257,6 +14026,10 @@ void NewBotAI_GetAttack(bot_state_t* bs) // Niksata Edit
 	if (!bs->frame_Enemy_Vis && (bs->cur_ps.weapon != WP_DEMP2)) { //Dont waste ammo if we cant see them..?
 		return;
 	}
+	if ((bs->features & BOTF_GUNS) && bs->frame_Enemy_Len < 190
+		&& (bs->cur_ps.weapon == WP_ROCKET_LAUNCHER || bs->cur_ps.weapon == WP_CONCUSSION || bs->cur_ps.weapon == WP_THERMAL)) {
+		return;	// the blast would catch the bot itself
+	}
 
 	if (!bs->isCamper && (bs->cur_ps.weapon == weapon)) {
 		// Check enemy vulnerability for timing
@@ -13741,6 +14514,13 @@ void NewBotAI_GetMovement(bot_state_t* bs) {
 	if (bs->currentEnemy->health < 30) {
 		adjustedMin -= 10; // Close in on low health enemy
 		adjustedMax -= 10;
+	}
+	if (bs->features & BOTF_GUNS) {
+		float gmin, gmax;
+		if (Bot_GunBand(bs->cur_ps.weapon, bs->currentEnemy->client->ps.weapon == WP_SABER ? qtrue : qfalse, &gmin, &gmax)) {
+			adjustedMin = gmin + 10;	// the tests below use min - 10 and max - 20
+			adjustedMax = gmax + 20;
+		}
 	}
 
 	// Too close - strong retreat
@@ -15222,7 +16002,9 @@ void NewBotAI_DoAloneStuff(bot_state_t* bs, float thinktime) {
 		bs->frame_Enemy_Vis = 0;
 	}
 
-	if ((bs->cur_ps.weapon != WP_SABER) && BotWeaponSelectable(bs, WP_SABER))
+	// (this ran on every think in which an enemy had just been found, pulling the saber back out
+	// against whatever the weapon choice for that enemy was)
+	if ((bs->cur_ps.weapon != WP_SABER) && BotWeaponSelectable(bs, WP_SABER) && (!(bs->features & BOTF_GUNS) || !bs->currentEnemy))
 		BotSelectWeapon(bs->client, WP_SABER);
 
 	// Cancel speed if FP is 0
@@ -15474,7 +16256,7 @@ void NewBotAI_DoAloneStuff(bot_state_t* bs, float thinktime) {
 	// FALLBACK NAVIGATION WITH FENCE/WALL JUMPS
 	// ========================================
 	if (!destination) {
-		if (bs->cur_ps.weapon == WP_SABER) {
+		if (bs->cur_ps.weapon == WP_SABER || (bs->features & BOTF_GUNS)) {
 			if (BotFallbackNavigation(bs)) {
 				return;
 			}
@@ -16792,7 +17574,7 @@ void StandardBotAI(bot_state_t* bs, float thinktime)
 	}
 	else //We can't find a waypoint, going to need a fallback routine.
 	{
-		if (bs->cur_ps.weapon == WP_SABER) // Niksata Edit
+		if (bs->cur_ps.weapon == WP_SABER || (bs->features & BOTF_GUNS)) // Niksata Edit
 		{
 			doingFallback = BotFallbackNavigation(bs);
 		} // Niksata Edit
@@ -17576,6 +18358,11 @@ skip_movement: // Niksata Edit
 		bs->doAltAttack = 0;
 	}
 
+	if ((bs->features & BOTF_GUNS) && bs->cur_ps.weapon != WP_SABER) {
+		// a charged shot goes off when the button is let go: do not keep it pressed past the charge
+		if (bs->doAltAttack && bs->cur_ps.weaponstate == WEAPON_CHARGING_ALT && NewBotAI_GetAltCharge(bs) == 2) bs->doAltAttack = 0;
+		if (bs->doAttack && bs->cur_ps.weaponstate == WEAPON_CHARGING && NewBotAI_GetCharge(bs) == 2) bs->doAttack = 0;
+	}
 	if (bs->doAttack)
 	{
 		trap->EA_Attack(bs->client);
@@ -17755,7 +18542,7 @@ int BotAISetup(int restart) {
 	trap->Cvar_Register(&bot_profile, "bot_profile", "0", 0);
 	trap->Cvar_Register(&bot_fixes, "bot_fixes", "1", CVAR_ARCHIVE);
 	trap->Cvar_Register(&bot_abBase, "bot_abBase", "0", 0);	// features of the baseline group in an A/B test
-	trap->Cvar_Register(&bot_features, "bot_features", "125423", CVAR_ARCHIVE);	// 495 + 2048 blade prediction + 8192 force rules + 16384 swing tracking + 32768 tuning by play + 65536 all-round awareness; 16, 512, 1024 lost their A/B tests, 4096 (swing table) showed no gain
+	trap->Cvar_Register(&bot_features, "bot_features", "4188671", CVAR_ARCHIVE);	// everything measured to help or do no harm: all bits except 512 (guide tactics), 1024 (counters) and 4096 (swing table), which lost their A/B tests
 	trap->Cvar_Register(&bot_abTest, "bot_abTest", "0", 0);
 	trap->Cvar_Register(&bot_attachments, "bot_attachments", "1", 0);
 	trap->Cvar_Register(&bot_camp, "bot_camp", "1", 0);

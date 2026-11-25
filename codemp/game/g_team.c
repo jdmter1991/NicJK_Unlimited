@@ -658,7 +658,9 @@ void Team_ReturnFlagSound( gentity_t *ent, int team ) {
 	te->r.svFlags |= SVF_BROADCAST;
 }
 
+extern void BotEval_NoteEvent(int kind);
 void Team_TakeFlagSound( gentity_t *ent, int team, int playerteam) {
+	BotEval_NoteEvent(0);
 	gentity_t	*te;
 
 	if (ent == NULL) {
@@ -709,6 +711,7 @@ void Team_TakeFlagSound( gentity_t *ent, int team, int playerteam) {
 }
 
 void Team_CaptureFlagSound( gentity_t *ent, int team ) {
+	BotEval_NoteEvent(1);
 	gentity_t	*te;
 
 	if (ent == NULL) {
@@ -727,6 +730,7 @@ void Team_CaptureFlagSound( gentity_t *ent, int team ) {
 }
 
 void Team_ReturnFlag( int team ) {
+	BotEval_NoteEvent(2);
 	Team_ReturnFlagSound(Team_ResetFlag(team), team);
 	if( level.gametype != GT_CTF ) {
 		//PrintMsg(NULL, "The flag has returned!\n" );

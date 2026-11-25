@@ -676,8 +676,10 @@ void SiegeTeamSwitch(int winTeam, int winTime)
 	}
 }
 
+extern void BotEval_NoteEvent(int kind);
 void SiegeRoundComplete(int winningteam, int winningclient)
 {
+	BotEval_NoteEvent(4);
 	vec3_t nomatter;
 	char teamstr[1024];
 	int originalWinningClient = winningclient;
@@ -1036,6 +1038,8 @@ void SiegeCheckTimers(void)
 void SiegeObjectiveCompleted(int team, int objective, int final, int client)
 {
 	int goals_completed, goals_required;
+
+	BotEval_NoteEvent(3);
 
 	if (gSiegeRoundEnded)
 	{

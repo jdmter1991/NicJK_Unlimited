@@ -909,6 +909,11 @@ void Use_BinaryMover( gentity_t *ent, gentity_t *other, gentity_t *activator )
 	{//I cannot be used anymore, must be a door with a wait of -1 that's opened.
 		return;
 	}
+	if ( activator && activator->client && (activator->r.svFlags & SVF_BOT) )
+	{
+		extern void BotEval_NoteEvent(int kind);
+		BotEval_NoteEvent(5);
+	}
 
 	// only the master should be used
 	if ( ent->flags & FL_TEAMSLAVE )
