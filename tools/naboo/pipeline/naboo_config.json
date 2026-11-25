@@ -1,0 +1,164 @@
+{
+ "blend": "E:/jedi academy modding archive/Naboo Theed map/Naboo_Theed.blend",
+ "blender": "E:/blender-5.2.0-windows-x64/blender.exe",
+ "units_per_metre": 39.37,
+ "origin_m": [
+  680.0,
+  -50.0,
+  436.0
+ ],
+ "regions": {
+  "proto": {
+   "centre_m": [
+    700.0,
+    50.0
+   ],
+   "half_m": 75.0
+  },
+  "city": {
+   "centre_m": [
+    700.0,
+    -50.0
+   ],
+   "half_m": 100000.0,
+   "all": true,
+   "terrain_grid": true,
+   "collision_bounds_m": [
+    420.0,
+    -520.0,
+    1000.0,
+    330.0
+   ],
+   "spawn_grid_m": 14.0,
+   "spawn_max_above_terrain_m": 2.5,
+   "collision": {
+    "box_below_extent_m": 3.0,
+    "skip_below_extent_m": 0.6,
+    "decimate_fraction": 0.04,
+    "decimate_min_tris": 60,
+    "decimate_max_tris": 800,
+    "terrain_stride": 2
+   }
+  }
+ },
+ "collision": {
+  "exclude_name_substrings": [
+   "nocollision",
+   "decal",
+   "leak",
+   "fx_",
+   "fxcol",
+   "invalidatelightplane",
+   "heightfog",
+   "grenadeblocker",
+   "meshp_sky",
+   "curtain",
+   "butterfly"
+  ],
+  "box_below_extent_m": 1.2,
+  "skip_below_extent_m": 0.35,
+  "decimate_fraction": 0.2,
+  "decimate_min_tris": 200,
+  "decimate_max_tris": 3000,
+  "terrain_stride": 2
+ },
+ "light": {
+  "sun_dir": [
+   0.756,
+   0.256,
+   0.603
+  ],
+  "sun_color": [
+   0.54,
+   0.49,
+   0.445
+  ],
+  "ambient_color": [
+   0.33,
+   0.355,
+   0.395
+  ],
+  "sun_color_before_contrast": [
+   0.5,
+   0.46,
+   0.42
+  ],
+  "ambient_color_before_contrast": [
+   0.42,
+   0.45,
+   0.5
+  ]
+ },
+ "lod": {
+  "ratios": [
+   0.3,
+   0.08
+  ],
+  "min_tris": [
+   200,
+   1200
+  ]
+ },
+ "sky_exposure": -1.0,
+ "bsp_writer": {
+  "thickness": 4.0,
+  "leaf_brushes": 96,
+  "max_duplication": 1.35,
+  "max_depth": 40,
+  "min_altitude": 0.05,
+  "merge": true,
+  "bevels": true,
+  "plane_tolerance": 0.05,
+  "line_tolerance": 0.05,
+  "merge_max_corners": 12,
+  "merge_max_extent": 1024.0
+ },
+ "shadow": {
+  "size": 6912,
+  "cpu_size": 1024,
+  "sample_step_texels": 0.5,
+  "bounds_units": [
+   [
+    -11700,
+    -19200,
+    -2600
+   ],
+   [
+    14600,
+    15800,
+    3400
+   ]
+  ],
+  "min_caster_radius_units": 120.0
+ },
+ "near_strides": [
+  1,
+  4,
+  16
+ ],
+ "foliage_alpha_gain": 2.2,
+ "material_bake": {
+  "max_size": 1024,
+  "tile_mode_size": 1024
+ },
+ "foliage_lod_keep": [
+  0.6,
+  0.25
+ ],
+ "foliage_alpha_gain_overrides": {
+  "t_naboobase_bg_tree_01_ca": 1.0
+ },
+ "glass_tint": [
+  0.16,
+  0.21,
+  0.21
+ ],
+ "glass_opacity": 0.8,
+ "sky_occlusion": {
+  "min_radius": 40.0,
+  "max_radius": 4000.0,
+  "points": 6,
+  "ray_length": 3200.0,
+  "cell": 160.0
+ }
+}
