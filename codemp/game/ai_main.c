@@ -404,6 +404,31 @@ static int botEvalStuckInSolid, botEvalLedgeHops;
 static int botEvalPredThreats, botEvalPredEvades, botEvalLearnSamples, botEvalLearnOverrides, botEvalLearnExplore;
 static int Bot_LearnTotal(void);
 static int botEvalPredChase, botEvalPredOnTarget;
+// every jump request is counted by the source line that asked for it
+// jumpTime values that only mean "no new jump before this time": the jump itself was already
+// pressed by the code that set them, so the jump key must not be tapped again until they run out
+static int botJumpNoTap[MAX_CLIENTS];
+static struct { int line, count; } botJumpSites[48];
+static void BotJump_Count(int line) {
+	int i;
+	for (i = 0; i < 48; i++) {
+		if (botJumpSites[i].line == line || !botJumpSites[i].line) {
+			botJumpSites[i].line = line;
+			botJumpSites[i].count++;
+			return;
+		}
+	}
+}
+#define BOT_EA_JUMP(c) (BotJump_Count(__LINE__), trap->EA_Jump(c))
+static void BotJump_Report(void) {
+	char out[900];
+	int i;
+	out[0] = 0;
+	for (i = 0; i < 48 && botJumpSites[i].line; i++) {
+		Q_strcat(out, sizeof(out), va(" %d:%d", botJumpSites[i].line, botJumpSites[i].count));
+	}
+	trap->Print("BOTEVAL jump requests by source line:%s\n", out);
+}
 static int botEvalForceUse[5];		// lightning, drain, pull, push, saber throw started by the force tactics
 static int botEvalForceBlocked[6];	// uses by the older logic stopped because they could not work: lightning, drain, grip, push, pull, throw
 static int botEvalProPunish, botEvalProHoldOff, botEvalProCounterFrames, botEvalProCrouchFrames;
@@ -511,6 +536,7 @@ static void BotEval_Report(void) {
 	trap->Print("BOTEVAL machine: predicted blade hits %d, evaded %d; learning: results recorded %d, swing choices changed by what was learned %d, exploratory choices %d, table holds %d results\n",
 		botEvalPredThreats, botEvalPredEvades, botEvalLearnSamples, botEvalLearnOverrides, botEvalLearnExplore, Bot_LearnTotal());
 	Bot_TuneReport();
+	BotJump_Report();
 	trap->Print("BOTEVAL machine attack: swing frames predicted to land %d, predicted to fall short and closed in %d\n", botEvalPredOnTarget, botEvalPredChase);
 	trap->Print("BOTEVAL force: started lightning %d drain %d pull %d push %d saber throw %d; stopped as out of range or pointless: lightning %d drain %d grip %d push %d pull %d throw %d\n",
 		botEvalForceUse[0], botEvalForceUse[1], botEvalForceUse[2], botEvalForceUse[3], botEvalForceUse[4],
@@ -1532,7 +1558,21 @@ void BotInputToUserCommand(bot_state_t* bs, bot_input_t* bi, usercmd_t* ucmd, in
 				if (BotNav_Steer(bs, dir, steer, &jump, &holdMs)) {
 					if (jump) {
 						const qboolean enemyClose = (bs->currentEnemy && bs->currentEnemy->client && bs->frame_Enemy_Vis && bs->frame_Enemy_Len < 300) ? qtrue : qfalse;
-						if (bs->jumpTime < level.time && (!enemyClose || holdMs <= 450
+						qboolean towardEnemy = qfalse;
+						if (enemyClose) {
+							vec3_t te;
+							VectorSubtract(bs->currentEnemy->client->ps.origin, bs->origin, te);
+							te[2] = 0;
+							VectorNormalize(te);
+							towardEnemy = (DotProduct(te, steer) > 0.5f) ? qtrue : qfalse;
+						}
+						if (enemyClose && !towardEnemy) {
+							// strafing or backing into something during a fight: a player does not hop
+							// over it, he stops moving that way. The fight logic picks another direction.
+							ucmd->forwardmove = 0;
+							ucmd->rightmove = 0;
+							botEvalMoveSteers++;
+						} else if (bs->jumpTime < level.time && (!enemyClose || holdMs <= 450
 							|| bs->currentEnemy->client->ps.origin[2] > bs->origin[2] + 32.0f)) {
 							BotNav_Jump(bs, steer, holdMs, 400 + holdMs);
 							botEvalMoveJumps++;
@@ -3228,7 +3268,7 @@ int BotTrace_Jump(bot_state_t* bs, vec3_t traceto)
 			}
 
 			// Set longer cooldown to prevent spam
-			bs->jumpTime = level.time + 2000; // 2 second cooldown
+			bs->jumpTime = level.time + 2000; botJumpNoTap[bs->client] = bs->jumpTime; // 2 second cooldown
 			return 1; // Jump is beneficial
 		}
 	}
@@ -3250,7 +3290,7 @@ int BotTrace_Jump(bot_state_t* bs, vec3_t traceto)
 		JP_Trace(&tr, start, mins, maxs, checkPos, bs->client, MASK_PLAYERSOLID, qfalse, 0, 0);
 
 		if (tr.fraction > 0.7) { // Can definitely make the jump
-			bs->jumpTime = level.time + 2000; // 2 second cooldown
+			bs->jumpTime = level.time + 2000; botJumpNoTap[bs->client] = bs->jumpTime; // 2 second cooldown
 			return 1;
 		}
 	}
@@ -3271,7 +3311,7 @@ int BotTrace_Jump(bot_state_t* bs, vec3_t traceto)
 			JP_Trace(&tr, start, mins, maxs, checkPos, bs->client, MASK_PLAYERSOLID, qfalse, 0, 0);
 
 			if (tr.fraction > 0.8) { // Can clear fence/wall
-				bs->jumpTime = level.time + 1500; // 1.5 second cooldown
+				bs->jumpTime = level.time + 1500; botJumpNoTap[bs->client] = bs->jumpTime; // 1.5 second cooldown
 				return 1;
 			}
 		}
@@ -6799,7 +6839,7 @@ static qboolean BotNav_PathClear(bot_state_t* bs, vec3_t dir, float dist, float 
 // Start a jump along the flat direction "dir": jump held for holdMs (0 = a tap), and the bot keeps
 // moving in that direction for moveMs so it does not steer away in mid-air.
 static void BotNav_Jump(bot_state_t* bs, vec3_t dir, int holdMs, int moveMs) {
-	bs->jumpTime = level.time + moveMs + 300;
+	bs->jumpTime = level.time + moveMs + 300; botJumpNoTap[bs->client] = bs->jumpTime;
 	bs->inputHoldUpUntil = level.time + (holdMs > 60 ? holdMs : 60);
 	bs->intentFlags = BOTINTENT_WORLD;
 	VectorCopy(dir, bs->intentWorldDir);
@@ -9032,7 +9072,7 @@ void NewBotAI_Getup(bot_state_t* bs)
 {
 	qboolean useTheForce = qfalse;
 
-	trap->EA_Jump(bs->client);
+	BOT_EA_JUMP(bs->client);
 
 	if ((bs->cur_ps.fd.forceGripBeingGripped > level.time) && bs->cur_ps.velocity[2] < -100) { //in grip and going down, a splat?
 		if (bs->cur_ps.fd.forcePowersKnown & (1 << FP_PROTECT)) {
@@ -9081,7 +9121,7 @@ void NewBotAI_Flipkick(bot_state_t* bs)
 
 	if (bs->cur_ps.groundEntityNum == ENTITYNUM_NONE - 1 || bs->cur_ps.fd.forceJumpZStart < 16) {//idk
 		trap->EA_MoveForward(bs->client);
-		trap->EA_Jump(bs->client);
+		BOT_EA_JUMP(bs->client);
 	}
 
 	//if red swing and during the good part of anim and they are in range of saber dont kick them.. yet
@@ -9095,7 +9135,7 @@ void NewBotAI_Flipkick(bot_state_t* bs)
 	else if (((bs->origin[2] - bs->cur_ps.fd.forceJumpZStart) > 24) && ((bs->origin[2] - bs->cur_ps.fd.forceJumpZStart) < 48))
 	{
 		if (level.framenum % 2)
-			trap->EA_Jump(bs->client);
+			BOT_EA_JUMP(bs->client);
 	}
 }
 
@@ -11077,7 +11117,7 @@ void Bot_ExecutePerfectBlocking(bot_state_t* bs) {
 
 		// Jump to escape overwhelm
 		if (bs->cur_ps.groundEntityNum != ENTITYNUM_NONE) {
-			trap->EA_Jump(bs->client);
+			BOT_EA_JUMP(bs->client);
 		}
 
 		blk->blockConfidence -= 0.1f;
@@ -11545,7 +11585,7 @@ void Bot_ExecuteDFA(bot_state_t* bs)
 
 	// JKA DFA: jump+forward+attack combo
 	trap->EA_MoveForward(bs->client);
-	trap->EA_Jump(bs->client);
+	BOT_EA_JUMP(bs->client);
 	trap->EA_Attack(bs->client);
 
 }
@@ -11916,7 +11956,7 @@ qboolean Bot_CheckAndInteractWithObstacle(bot_state_t* bs) { // Niksata Edit - F
 					// If we can jump over, do it
 					if (jumpTrace.fraction >= 0.8f) {
 						// Jump over obstacle
-						trap->EA_Jump(bs->client);
+						BOT_EA_JUMP(bs->client);
 
 						// Move forward while jumping
 						trap->EA_Move(bs->client, forward, 4000);
@@ -11953,7 +11993,7 @@ qboolean Bot_CheckAndInteractWithObstacle(bot_state_t* bs) { // Niksata Edit - F
 				// Check if obstacle is jumpable
 				if (hitEnt->r.absmax[2] - bs->origin[2] < 30.0f) {
 					// Simple jump for non-combat
-					trap->EA_Jump(bs->client);
+					BOT_EA_JUMP(bs->client);
 					trap->EA_Move(bs->client, forward, 3000);
 					return qtrue;
 				}
@@ -12438,7 +12478,7 @@ void Bot_ExecuteSaberCombat(bot_state_t* bs) {
 
 		// Execute jump while continuing combat
 		if (shouldJumpOverObstacle) {
-			trap->EA_Jump(bs->client);
+			BOT_EA_JUMP(bs->client);
 			trap->EA_Move(bs->client, jumpDir, 4000);
 
 			// Attack while jumping
@@ -13382,7 +13422,7 @@ qboolean Bot_CheckMovementPaths(bot_state_t* bs) {
 		else {
 			// BALANCED: Only jump when not in combat and with cooldown
 			if (!bs->currentEnemy && bs->noJumpTime < level.time && bs->lastObstacleTime < level.time - 2000) {
-				trap->EA_Jump(bs->client);
+				BOT_EA_JUMP(bs->client);
 				bs->noJumpTime = level.time + 1000;
 				bs->lastObstacleTime = level.time;
 			}
@@ -13544,8 +13584,8 @@ void NewBotAI_GetMovement(bot_state_t* bs) {
 		// BALANCED: Reduced random jump chance (10% instead of 30%) and only when not in combat
 		if (!bs->currentEnemy || dist > 150) {
 			if (Q_flrand(0, 1) < 0.1f) {
-				if (Q_irand(0, 1)) trap->EA_Jump(bs->client);
-				else trap->EA_Jump(bs->client); // Niksata Edit
+				if (Q_irand(0, 1)) BOT_EA_JUMP(bs->client);
+				else BOT_EA_JUMP(bs->client); // Niksata Edit
 			}
 		}
 
@@ -14744,7 +14784,7 @@ void NewBotAI_NF(bot_state_t* bs)
 	else if (bs->frame_Enemy_Len <= 200) {//Closerange
 		if (g_entities[bs->client].client->ps.saberMove > 1) {
 			if (bs->origin[2] < bs->currentEnemy->client->ps.origin[2]) {
-				trap->EA_Jump(bs->client);
+				BOT_EA_JUMP(bs->client);
 				level.clients[bs->client].ps.fd.forcePowerSelected = FP_LEVITATION;
 				trap_EA_ForcePower(bs->client);
 			}
@@ -14761,7 +14801,7 @@ void NewBotAI_NF(bot_state_t* bs)
 			//Do a backslash 
 			//bs->ideal_viewangles[YAW] += 180;
 			/*if (BS_GroundDistance(bs) < 20)
-				trap->EA_Jump(bs->client);
+				BOT_EA_JUMP(bs->client);
 			else
 				trap->EA_Crouch(bs->client);*/ // Niksata Edit
 			trap->EA_MoveBack(bs->client);
@@ -14786,7 +14826,7 @@ void NewBotAI_NF(bot_state_t* bs)
 	}
 	else if ((speed >= 125) && ((bs->frame_Enemy_Len / speed) > 0.7f)) {//Midrange
 		if ((sqrt(bs->cur_ps.velocity[0] * bs->cur_ps.velocity[0] + bs->cur_ps.velocity[1] * bs->cur_ps.velocity[1])) > 240.0f) {
-			trap->EA_Jump(bs->client);
+			BOT_EA_JUMP(bs->client);
 			if (BS_GroundDistance(bs) > 20 && g_entities[bs->client].client->ps.saberMove <= 1) {
 				trap->EA_Crouch(bs->client);
 				trap->EA_MoveBack(bs->client);
@@ -14898,7 +14938,7 @@ qboolean NewBotAI_CapRoute(bot_state_t* bs, float thinktime)
 
 	if (g_entities[bs->client].client->ps.velocity[2]) {
 		if (level.time % 1000 > 500) { //what the fuck /sad hack to make it lok like they are jetting
-			trap->EA_Jump(bs->client);
+			BOT_EA_JUMP(bs->client);
 			trap->EA_MoveUp(bs->client);
 		}
 		else {
@@ -14946,14 +14986,14 @@ void NewBotAI_Tribes(bot_state_t* bs, float thinktime)
 			//bs->jumpHoldTime = level.time + 200;
 		//}
 		//Com_Printf("2 Still going up\n");
-		trap->EA_Jump(bs->client);
+		BOT_EA_JUMP(bs->client);
 	}
 	else if (bs->cur_ps.fd.forcePower > 98) {
 		//Com_Printf("1 Going up\n");
 		//bs->jumpTime = level.time + 200;
 		//bs->jumpHoldTime = level.time + 200;
 
-		trap->EA_Jump(bs->client);
+		BOT_EA_JUMP(bs->client);
 	}
 	else {
 		//Com_Printf("3 Flaming? %i, Active? %i, FP: %i\n", (bs->cur_ps.eFlags & EF_JETPACK_FLAMING), bs->cur_ps.eFlags & EF_JETPACK_ACTIVE, bs->cur_ps.fd.forcePower);
@@ -14964,7 +15004,7 @@ void NewBotAI_Tribes(bot_state_t* bs, float thinktime)
 	{
 	if (bs->jumpHoldTime > level.time)
 	{
-	trap->EA_Jump(bs->client);
+	BOT_EA_JUMP(bs->client);
 	if (bs->wpCurrent)
 	{
 	if ((bs->wpCurrent->origin[2] - bs->origin[2]) < 64)
@@ -14983,7 +15023,7 @@ void NewBotAI_Tribes(bot_state_t* bs, float thinktime)
 	}
 	else if (!(bs->cur_ps.pm_flags & PMF_JUMP_HELD))
 	{
-	trap->EA_Jump(bs->client);
+	BOT_EA_JUMP(bs->client);
 	}
 		*/
 	trap->EA_Action(bs->client, ACTION_SKI);
@@ -15266,8 +15306,8 @@ void NewBotAI_DoAloneStuff(bot_state_t* bs, float thinktime) {
 
 			if (tr.fraction > 0.7) { // Can jump over obstacle
 				if (bs->jumpTime < level.time) {
-					bs->jumpTime = level.time + 1500; // 1.5 second cooldown
-					trap->EA_Jump(bs->client);
+					bs->jumpTime = level.time + 1500; botJumpNoTap[bs->client] = bs->jumpTime; // 1.5 second cooldown
+					BOT_EA_JUMP(bs->client);
 				}
 			}
 			else {
@@ -15279,8 +15319,8 @@ void NewBotAI_DoAloneStuff(bot_state_t* bs, float thinktime) {
 
 				if (tr.fraction > 0.6) { // Can jump over wall
 					if (bs->jumpTime < level.time) {
-						bs->jumpTime = level.time + 2000; // 2 second cooldown
-						trap->EA_Jump(bs->client);
+						bs->jumpTime = level.time + 2000; botJumpNoTap[bs->client] = bs->jumpTime; // 2 second cooldown
+						BOT_EA_JUMP(bs->client);
 					}
 				}
 				else {
@@ -15302,8 +15342,8 @@ void NewBotAI_DoAloneStuff(bot_state_t* bs, float thinktime) {
 
 		if (tr.fraction == 1.0) { // Pit detected
 			if (bs->jumpTime < level.time) {
-				bs->jumpTime = level.time + 1500;
-				trap->EA_Jump(bs->client);
+				bs->jumpTime = level.time + 1500; botJumpNoTap[bs->client] = bs->jumpTime;
+				BOT_EA_JUMP(bs->client);
 			}
 		}
 	}
@@ -15343,8 +15383,8 @@ void NewBotAI_DoAloneStuff(bot_state_t* bs, float thinktime) {
 
 			if (tr.fraction > 0.7) { // Can jump over
 				if (bs->jumpTime < level.time) {
-					bs->jumpTime = level.time + 1500;
-					trap->EA_Jump(bs->client);
+					bs->jumpTime = level.time + 1500; botJumpNoTap[bs->client] = bs->jumpTime;
+					BOT_EA_JUMP(bs->client);
 				}
 			}
 			else {
@@ -15356,8 +15396,8 @@ void NewBotAI_DoAloneStuff(bot_state_t* bs, float thinktime) {
 
 				if (tr.fraction > 0.6) { // Can jump over wall
 					if (bs->jumpTime < level.time) {
-						bs->jumpTime = level.time + 2000;
-						trap->EA_Jump(bs->client);
+						bs->jumpTime = level.time + 2000; botJumpNoTap[bs->client] = bs->jumpTime;
+						BOT_EA_JUMP(bs->client);
 					}
 				}
 				else {
@@ -16043,7 +16083,7 @@ void StandardBotAI(bot_state_t* bs, float thinktime)
 		}
 		if (bs->forceMove_Up)
 		{
-			trap->EA_Jump(bs->client);
+			BOT_EA_JUMP(bs->client);
 		}
 		return;
 	}
@@ -16714,7 +16754,7 @@ void StandardBotAI(bot_state_t* bs, float thinktime)
 
 		if (doJ)
 		{
-			bs->jumpTime = level.time + 1500;
+			bs->jumpTime = level.time + 1500; botJumpNoTap[bs->client] = bs->jumpTime;
 			bs->jumpHoldTime = level.time + 1500;
 			bs->jDelay = 0;
 		}
@@ -17045,8 +17085,8 @@ void StandardBotAI(bot_state_t* bs, float thinktime)
 				// Try alternative: jump and turn 90 degrees
 				if (bs->jumpTime < level.time)
 				{
-					bs->jumpTime = level.time + 500;
-					trap->EA_Jump(bs->client);
+					bs->jumpTime = level.time + 500; botJumpNoTap[bs->client] = bs->jumpTime;
+					BOT_EA_JUMP(bs->client);
 				}
 
 				// Turn 90 degrees and try forward
@@ -17093,8 +17133,8 @@ void StandardBotAI(bot_state_t* bs, float thinktime)
 					// AGGRESSIVE UNSTUCK MANEUVERS
 					if (bs->jumpTime < level.time)
 					{
-						bs->jumpTime = level.time + 500;
-						trap->EA_Jump(bs->client);
+						bs->jumpTime = level.time + 500; botJumpNoTap[bs->client] = bs->jumpTime;
+						BOT_EA_JUMP(bs->client);
 
 						// Random direction to escape
 						int randomDir = Q_irand(1, 8);
@@ -17126,8 +17166,8 @@ void StandardBotAI(bot_state_t* bs, float thinktime)
 
 					if (bs->jumpTime < level.time)
 					{
-						bs->jumpTime = level.time + 300;
-						trap->EA_Jump(bs->client);
+						bs->jumpTime = level.time + 300; botJumpNoTap[bs->client] = bs->jumpTime;
+						BOT_EA_JUMP(bs->client);
 					}
 				}
 			}
@@ -17253,7 +17293,7 @@ skip_movement: // Niksata Edit
 	{
 		if (bs->jumpHoldTime > level.time)
 		{
-			trap->EA_Jump(bs->client);
+			BOT_EA_JUMP(bs->client);
 			if (bs->wpCurrent)
 			{
 				if ((bs->wpCurrent->origin[2] - bs->origin[2]) < 64)
@@ -17270,9 +17310,9 @@ skip_movement: // Niksata Edit
 				g_entities[bs->client].client->ps.pm_flags |= PMF_JUMP_HELD;
 			}
 		}
-		else if (!(bs->cur_ps.pm_flags & PMF_JUMP_HELD))
+		else if (!(bs->cur_ps.pm_flags & PMF_JUMP_HELD) && bs->jumpTime != botJumpNoTap[bs->client])
 		{
-			trap->EA_Jump(bs->client);
+			BOT_EA_JUMP(bs->client);
 		}
 	}
 
