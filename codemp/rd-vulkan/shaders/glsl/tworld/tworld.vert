@@ -15,6 +15,13 @@ layout(push_constant) uniform Transform {
 	mat4 mvp;				// world -> clip
 };
 
+layout(set = 0, binding = 0) uniform TWorld {
+	vec4 eye;
+	vec4 skyZenith;
+	vec4 skyHorizon;
+	vec4 spare;				// y: light reaching foliage (leaves shade each other; the source's canopies are dark inside)
+} u_tw;
+
 layout(set = 0, binding = 2) uniform Entity {
 	vec4 ambientLight;		// rgb ambient colour, a: time in seconds
 	vec4 directedLight;
@@ -87,6 +94,11 @@ void main() {
 	float ndl = dot( n, u_entity.localLightOrigin.xyz );
 	vec3 sunLight = u_entity.directedLight.rgb * ( 1.2 * clamp( ndl, 0.001, 1.0 ) );
 	vec3 ambLight = u_entity.ambientLight.rgb * ( 1.7 * max( ndl, 0.5 ) );
+
+	if ( anim == 2 ) {
+		ambLight *= u_tw.spare.y;
+		sunLight *= 0.5 + 0.5 * u_tw.spare.y;
+	}
 
 	frag_color = vec4( ambLight * in_tint.rgb, in_tint.a );
 	frag_sun = sunLight * in_tint.rgb;

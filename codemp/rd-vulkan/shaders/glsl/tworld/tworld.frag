@@ -31,7 +31,7 @@ layout(set = 0, binding = 0) uniform TWorld {
 	vec4 eye;				// xyz: camera position (world units), w: metres per world unit
 	vec4 skyZenith;			// rgb: sky colour straight up, a: water ripple slope scale
 	vec4 skyHorizon;		// rgb: sky colour just above the horizon
-	vec4 spare;				// x: 1 = physically based path
+	vec4 spare;				// x: 1 = physically based path, y: foliage light (vertex shader)
 } u_tw;
 
 layout(set = 0, binding = 2) uniform Entity {

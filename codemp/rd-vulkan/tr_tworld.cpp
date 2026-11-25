@@ -184,6 +184,7 @@ static cvar_t	*r_tworldShadowOffset;
 static cvar_t	*r_tworldShadowBias;
 static cvar_t	*r_tworldWaterBump;
 static cvar_t	*r_tworldPBR;
+static cvar_t	*r_tworldFoliageLight;
 
 static const tworldSub_t *s_sortSubs;
 static int TW_CompareSubs( const void *a, const void *b )
@@ -416,6 +417,7 @@ void R_LoadTWorld( const char *bspName )
 	r_tworldShadowBias = ri.Cvar_Get( "r_tworldShadowBias", "1.5", CVAR_TEMP, "Cooked world shadows: depth bias, in shadow map texels" );
 	r_tworldWaterBump = ri.Cvar_Get( "r_tworldWaterBump", "0.015", CVAR_ARCHIVE_ND, "Cooked world water: slope of the ripples (0 = mirror)" );
 	r_tworldPBR = ri.Cvar_Get( "r_tworldPBR", "1", CVAR_ARCHIVE_ND, "Cooked world: 1 = physically based shading (normal maps, roughness, metallic), 0 = classic shading" );
+	r_tworldFoliageLight = ri.Cvar_Get( "r_tworldFoliageLight", "0.6", CVAR_ARCHIVE_ND, "Cooked world: share of the ambient light that reaches foliage (1 = lit like open surfaces)" );
 	r_tworldInstancing = ri.Cvar_Get( "r_tworldInstancing", "1", CVAR_ARCHIVE_ND, "Cooked world: 1 = one instanced draw per mesh level and material, 0 = one draw per placement through the model path" );
 
 	if ( !vk.vboMdvActive )
@@ -826,6 +828,7 @@ static qboolean RB_TWorldInstanced( tworld_t *tw, const int pass )
 		VectorCopy( tw->skyZenith, f + 4 );			f[7] = r_tworldWaterBump->value;
 		VectorCopy( tw->skyHorizon, f + 8 );
 		f[12] = usePbr ? 1.0f : 0.0f;
+		f[13] = r_tworldFoliageLight->value;
 		mainOffset = ( uboOffset != ~0U ) ? vk_append_uniform( &m, sizeof( m ), vk.uniform_item_size ) : ~0U;
 	}
 
