@@ -174,6 +174,10 @@ typedef struct tworld_s {
 	float			*tilePacks;			// 2 * repeats in U + 1024 * repeats in V
 	int				numPbrMaps;
 
+	// local lights (maps/<name>.tlights): lamps that light their surroundings
+	int				numLights;
+	float			*lights;			// 8 floats each: position, radius, colour (already times intensity), unused
+
 	// baked sun shadow map (maps/<name>_shadow.dds + maps/<name>.tshadow), NULL when the map has none
 	image_t			*shadowImage;
 	float			shadowRow[3][4];	// world -> texel x, texel y, depth 0..1
@@ -203,6 +207,7 @@ static cvar_t	*r_tworldWaterBump;
 static cvar_t	*r_tworldPBR;
 static cvar_t	*r_tworldFoliageLight;
 static cvar_t	*r_tworldHaze;
+static cvar_t	*r_tworldLamps;
 
 
 static const int64_t		*s_cellKeys;
@@ -505,6 +510,7 @@ void R_LoadTWorld( const char *bspName )
 	r_tworldPBR = ri.Cvar_Get( "r_tworldPBR", "1", CVAR_ARCHIVE_ND, "Cooked world: 1 = physically based shading (normal maps, roughness, metallic), 0 = classic shading" );
 	r_tworldFoliageLight = ri.Cvar_Get( "r_tworldFoliageLight", "0.6", CVAR_ARCHIVE_ND, "Cooked world: share of the ambient light that reaches foliage (1 = lit like open surfaces)" );
 	r_tworldHaze = ri.Cvar_Get( "r_tworldHaze", "110000", CVAR_ARCHIVE_ND, "Cooked world: distance in world units at which haze has taken half of the view (0 = no haze)" );
+	r_tworldLamps = ri.Cvar_Get( "r_tworldLamps", "1", CVAR_ARCHIVE_ND, "Cooked world: brightness of the local lights (lamps), 0 = off" );
 	r_tworldInstancing = ri.Cvar_Get( "r_tworldInstancing", "1", CVAR_ARCHIVE_ND, "Cooked world: 1 = one instanced draw per mesh level and material, 0 = one draw per placement through the model path" );
 
 	if ( !vk.vboMdvActive )
@@ -726,6 +732,26 @@ void R_LoadTWorld( const char *bspName )
 
 	ri.FS_FreeFile( buffer );
 	TW_BuildCells( tw );
+	{
+		// optional local lights: "TLGT", version 1, count, then 8 floats per light
+		char lname[MAX_QPATH];
+		byte *lbuf = NULL;
+		long llen;
+		COM_StripExtension( bspName, lname, sizeof( lname ) );
+		Q_strcat( lname, sizeof( lname ), ".tlights" );
+		llen = ri.FS_ReadFile( lname, (void **)&lbuf );
+		if ( llen >= 12 && lbuf ) {
+			const uint32_t n = ( (const uint32_t *)lbuf )[2];
+			if ( !memcmp( lbuf, "TLGT", 4 ) && ( (const uint32_t *)lbuf )[1] == 1 && n <= 4096 && (size_t)llen == 12 + (size_t)n * 32 ) {
+				tw->lights = (float *)ri.Hunk_Alloc( (int)( n * 32 + 4 ), h_low );
+				Com_Memcpy( tw->lights, lbuf + 12, n * 32 );
+				tw->numLights = (int)n;
+				ri.Printf( PRINT_ALL, "R_LoadTWorld: %s: %i local lights\n", lname, tw->numLights );
+			}
+		}
+		if ( lbuf )
+			ri.FS_FreeFile( lbuf );
+	}
 	R_LoadTWorldShadow( tw, bspName );
 	R_LoadTWorldPBR( tw, bspName );
 	s_tworld = tw;
@@ -940,6 +966,34 @@ static qboolean RB_TWorldInstanced( tworld_t *tw, const int pass )
 		f[12] = usePbr ? 1.0f : 0.0f;
 		f[13] = r_tworldFoliageLight->value;
 		f[14] = ( r_tworldHaze->value > 1.0f ) ? 0.693147f / r_tworldHaze->value : 0.0f;
+		if ( tw->numLights && r_tworldLamps->value > 0.0f ) {
+			// the four lights nearest the camera (distance beyond their radius)
+			int best[4] = { -1, -1, -1, -1 };
+			float bestD[4] = { 1e30f, 1e30f, 1e30f, 1e30f };
+			int li, lj, lk;
+			for ( li = 0; li < tw->numLights; li++ ) {
+				const float *L = tw->lights + li * 8;
+				vec3_t dd;
+				float dist;
+				VectorSubtract( L, viewOrg, dd );
+				dist = VectorLength( dd ) - L[3];
+				for ( lj = 0; lj < 4; lj++ ) {
+					if ( dist < bestD[lj] ) {
+						for ( lk = 3; lk > lj; lk-- ) { best[lk] = best[lk - 1]; bestD[lk] = bestD[lk - 1]; }
+						best[lj] = li; bestD[lj] = dist;
+						break;
+					}
+				}
+			}
+			for ( lj = 0; lj < 4; lj++ ) {
+				if ( best[lj] >= 0 && bestD[lj] < 20000.0f ) {
+					const float *L = tw->lights + best[lj] * 8;
+					VectorCopy( L, f + 16 + lj * 4 );
+					f[16 + lj * 4 + 3] = 1.0f / ( L[3] * L[3] );
+					VectorScale( L + 4, r_tworldLamps->value, f + 32 + lj * 4 );
+				}
+			}
+		}
 		mainOffset = ( uboOffset != ~0U ) ? vk_append_uniform( &m, sizeof( m ), vk.uniform_item_size ) : ~0U;
 	}
 

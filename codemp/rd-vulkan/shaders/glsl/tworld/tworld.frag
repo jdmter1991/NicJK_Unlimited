@@ -33,7 +33,10 @@ layout(set = 0, binding = 0) uniform TWorld {
 	vec4 skyHorizon;		// rgb: sky colour just above the horizon
 	vec4 spare;				// x: 1 = physically based path, y: foliage light (vertex shader),
 							// z: haze, share of the view lost per world unit (0 = off)
+	vec4 lightPos[4];		// the four local lights nearest the camera: xyz position, w = 1 / radius^2 (0 = unused)
+	vec4 lightColor[4];		// rgb colour times intensity
 } u_tw;
+
 
 layout(set = 0, binding = 2) uniform Entity {
 	vec4 ambientLight;
@@ -57,6 +60,23 @@ layout(location = 10) flat in float frag_ref;
 layout(location = 11) in vec3 frag_normal;
 layout(location = 12) flat in vec3 frag_tint;
 layout(location = 13) flat in vec2 frag_tile;
+
+// light from the nearby lamps on a surface with normal n (display-space, added to the diffuse light)
+vec3 local_lights( vec3 n ) {
+	vec3 sum = vec3( 0.0 );
+	for ( int i = 0; i < 4; i++ ) {
+		if ( u_tw.lightPos[i].w <= 0.0 )
+			continue;
+		vec3 d = u_tw.lightPos[i].xyz - frag_world;
+		float q = dot( d, d ) * u_tw.lightPos[i].w;
+		if ( q >= 1.0 )
+			continue;
+		float att = ( 1.0 - q ) * ( 1.0 - q );
+		float wrap = 0.35 + 0.65 * max( dot( n, d ) * inversesqrt( max( dot( d, d ), 1e-6 ) ), 0.0 );
+		sum += u_tw.lightColor[i].rgb * ( att * wrap );
+	}
+	return sum;
+}
 
 // share of the sun that reaches the fragment: 1 = fully lit
 float sun_visibility() {
@@ -115,7 +135,8 @@ void main() {
 	bool pbr = u_tw.spare.x > 0.5 && frag_anim.x < 0.5;
 
 	float vis = sun_visibility();
-	vec3 lit = frag_color.rgb + frag_sun * vis;
+	vec3 lamps = local_lights( normalize( frag_normal ) );
+	vec3 lit = frag_color.rgb + frag_sun * vis + frag_tint * lamps;
 	vec4 color = vec4( base.rgb * lit, base.a * frag_color.a );
 
 	if ( pbr ) {
@@ -184,7 +205,7 @@ void main() {
 		vec3 specAmb = env * Fr * ( ( 1.0 - rough ) * ( 1.0 - rough ) );		// rough surfaces show no sky reflection
 
 		vec3 kd = vec3( 1.0 - metal );
-		vec3 lin = kd * albedo * ( Eamb + Esun ) + specSun + specAmb;
+		vec3 lin = kd * albedo * ( Eamb + Esun + pow( local_lights( N ), vec3( 2.2 ) ) ) + specSun + specAmb;
 		color.rgb = pow( lin, vec3( 1.0 / 2.2 ) );
 	}
 
