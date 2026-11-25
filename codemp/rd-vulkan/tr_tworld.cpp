@@ -165,6 +165,7 @@ typedef struct tworld_s {
 	vec3_t			sunDir, sunColor, ambientColor;
 	vec3_t			skyZenith, skyHorizon;	// display-space sky colours for water reflections
 	float			metresPerUnit;
+	float			originM[2];			// source-scene x, y (metres) of the world origin, for world-projected textures
 
 	// physically based path: optional per-material maps and values (maps/<name>.tpbr)
 	image_t			**pbrImages;		// normal map per material, or NULL
@@ -588,6 +589,7 @@ void R_LoadTWorld( const char *bspName )
 	VectorCopy( h->sunColor, tw->sunColor );
 	VectorCopy( h->ambientColor, tw->ambientColor );
 	tw->metresPerUnit = ( h->unitsPerMetre > 0.001f ) ? 1.0f / h->unitsPerMetre : 0.0254f;
+	Com_Memcpy( tw->originM, &h->reserved[2], sizeof( tw->originM ) );		// two floats; zero in older files
 	if ( h->reserved[0] || h->reserved[1] ) {
 		for ( i = 0; i < 3; i++ ) {
 			tw->skyZenith[i] = ( ( h->reserved[0] >> ( 16 - 8 * i ) ) & 255 ) / 255.0f;
@@ -966,6 +968,8 @@ static qboolean RB_TWorldInstanced( tworld_t *tw, const int pass )
 		f[12] = usePbr ? 1.0f : 0.0f;
 		f[13] = r_tworldFoliageLight->value;
 		f[14] = ( r_tworldHaze->value > 1.0f ) ? 0.693147f / r_tworldHaze->value : 0.0f;
+		f[11] = tw->originM[0];
+		f[15] = tw->originM[1];
 		if ( tw->numLights && r_tworldLamps->value > 0.0f ) {
 			// the four lights nearest the camera (distance beyond their radius)
 			int best[4] = { -1, -1, -1, -1 };
@@ -1036,7 +1040,7 @@ static qboolean RB_TWorldInstanced( tworld_t *tw, const int pass )
 			if ( tw->anims[sub->tintIndex] == 0 ) {
 				// physically based path: packed material values; a normal map takes the second texture slot
 				out->params[3] = tw->pbrPacks[sub->tintIndex];
-				if ( usePbr && out->params[0] <= 0.0f && tw->pbrImages[sub->tintIndex] )
+				if ( usePbr && out->params[0] <= 0.0f && tw->pbrImages[sub->tintIndex] && ( (int)tw->tilePacks[sub->tintIndex] >> 10 ) != 254 )
 					out->params[0] = -tw->pbrScales[sub->tintIndex];
 			}
 			else if ( tw->anims[sub->tintIndex] == 4 )
@@ -1089,7 +1093,8 @@ static qboolean RB_TWorldInstanced( tworld_t *tw, const int pass )
 		{
 			const shaderStage_t *ds = ( tw->details[sub->tintIndex] > 0.0f || tw->anims[sub->tintIndex] == 1 || tw->anims[sub->tintIndex] == 4 ) ? sub->shader->stages[1] : NULL;
 			image_t *detail = ( ds && ds->bundle[0].image[0] ) ? ds->bundle[0].image[0] : tr.whiteImage;
-			if ( !ds && usePbr && tw->anims[sub->tintIndex] == 0 && tw->pbrImages[sub->tintIndex] )
+			// blended ground (tile code 254): the second texture is its weight map, with or without the PBR path
+			if ( !ds && tw->anims[sub->tintIndex] == 0 && tw->pbrImages[sub->tintIndex] && ( usePbr || ( (int)tw->tilePacks[sub->tintIndex] >> 10 ) == 254 ) )
 				detail = tw->pbrImages[sub->tintIndex];
 			vk_update_descriptor( VK_DESC_TEXTURE0 + 1, detail->descriptor_set );
 		}

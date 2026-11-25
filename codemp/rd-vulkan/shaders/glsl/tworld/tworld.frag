@@ -16,6 +16,11 @@
 // the tint its colour and gain; drawn additively (blend state from the material's shader script).
 // Tiling colour layer (frag_tile > 0): materials whose source formula is a repeating colour texture times
 // everything else keep that texture as a layer of its own; colour = base x tile x 2.
+// Ground (frag_tile.y = 255): the layer is projected from world position, frag_tile.x / 256 repeats per metre, and
+// the base map's alpha says how much of the pixel belongs to that layer: colour = base x mix(1, tile x 2, alpha).
+// Blended ground (frag_tile.y = 254): where the source blends several tiling textures. The second texture holds
+// the share of the pixel's light that comes from layers 1-4 (RGBA, mapped like the base), the tiling texture holds
+// each layer's brightness relative to its mean x 0.5 (RGBA): colour = base x (1 + sum w_i x (2 x pack_i - 1)).
 // Falling water / foam (animation type 4): white, alpha = (n1.r + n2.r) * n3.b [* m.g] * fade * 0.75 with three
 // scrolling samples of the first texture and optionally one of the second, as in the source material.
 // Alpha test uses the same specialization constants as the generic fragment shader.
@@ -118,7 +123,22 @@ void main() {
 		if ( base.a < alpha_test_value ) discard;
 	}
 
-	if ( frag_tile.x > 0.5 ) {
+	float groundSmooth = -1.0;
+	bool groundPack = frag_tile.y > 253.5 && frag_tile.y < 254.5;
+	if ( groundPack ) {
+		vec2 guv = ( frag_world.xy * u_tw.eye.w + vec2( u_tw.skyHorizon.a, u_tw.spare.w ) ) * ( frag_tile.x / 256.0 );
+		vec4 gt = texture( texture3, vec2( guv.x, 1.0 - guv.y ) );
+		vec4 gw = texture( texture1, frag_tex_coord );
+		base.rgb = clamp( base.rgb * ( 1.0 + dot( gw, gt * 2.0 - 1.0 ) ), vec3( 0.0 ), vec3( 1.0 ) );
+		base.a = 1.0;
+	} else if ( frag_tile.y > 254.5 ) {
+		// source-scene metres: world units * metres per unit + the scene origin (skyHorizon.a, spare.w)
+		vec2 guv = ( frag_world.xy * u_tw.eye.w + vec2( u_tw.skyHorizon.a, u_tw.spare.w ) ) * ( frag_tile.x / 256.0 );
+		vec4 gt = texture( texture3, vec2( guv.x, 1.0 - guv.y ) );
+		base.rgb = min( base.rgb * mix( vec3( 1.0 ), gt.rgb * 2.0, base.a ), vec3( 1.0 ) );
+		groundSmooth = gt.a * base.a;
+		base.a = 1.0;
+	} else if ( frag_tile.x > 0.5 ) {
 		base.rgb = min( base.rgb * texture( texture3, frag_tex_coord * frag_tile ).rgb * 2.0, vec3( 1.0 ) );
 	}
 
@@ -172,6 +192,8 @@ void main() {
 		}
 		if ( ( flags & 1 ) != 0 )
 			rough = clamp( 1.0 - base.a, 0.06, 1.0 );		// the base texture's alpha is smoothness
+		if ( groundSmooth >= 0.0 )
+			rough = mix( 0.85, 1.0 - groundSmooth, 0.8 );		// the tiling layer's alpha is its smoothness
 		rough = clamp( rough, 0.06, 1.0 );
 
 		vec3 L = u_entity.localLightOrigin.xyz;
