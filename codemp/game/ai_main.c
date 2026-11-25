@@ -197,6 +197,204 @@ vmCvar_t bot_abTest;
 #define BOTF_FORCE		8192
 // 16384: step in when the bot's own swing is predicted to fall short
 #define BOTF_SWINGTRACK	16384
+// 32768: the distances, timings and chances listed in btDefs are tuned by play (see below)
+#define BOTF_TUNE		32768
+
+/*
+==============
+Tuning by play (bot_features 32768)
+
+The values in btDefs were set by hand. With this feature each bot plays an episode of
+bot_tuneEpisode seconds with every value moved a little up or down at random, and at the end of
+the episode its kills minus deaths are compared with what bots usually score in an episode. If it
+did better than usual, the shared values move a small step toward the ones it played with; if it
+did worse, a small step away. One episode says very little; thousands of them add up. The shared
+values are kept in bottune.dat (plain text) and read back at start.
+bot_tuneExplore 0 plays the shared values exactly and changes nothing (for measuring them).
+==============
+*/
+enum {
+	BT_EVADE_HORIZON, BT_EVADE_DIST, BT_EVADE_HOLD, BT_HEAVY_DIST, BT_HEAVY_HEALTH, BT_RETREAT_HEALTH,
+	BT_TRACK_NEAR, BT_TRACK_FAR, BT_TRACK_HORIZON,
+	BT_LIGHTNING_NEAR, BT_DRAIN_HEALTH, BT_PUSH_DIST, BT_PUSH_CHANCE, BT_PULL_CHANCE, BT_THROW_NEAR, BT_THROW_CHANCE,
+	BT_FORCE_PAUSE, BT_KATA_CHANCE,
+	BT_COUNT
+};
+typedef struct btDef_s { const char *name; float def, min, max, step; } btDef_t;
+static const btDef_t btDefs[BT_COUNT] = {
+	{ "evadeHorizon",	120,  20, 320, 30 },	// ms a blade is looked ahead before skill is added
+	{ "evadeDist",		150,  90, 230, 15 },	// enemy within this distance: watch his blade
+	{ "evadeHold",		160,  40, 420, 35 },	// ms the step away lasts beyond the predicted hit
+	{ "heavyDist",		 90,  50, 160, 12 },	// strong-style swing closer than this is stepped away from when hurt
+	{ "heavyHealth",	 50,  10, 100,  8 },	// ... "hurt" means below this health
+	{ "retreatHealth",	 30,   0,  60,  6 },	// below this health, break off from a healthier enemy
+	{ "trackNear",		 40,  20,  70,  8 },	// own swing is followed up between these two distances
+	{ "trackFar",		135, 100, 200, 12 },
+	{ "trackHorizon",	 50,   0, 220, 25 },	// ms the own blade is looked ahead before skill is added
+	{ "lightningNear",	130,  90, 240, 15 },	// lightning is not started closer than this
+	{ "drainHealth",	 70,  30, 100,  8 },	// drain is started below this health
+	{ "pushDist",		110,  60, 150, 10 },	// knock-down push is tried inside this distance
+	{ "pushChance",		 30,   0, 100,  8 },	// per think, in percent
+	{ "pullChance",		 25,   0, 100,  8 },
+	{ "throwNear",		280, 200, 500, 30 },	// saber throw is not started closer than this
+	{ "throwChance",	 20,   0, 100,  6 },
+	{ "forcePause",		100,  40, 300, 15 },	// pauses between force uses, percent of the hand-set ones
+	{ "kataChance",		 35,   0, 100,  8 },
+};
+static float btMean[BT_COUNT];
+static float btVal[MAX_CLIENTS][BT_COUNT], btEps[MAX_CLIENTS][BT_COUNT];
+static struct { qboolean on; int start, kills, deaths; } btEp[MAX_CLIENTS];
+static float btBase, btScale = 3.0f;
+static int btEpisodes, btEpisodesRun, btSaveTime;
+static qboolean btDirty;
+static vmCvar_t bot_tuneExplore, bot_tuneEpisode;
+#define BT(bs, k) ((int)btVal[(bs)->client][k])
+
+static void Bot_TuneDefaults(int client) {
+	int k;
+	for (k = 0; k < BT_COUNT; k++) {
+		btVal[client][k] = btDefs[k].def;
+		btEps[client][k] = 0;
+	}
+	btEp[client].on = qfalse;
+}
+
+static void Bot_TuneLoad(void) {
+	fileHandle_t f;
+	char buf[4096];
+	const char *text = buf;
+	int i, k;
+	const int len = trap->FS_Open("bottune.dat", &f, FS_READ);
+
+	for (k = 0; k < BT_COUNT; k++) {
+		btMean[k] = btDefs[k].def;
+	}
+	for (i = 0; i < MAX_CLIENTS; i++) {
+		Bot_TuneDefaults(i);
+	}
+	btBase = 0; btScale = 3.0f; btEpisodes = btEpisodesRun = 0; btDirty = qfalse;
+	if (!f) {
+		return;
+	}
+	if (len > 0 && len < (int)sizeof(buf)) {
+		trap->FS_Read(buf, len, f);
+		buf[len] = 0;
+		for (;;) {
+			char name[64];
+			const char *tok = COM_ParseExt(&text, qtrue);
+			float v;
+			if (!tok[0]) break;
+			Q_strncpyz(name, tok, sizeof(name));
+			tok = COM_ParseExt(&text, qfalse);
+			if (!tok[0]) break;
+			v = atof(tok);
+			if (!Q_stricmp(name, "episodes")) btEpisodes = (int)v;
+			else if (!Q_stricmp(name, "usualScore")) btBase = v;
+			else if (!Q_stricmp(name, "usualSpread")) btScale = (v < 1.0f) ? 1.0f : v;
+			else for (k = 0; k < BT_COUNT; k++) {
+				if (!Q_stricmp(name, btDefs[k].name)) {
+					btMean[k] = (v < btDefs[k].min) ? btDefs[k].min : ((v > btDefs[k].max) ? btDefs[k].max : v);
+				}
+			}
+		}
+	}
+	trap->FS_Close(f);
+	trap->Print("Bot tuning: values from %d episodes loaded from bottune.dat\n", btEpisodes);
+}
+
+static void Bot_TuneSave(void) {
+	fileHandle_t f;
+	char line[128];
+	int k;
+
+	if (!btDirty) {
+		return;
+	}
+	trap->FS_Open("bottune.dat", &f, FS_WRITE);
+	if (!f) {
+		return;
+	}
+	Com_sprintf(line, sizeof(line), "episodes %d\nusualScore %.3f\nusualSpread %.3f\n", btEpisodes, btBase, btScale);
+	trap->FS_Write(line, strlen(line), f);
+	for (k = 0; k < BT_COUNT; k++) {
+		Com_sprintf(line, sizeof(line), "%s %.2f\n", btDefs[k].name, btMean[k]);
+		trap->FS_Write(line, strlen(line), f);
+	}
+	trap->FS_Close(f);
+	btDirty = qfalse;
+}
+
+static void Bot_TuneReport(void) {
+	char out[900];
+	int k;
+	out[0] = 0;
+	for (k = 0; k < BT_COUNT; k++) {
+		Q_strcat(out, sizeof(out), va(" %s %.0f(%.0f)", btDefs[k].name, btMean[k], btDefs[k].def));
+	}
+	trap->Print("BOTEVAL tuning: episodes scored %d in all, %d since start, exploring %d, usual episode score %.2f spread %.2f\n",
+		btEpisodes, btEpisodesRun, bot_tuneExplore.integer, btBase, btScale);
+	trap->Print("BOTEVAL tuned values, hand-set in brackets:%s\n", out);
+}
+
+// once per think for every bot
+static void Bot_TuneThink(int client, int features) {
+	gclient_t *cl = g_entities[client].client;
+	int k, kills, deaths, len;
+
+	if (level.time - btSaveTime > (btDirty ? 10000 : 120000) || btSaveTime > level.time) {
+		btSaveTime = level.time;
+		Bot_TuneSave();
+	}
+	if (!cl || !(features & BOTF_TUNE) || cl->sess.sessionTeam == TEAM_SPECTATOR) {
+		if (btEp[client].on) {
+			Bot_TuneDefaults(client);
+		}
+		return;
+	}
+	kills = cl->ps.persistant[PERS_SCORE];
+	deaths = cl->ps.persistant[PERS_KILLED];
+	len = bot_tuneEpisode.integer;
+	if (len < 30) len = 30;
+	if (btEp[client].on) {
+		if (level.time < btEp[client].start || deaths < btEp[client].deaths) {
+			btEp[client].on = qfalse;	// counters restarted under us: nothing to score
+		} else if (level.time - btEp[client].start < len * 1000) {
+			return;
+		} else if (bot_tuneExplore.integer) {
+			const float score = (float)((kills - btEp[client].kills) - (deaths - btEp[client].deaths));
+			float z = (score - btBase) / btScale;
+			if (z > 2.5f) z = 2.5f;
+			if (z < -2.5f) z = -2.5f;
+			for (k = 0; k < BT_COUNT; k++) {
+				btMean[k] += 0.04f * btDefs[k].step * z * btEps[client][k];
+				if (btMean[k] < btDefs[k].min) btMean[k] = btDefs[k].min;
+				if (btMean[k] > btDefs[k].max) btMean[k] = btDefs[k].max;
+			}
+			btBase += 0.02f * (score - btBase);
+			btScale += 0.02f * ((float)fabs(score - btBase) - btScale);
+			if (btScale < 1.0f) btScale = 1.0f;
+			btEpisodes++;
+			btEpisodesRun++;
+			btDirty = qtrue;
+		}
+	}
+	// next episode
+	for (k = 0; k < BT_COUNT; k++) {
+		float e = 0, v;
+		if (bot_tuneExplore.integer) {
+			e = Q_flrand(-1.0f, 1.0f) + Q_flrand(-1.0f, 1.0f) + Q_flrand(-1.0f, 1.0f);	// about a normal distribution, spread 1
+		}
+		v = btMean[k] + e * btDefs[k].step;
+		if (v < btDefs[k].min) v = btDefs[k].min;
+		if (v > btDefs[k].max) v = btDefs[k].max;
+		btVal[client][k] = v;
+		btEps[client][k] = (v - btMean[k]) / btDefs[k].step;
+	}
+	btEp[client].on = qtrue;
+	btEp[client].start = level.time;
+	btEp[client].kills = kills;
+	btEp[client].deaths = deaths;
+}
 
 #define BOTINTENT_EVADE		8	// applied whatever the buttons are, and releases attack
 #define BOTINTENT_WORLD		16	// move along bs->intentWorldDir (navigation jump / unstick), always applied
@@ -312,6 +510,7 @@ static void BotEval_Report(void) {
 	trap->Print("BOTEVAL bots found standing inside solid geometry and respawned: %d; hops over low ledges while moving: %d\n", botEvalStuckInSolid, botEvalLedgeHops);
 	trap->Print("BOTEVAL machine: predicted blade hits %d, evaded %d; learning: results recorded %d, swing choices changed by what was learned %d, exploratory choices %d, table holds %d results\n",
 		botEvalPredThreats, botEvalPredEvades, botEvalLearnSamples, botEvalLearnOverrides, botEvalLearnExplore, Bot_LearnTotal());
+	Bot_TuneReport();
 	trap->Print("BOTEVAL machine attack: swing frames predicted to land %d, predicted to fall short and closed in %d\n", botEvalPredOnTarget, botEvalPredChase);
 	trap->Print("BOTEVAL force: started lightning %d drain %d pull %d push %d saber throw %d; stopped as out of range or pointless: lightning %d drain %d grip %d push %d pull %d throw %d\n",
 		botEvalForceUse[0], botEvalForceUse[1], botEvalForceUse[2], botEvalForceUse[3], botEvalForceUse[4],
@@ -364,6 +563,8 @@ static double BotProf_FrameBegin(void) {
 	trap->Cvar_Update(&bot_fixes);
 	trap->Cvar_Update(&bot_features);
 	trap->Cvar_Update(&bot_abTest);
+	trap->Cvar_Update(&bot_tuneExplore);
+	trap->Cvar_Update(&bot_tuneEpisode);
 	if (bot_profile.integer <= 0) {
 		botProf.enabled = 0;
 		return 0.0;
@@ -985,10 +1186,10 @@ static qboolean Bot_ForceOK(bot_state_t* bs, int power, qboolean cont) {
 	switch (power) {
 	case FP_LIGHTNING:
 		max = (lvl >= 3) ? 285 : 1100;
-		return (!absorbing && d >= (cont ? 95 : 130) && d <= max && fp >= (cont ? 25 : 35) && !Bot_ForceCrowded(bs, 150)) ? qtrue : qfalse;
+		return (!absorbing && d >= BT(bs, BT_LIGHTNING_NEAR) - (cont ? 35 : 0) && d <= max && fp >= (cont ? 25 : 35) && !Bot_ForceCrowded(bs, 150)) ? qtrue : qfalse;
 	case FP_DRAIN:
 		max = (lvl >= 3) ? 480 : 1100;
-		return (!absorbing && ep->fd.forcePower >= 10 && me->health < (cont ? 95 : 70) && d >= (cont ? 95 : 130) && d <= max
+		return (!absorbing && ep->fd.forcePower >= 10 && me->health < (cont ? 95 : BT(bs, BT_DRAIN_HEALTH)) && d >= (cont ? 95 : 130) && d <= max
 			&& fp >= (cont ? 25 : 45) && !Bot_ForceCrowded(bs, 150)) ? qtrue : qfalse;
 	case FP_GRIP:
 		return (!absorbing && !BG_SaberInSpecial(ep->saberMove) && d >= 70 && d <= (cont ? 250 : 235)
@@ -1000,7 +1201,7 @@ static qboolean Bot_ForceOK(bot_state_t* bs, int power, qboolean cont) {
 	case FP_SABERTHROW:
 		max = 700 * lvl - 120;
 		if (max > 1000) max = 1000;
-		return (d >= (cont ? 150 : 280) && d <= max && !Bot_ForceCrowded(bs, 250)) ? qtrue : qfalse;
+		return (d >= (cont ? 150 : BT(bs, BT_THROW_NEAR)) && d <= max && !Bot_ForceCrowded(bs, 250)) ? qtrue : qfalse;
 	}
 	return qtrue;
 }
@@ -1049,7 +1250,7 @@ static void Bot_ForceTactics(bot_state_t* bs) {
 	gentity_t *me = &g_entities[bs->client];
 	gentity_t *en = bs->currentEnemy;
 	const playerState_t *ps;
-	int known, d, dur;
+	int known, d, dur, pause;
 
 	if (!(bs->features & BOTF_FORCE) || !me->client || me->health <= 0 || !en || !en->client || !bs->frame_Enemy_Vis) {
 		return;
@@ -1064,33 +1265,34 @@ static void Bot_ForceTactics(bot_state_t* bs) {
 	}
 	known = ps->fd.forcePowersKnown;
 	d = bs->frame_Enemy_Len;
+	pause = BT(bs, BT_FORCE_PAUSE);
 
 	if ((known & (1 << FP_DRAIN)) && !(g_forcePowerDisable.integer & (1 << FP_DRAIN)) && Bot_ForceOK(bs, FP_DRAIN, qfalse)) {
 		dur = Q_irand(450, 800);	// 5 force a tick: short
 		Bot_HoldButtons(bs, BUTTON_FORCE_DRAIN, dur);
-		nextUse[bs->client] = level.time + dur + Q_irand(1800, 2600);
+		nextUse[bs->client] = level.time + dur + Q_irand(1800, 2600) * pause / 100;
 		botEvalForceUse[1]++;
 	} else if ((known & (1 << FP_LIGHTNING)) && !(g_forcePowerDisable.integer & (1 << FP_LIGHTNING)) && Bot_ForceOK(bs, FP_LIGHTNING, qfalse)) {
 		dur = Q_irand(800, 1500);
 		Bot_HoldButtons(bs, BUTTON_FORCE_LIGHTNING, dur);
-		nextUse[bs->client] = level.time + dur + Q_irand(1800, 3200);
+		nextUse[bs->client] = level.time + dur + Q_irand(1800, 3200) * pause / 100;
 		botEvalForceUse[0]++;
-	} else if ((known & (1 << FP_PUSH)) && !(g_forcePowerDisable.integer & (1 << FP_PUSH)) && ps->fd.forcePowerLevel[FP_PUSH] >= 3 && d <= 110
-		&& ps->fd.forcePower >= 40 && !BG_InKnockDown(en->client->ps.legsAnim) && Bot_ForceOK(bs, FP_PUSH, qfalse) && Q_irand(1, 100) <= 30) {
+	} else if ((known & (1 << FP_PUSH)) && !(g_forcePowerDisable.integer & (1 << FP_PUSH)) && ps->fd.forcePowerLevel[FP_PUSH] >= 3 && d <= BT(bs, BT_PUSH_DIST)
+		&& ps->fd.forcePower >= 40 && !BG_InKnockDown(en->client->ps.legsAnim) && Bot_ForceOK(bs, FP_PUSH, qfalse) && Q_irand(1, 100) <= BT(bs, BT_PUSH_CHANCE)) {
 		if (Bot_SendGenCmd(bs, GENCMD_FORCE_THROW, 300)) {
-			nextUse[bs->client] = level.time + Q_irand(2500, 4000);
+			nextUse[bs->client] = level.time + Q_irand(2500, 4000) * pause / 100;
 			botEvalForceUse[3]++;
 		}
 	} else if ((known & (1 << FP_PULL)) && !(g_forcePowerDisable.integer & (1 << FP_PULL)) && d >= 150 && d <= 320
-		&& ps->fd.forcePower >= 40 && Bot_ForceOK(bs, FP_PULL, qfalse) && Q_irand(1, 100) <= 25) {
+		&& ps->fd.forcePower >= 40 && Bot_ForceOK(bs, FP_PULL, qfalse) && Q_irand(1, 100) <= BT(bs, BT_PULL_CHANCE)) {
 		if (Bot_SendGenCmd(bs, GENCMD_FORCE_PULL, 300)) {	// bring him into reach while he cannot resist
-			nextUse[bs->client] = level.time + Q_irand(2500, 4000);
+			nextUse[bs->client] = level.time + Q_irand(2500, 4000) * pause / 100;
 			botEvalForceUse[2]++;
 		}
 	} else if ((known & (1 << FP_SABERTHROW)) && ps->weapon == WP_SABER && ps->fd.saberAnimLevel != SS_STAFF && !ps->saberInFlight
-		&& !ps->saberHolstered && ps->fd.forcePower >= 30 && Bot_ForceOK(bs, FP_SABERTHROW, qfalse) && Q_irand(1, 100) <= 20) {
+		&& !ps->saberHolstered && ps->fd.forcePower >= 30 && Bot_ForceOK(bs, FP_SABERTHROW, qfalse) && Q_irand(1, 100) <= BT(bs, BT_THROW_CHANCE)) {
 		Bot_HoldButtons(bs, BUTTON_ALT_ATTACK, 800);
-		nextUse[bs->client] = level.time + Q_irand(5000, 9000);
+		nextUse[bs->client] = level.time + Q_irand(5000, 9000) * pause / 100;
 		botEvalForceUse[4]++;
 	}
 }
@@ -1287,12 +1489,12 @@ void BotInputToUserCommand(bot_state_t* bs, bot_input_t* bi, usercmd_t* ucmd, in
 	// reach him? If the swing is going to fall short of an enemy who is nearly in reach, step in so
 	// that it lands, instead of finishing the swing in the air. Skill 5 looks 250 ms ahead.
 	if ((bs->features & BOTF_SWINGTRACK) && !bs->seqType && !(bs->intentFlags & (BOTINTENT_WORLD | BOTINTENT_KATA | BOTINTENT_EVADE))
-		&& bs->currentEnemy && bs->currentEnemy->client && bs->frame_Enemy_Vis && bs->frame_Enemy_Len >= 40 && bs->frame_Enemy_Len <= 135
+		&& bs->currentEnemy && bs->currentEnemy->client && bs->frame_Enemy_Vis && bs->frame_Enemy_Len >= BT(bs, BT_TRACK_NEAR) && bs->frame_Enemy_Len <= BT(bs, BT_TRACK_FAR)
 		&& g_entities[bs->client].client && (int)bs->settings.skill >= 3) {
 		const playerState_t *mp = &g_entities[bs->client].client->ps;
 		if (mp->stats[STAT_HEALTH] > 0 && mp->weapon == WP_SABER && BG_SaberInAttack(mp->saberMove) && !BG_SaberInSpecial(mp->saberMove)
 			&& mp->groundEntityNum != ENTITYNUM_NONE) {
-			if (BotPred_BladeHits(&g_entities[bs->client], bs->currentEnemy, 50 + (int)bs->settings.skill * 40) >= 0) {
+			if (BotPred_BladeHits(&g_entities[bs->client], bs->currentEnemy, BT(bs, BT_TRACK_HORIZON) + (int)bs->settings.skill * 40) >= 0) {
 				botEvalPredOnTarget++;
 			} else {
 				ucmd->forwardmove = 127;	// the view is on the enemy, so forward is toward him
@@ -2020,6 +2222,7 @@ int BotAI(int client, float thinktime) {
 	if (bs->features & BOTF_LEARN) {
 		Bot_LearnResolve(bs);
 	}
+	Bot_TuneThink(bs->client, bs->features);
 	Bot_ForceTactics(bs);
 #ifdef _DEBUG
 	end = trap->Milliseconds();
@@ -12016,19 +12219,19 @@ static qboolean Bot_DefensiveReaction(bot_state_t* bs) {
 	// katas and special attacks cannot be blocked and lock the attacker into the move
 	enemySpecial = (bs->frame_Enemy_Vis && dist < 190 && (BG_SaberInKata(en->ps.saberMove) || BG_SaberInSpecial(en->ps.saberMove))) ? qtrue : qfalse;
 	// a strong-style swing coming in while we are hurt and not already swinging ourselves
-	enemyHeavySwing = (bs->frame_Enemy_Vis && dist < 90 && myHealth < 50 && BG_SaberInAttack(en->ps.saberMove)
+	enemyHeavySwing = (bs->frame_Enemy_Vis && dist < BT(bs, BT_HEAVY_DIST) && myHealth < BT(bs, BT_HEAVY_HEALTH) && BG_SaberInAttack(en->ps.saberMove)
 		&& (en->ps.fd.saberAnimLevel == SS_STRONG || en->ps.fd.saberAnimLevel == SS_DESANN)
 		&& !BG_SaberInAttack(cl->ps.saberMove)) ? qtrue : qfalse;
 
-	if ((bs->features & BOTF_MACHINE) && bs->frame_Enemy_Vis && dist < 150 && !BG_SaberInAttack(cl->ps.saberMove)) {
+	if ((bs->features & BOTF_MACHINE) && bs->frame_Enemy_Vis && dist < BT(bs, BT_EVADE_DIST) && !BG_SaberInAttack(cl->ps.saberMove)) {
 		// A blade is on its way to this bot's body. Skill 5 sees it 320 ms out and acts at once;
 		// each skill level below sees less far and needs 90 ms more to react, so at low skill only
 		// the slowest swings are avoided.
 		const int reaction = (5 - skill) * 90;
-		const int t = BotPred_BladeThreat(bs, bs->currentEnemy, 120 + skill * 40);
+		const int t = BotPred_BladeThreat(bs, bs->currentEnemy, BT(bs, BT_EVADE_HORIZON) + skill * 40);
 		if (t >= 0) {
 			botEvalPredThreats++;
-			if (t >= reaction && Bot_StartEvade(bs, qfalse, t + 160)) {
+			if (t >= reaction && Bot_StartEvade(bs, qfalse, t + BT(bs, BT_EVADE_HOLD))) {
 				botEvalPredEvades++;
 				bs->defThreatTime = 0;
 				return qtrue;
@@ -12070,7 +12273,7 @@ static qboolean Bot_DefensiveReaction(bot_state_t* bs) {
 	}
 
 	// badly hurt and the enemy is not: break off, and use what we have to recover or soak damage
-	if (myHealth > 0 && myHealth < 30 && bs->currentEnemy->health > myHealth + 15 && dist < 220 && bs->frame_Enemy_Vis) {
+	if (myHealth > 0 && myHealth < BT(bs, BT_RETREAT_HEALTH) && bs->currentEnemy->health > myHealth + 15 && dist < 220 && bs->frame_Enemy_Vis) {
 		if (level.time >= bs->defNextHealTime) {
 			int cmd = 0;
 			if ((cl->ps.fd.forcePowersKnown & (1 << FP_HEAL)) && cl->ps.fd.forcePower >= 50 && dist > 100) {
@@ -12595,7 +12798,7 @@ void Bot_ExecuteSaberCombat(bot_state_t* bs) {
 			&& kps->saberMove == LS_READY	// PM_SaberMoveOkayForKata
 			&& !((kps->fd.saberAnimLevelBase == SS_STAFF || kps->fd.saberAnimLevelBase == SS_DUAL) && kps->fd.saberAnimLevel != kps->fd.saberAnimLevelBase)	// PM_InSecondaryStyle
 			&& kps->forceHandExtend == HANDEXTEND_NONE
-			&& enemyVulnerable && Q_irand(1, 100) <= 35 && !Bot_ForceCrowded(bs, 260)
+			&& enemyVulnerable && Q_irand(1, 100) <= BT(bs, BT_KATA_CHANCE) && !Bot_ForceCrowded(bs, 260)
 			&& (!(bs->features & BOTF_PRO) || Q_irand(1, 100) <= 60)
 			&& (!(bs->features & BOTF_SPECIALS) || level.time >= bs->seqNextSpecialTime)
 			&& Q_irand(1, 100) <= (specialChance + 10))
@@ -17370,6 +17573,9 @@ BotAISetup
 */
 int BotAISetup(int restart) {
 	Bot_LearnLoad();
+	Bot_TuneLoad();
+	trap->Cvar_Register(&bot_tuneExplore, "bot_tuneExplore", "1", 0);	// 0: play the tuned values exactly, learn nothing
+	trap->Cvar_Register(&bot_tuneEpisode, "bot_tuneEpisode", "180", 0);	// seconds a bot plays one set of values before it is scored
 	//rww - new bot cvars..
 	trap->Cvar_Register(&bot_forcepowers, "bot_forcepowers", "1", CVAR_CHEAT);
 	trap->Cvar_Register(&bot_forgimmick, "bot_forgimmick", "0", CVAR_CHEAT);
@@ -17387,7 +17593,7 @@ int BotAISetup(int restart) {
 	trap->Cvar_Register(&bot_profile, "bot_profile", "0", 0);
 	trap->Cvar_Register(&bot_fixes, "bot_fixes", "1", CVAR_ARCHIVE);
 	trap->Cvar_Register(&bot_abBase, "bot_abBase", "0", 0);	// features of the baseline group in an A/B test
-	trap->Cvar_Register(&bot_features, "bot_features", "31215", CVAR_ARCHIVE);	// 495 + 2048 blade prediction + 4096 learning + 8192 force rules + 16384 swing tracking; 16, 512, 1024 lost their A/B tests
+	trap->Cvar_Register(&bot_features, "bot_features", "59887", CVAR_ARCHIVE);	// 495 + 2048 blade prediction + 8192 force rules + 16384 swing tracking + 32768 tuning by play; 16, 512, 1024 lost their A/B tests, 4096 (swing table) showed no gain
 	trap->Cvar_Register(&bot_abTest, "bot_abTest", "0", 0);
 	trap->Cvar_Register(&bot_attachments, "bot_attachments", "1", 0);
 	trap->Cvar_Register(&bot_camp, "bot_camp", "1", 0);
@@ -17427,6 +17633,7 @@ int BotAIShutdown(int restart) {
 	int i;
 
 	Bot_LearnSave();
+	Bot_TuneSave();
 
 	//if the game is restarted for a tournament
 	if (restart) {
