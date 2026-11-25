@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - master
+      - NicJK_Unlimited
       - beta
     paths-ignore:
       - "**.md"
@@ -12,7 +12,7 @@ on:
       - "docs/*"
   pull_request:
     branches:
-      - master
+      - NicJK_Unlimited
       - beta
     paths-ignore:
       - "**.md"
@@ -139,20 +139,20 @@ jobs:
             throw "MSVC AddressSanitizer runtime DLL not found at $asanRuntime"
           }
           Copy-Item $asanRuntime -Destination $installDir -Force
-          Copy-Item "${{ github.workspace }}\scripts\asan\Run-TaystJK-ASan.bat" -Destination $installDir -Force
+          Copy-Item "${{ github.workspace }}\scripts\asan\Run-NicJK-ASan.bat" -Destination $installDir -Force
 
       - name: Create Archive
         if: ${{ matrix.build_type == 'Release' || matrix.sanitizer == 'AddressSanitizer' }}
         working-directory: ${{ github.workspace }}/build/bin/JediAcademy
         shell: bash
         run: |
-          7z a -r TaystJK-windows-${{ matrix.arch }}-${{ matrix.build_type }}-${{ matrix.portable }}${{ matrix.sanitizer == 'AddressSanitizer' && '-AddressSanitizer' || '' }}.zip *
+          7z a -r NicJK-windows-${{ matrix.arch }}-${{ matrix.build_type }}-${{ matrix.portable }}${{ matrix.sanitizer == 'AddressSanitizer' && '-AddressSanitizer' || '' }}.zip *
 
       - uses: actions/upload-artifact@6027e3dd177782cd8ab9af838c04fd81a07f1d47 # v4.6.2
         if: ${{ matrix.build_type == 'Release' || matrix.sanitizer == 'AddressSanitizer' }}
         with:
-          name: TaystJK-windows-${{ matrix.arch }}-${{ matrix.build_type }}-${{ matrix.portable }}${{ matrix.sanitizer == 'AddressSanitizer' && '-AddressSanitizer' || '' }}
-          path: ${{ github.workspace }}/build/bin/JediAcademy/TaystJK-windows-${{ matrix.arch }}-${{ matrix.build_type }}-${{ matrix.portable }}${{ matrix.sanitizer == 'AddressSanitizer' && '-AddressSanitizer' || '' }}.zip
+          name: NicJK-windows-${{ matrix.arch }}-${{ matrix.build_type }}-${{ matrix.portable }}${{ matrix.sanitizer == 'AddressSanitizer' && '-AddressSanitizer' || '' }}
+          path: ${{ github.workspace }}/build/bin/JediAcademy/NicJK-windows-${{ matrix.arch }}-${{ matrix.build_type }}-${{ matrix.portable }}${{ matrix.sanitizer == 'AddressSanitizer' && '-AddressSanitizer' || '' }}.zip
           if-no-files-found: error
 
   ubuntu:
@@ -224,17 +224,16 @@ jobs:
         if: ${{ matrix.build_type == 'Release' }}
         working-directory: ${{ github.workspace }}/install/JediAcademy
         shell: bash
-        run: tar -czvf TaystJK-linux-${{ matrix.arch }}-${{ matrix.build_type }}-${{ matrix.portable }}.tar.gz  *
+        run: tar -czvf NicJK-linux-${{ matrix.arch }}-${{ matrix.build_type }}-${{ matrix.portable }}.tar.gz  *
 
       - uses: actions/upload-artifact@6027e3dd177782cd8ab9af838c04fd81a07f1d47 # v4.6.2
         if: ${{ matrix.build_type == 'Release' }}
         with:
-          name: TaystJK-linux-${{ matrix.arch }}-${{ matrix.build_type }}-${{ matrix.portable }}
-          path: ${{github.workspace}}/install/JediAcademy/TaystJK-linux-${{ matrix.arch }}-${{ matrix.build_type }}-${{ matrix.portable }}.tar.gz
+          name: NicJK-linux-${{ matrix.arch }}-${{ matrix.build_type }}-${{ matrix.portable }}
+          path: ${{github.workspace}}/install/JediAcademy/NicJK-linux-${{ matrix.arch }}-${{ matrix.build_type }}-${{ matrix.portable }}.tar.gz
           if-no-files-found: error
 
   macos-x86_64:
-    if: ${{ false }}
     name: macOS ${{ matrix.arch }} ${{ matrix.build_type }} (${{ matrix.portable}})
     runs-on: macos-15-intel
     strategy:
@@ -288,26 +287,25 @@ jobs:
         shell: bash
         run: cmake --install .
 
-      - name: Create TaystJK binary archive
+      - name: Create NicJK binary archive
         if: ${{ matrix.build_type == 'Release' }}
         working-directory: ${{ github.workspace }}/install/JediAcademy
         shell: bash
         run: |
-          chmod +x taystjk.${{ matrix.arch }}.app/Contents/MacOS/taystjk.${{ matrix.arch }}
-          chmod +x taystjkded.${{ matrix.arch }}
-          codesign --force --deep --sign - taystjk.${{ matrix.arch }}.app 
-          codesign --force --deep --sign - taystjkded.${{ matrix.arch }}
-          tar -czvf TaystJK-macos-${{ matrix.arch }}-${{ matrix.build_type }}-${{ matrix.portable }}.tar.gz *
+          chmod +x nicjk.${{ matrix.arch }}.app/Contents/MacOS/nicjk.${{ matrix.arch }}
+          chmod +x nicjkded.${{ matrix.arch }}
+          codesign --force --deep --sign - nicjk.${{ matrix.arch }}.app 
+          codesign --force --deep --sign - nicjkded.${{ matrix.arch }}
+          tar -czvf NicJK-macos-${{ matrix.arch }}-${{ matrix.build_type }}-${{ matrix.portable }}.tar.gz *
 
       - uses: actions/upload-artifact@6027e3dd177782cd8ab9af838c04fd81a07f1d47 # v4.6.2
         if: ${{ matrix.build_type == 'Release' }}
         with:
-          name: TaystJK-macos-${{ matrix.arch }}-${{ matrix.build_type }}-${{ matrix.portable }}
-          path: ${{ github.workspace }}/install/JediAcademy/TaystJK-macos-${{ matrix.arch }}-${{ matrix.build_type }}-${{ matrix.portable }}.tar.gz
+          name: NicJK-macos-${{ matrix.arch }}-${{ matrix.build_type }}-${{ matrix.portable }}
+          path: ${{ github.workspace }}/install/JediAcademy/NicJK-macos-${{ matrix.arch }}-${{ matrix.build_type }}-${{ matrix.portable }}.tar.gz
           if-no-files-found: error
 
   macos-arm64:
-    if: ${{ false }}
     name: macOS ${{ matrix.arch }} ${{ matrix.build_type }} (${{ matrix.portable}})
     runs-on: macos-15
     strategy:
@@ -358,22 +356,22 @@ jobs:
         shell: bash
         run: cmake --install .
 
-      - name: Create TaystJK binary archive
+      - name: Create NicJK binary archive
         if: ${{ matrix.build_type == 'Release' }}
         working-directory: ${{ github.workspace }}/install/JediAcademy
         shell: bash
         run: |
-          chmod +x taystjk.${{ matrix.arch }}.app/Contents/MacOS/taystjk.${{ matrix.arch }}
-          chmod +x taystjkded.${{ matrix.arch }}
-          codesign --force --deep --sign - taystjk.${{ matrix.arch }}.app 
-          codesign --force --deep --sign - taystjkded.${{ matrix.arch }}
-          tar -czvf TaystJK-macos-${{ matrix.arch }}-${{ matrix.build_type }}-${{ matrix.portable }}.tar.gz *
+          chmod +x nicjk.${{ matrix.arch }}.app/Contents/MacOS/nicjk.${{ matrix.arch }}
+          chmod +x nicjkded.${{ matrix.arch }}
+          codesign --force --deep --sign - nicjk.${{ matrix.arch }}.app 
+          codesign --force --deep --sign - nicjkded.${{ matrix.arch }}
+          tar -czvf NicJK-macos-${{ matrix.arch }}-${{ matrix.build_type }}-${{ matrix.portable }}.tar.gz *
 
       - uses: actions/upload-artifact@6027e3dd177782cd8ab9af838c04fd81a07f1d47 # v4.6.2
         if: ${{ matrix.build_type == 'Release' }}
         with:
-          name: TaystJK-macos-${{ matrix.arch }}-${{ matrix.build_type }}-${{ matrix.portable }}
-          path: ${{ github.workspace }}/install/JediAcademy/TaystJK-macos-${{ matrix.arch }}-${{ matrix.build_type }}-${{ matrix.portable }}.tar.gz
+          name: NicJK-macos-${{ matrix.arch }}-${{ matrix.build_type }}-${{ matrix.portable }}
+          path: ${{ github.workspace }}/install/JediAcademy/NicJK-macos-${{ matrix.arch }}-${{ matrix.build_type }}-${{ matrix.portable }}.tar.gz
           if-no-files-found: error
 
   macos-universal2:
@@ -386,78 +384,78 @@ jobs:
       - name: Download x86_64 artifact
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: TaystJK-macos-x86_64-Release-Portable
+          name: NicJK-macos-x86_64-Release-Portable
           path: x86_64-build
 
       - name: Download arm64 artifact
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: TaystJK-macos-arm64-Release-Portable
+          name: NicJK-macos-arm64-Release-Portable
           path: arm64-build
 
       - name: Extract archives
         run: |
           mkdir -p x86_64-extracted
           mkdir -p arm64-extracted
-          tar -xzf x86_64-build/TaystJK-macos-x86_64-Release-Portable.tar.gz -C x86_64-extracted
-          tar -xzf arm64-build/TaystJK-macos-arm64-Release-Portable.tar.gz -C arm64-extracted
+          tar -xzf x86_64-build/NicJK-macos-x86_64-Release-Portable.tar.gz -C x86_64-extracted
+          tar -xzf arm64-build/NicJK-macos-arm64-Release-Portable.tar.gz -C arm64-extracted
 
       - name: Create Universal 2 Binary
         run: |
-          mkdir -p universal2-app/JediAcademy/taystjk.app/Contents/{MacOS/taystjk,Resources,Frameworks}
-          mkdir -p universal2-app/JediAcademy/taystjk/
+          mkdir -p universal2-app/JediAcademy/nicjk.app/Contents/{MacOS/nicjk,Resources,Frameworks}
+          mkdir -p universal2-app/JediAcademy/nicjk/
 
-          cp -R x86_64-extracted/taystjk.x86_64.app/Contents/Info.plist   universal2-app/JediAcademy/taystjk.app/Contents/
-          cp -R x86_64-extracted/taystjk.x86_64.app/Contents/PkgInfo      universal2-app/JediAcademy/taystjk.app/Contents/ 2>/dev/null || true
-          cp -R x86_64-extracted/taystjk.x86_64.app/Contents/Resources/*  universal2-app/JediAcademy/taystjk.app/Contents/Resources/
-          cp -R x86_64-extracted/taystjk/*                                universal2-app/JediAcademy/taystjk/
+          cp -R x86_64-extracted/nicjk.x86_64.app/Contents/Info.plist   universal2-app/JediAcademy/nicjk.app/Contents/
+          cp -R x86_64-extracted/nicjk.x86_64.app/Contents/PkgInfo      universal2-app/JediAcademy/nicjk.app/Contents/ 2>/dev/null || true
+          cp -R x86_64-extracted/nicjk.x86_64.app/Contents/Resources/*  universal2-app/JediAcademy/nicjk.app/Contents/Resources/
+          cp -R x86_64-extracted/nicjk/*                                universal2-app/JediAcademy/nicjk/
 
-          plutil -replace CFBundleExecutable -string "taystjk.ub2" universal2-app/JediAcademy/taystjk.app/Contents/Info.plist
-          plutil -replace LSArchitecturePriority -json '["arm64","x86_64"]' universal2-app/JediAcademy/taystjk.app/Contents/Info.plist
+          plutil -replace CFBundleExecutable -string "nicjk.ub2" universal2-app/JediAcademy/nicjk.app/Contents/Info.plist
+          plutil -replace LSArchitecturePriority -json '["arm64","x86_64"]' universal2-app/JediAcademy/nicjk.app/Contents/Info.plist
 
-          lipo -create -output "universal2-app/JediAcademy/taystjk.app/Contents/MacOS/taystjk.ub2" \
-            x86_64-extracted/taystjk.x86_64.app/Contents/MacOS/taystjk.x86_64 \
-            arm64-extracted/taystjk.arm64.app/Contents/MacOS/taystjk.arm64
+          lipo -create -output "universal2-app/JediAcademy/nicjk.app/Contents/MacOS/nicjk.ub2" \
+            x86_64-extracted/nicjk.x86_64.app/Contents/MacOS/nicjk.x86_64 \
+            arm64-extracted/nicjk.arm64.app/Contents/MacOS/nicjk.arm64
 
-          lipo -create -output universal2-app/JediAcademy/taystjkded \
-            x86_64-extracted/taystjkded.x86_64 \
-            arm64-extracted/taystjkded.arm64
+          lipo -create -output universal2-app/JediAcademy/nicjkded \
+            x86_64-extracted/nicjkded.x86_64 \
+            arm64-extracted/nicjkded.arm64
 
-          lipo -create -output universal2-app/JediAcademy/taystjk.app/Contents/Frameworks/libopenal.1.dylib \
-            x86_64-extracted/taystjk.x86_64.app/Contents/Frameworks/libopenal.1.dylib \
-            arm64-extracted/taystjk.arm64.app/Contents/Frameworks/libopenal.1.dylib
+          lipo -create -output universal2-app/JediAcademy/nicjk.app/Contents/Frameworks/libopenal.1.dylib \
+            x86_64-extracted/nicjk.x86_64.app/Contents/Frameworks/libopenal.1.dylib \
+            arm64-extracted/nicjk.arm64.app/Contents/Frameworks/libopenal.1.dylib
 
           cp -R x86_64-extracted/licenses universal2-app/JediAcademy/
 
           cp -v \
-            x86_64-extracted/taystjk.x86_64.app/Contents/Frameworks/libSDL2-2.0.0.dylib \
-            universal2-app/JediAcademy/taystjk.app/Contents/Frameworks/
+            x86_64-extracted/nicjk.x86_64.app/Contents/Frameworks/libSDL2-2.0.0.dylib \
+            universal2-app/JediAcademy/nicjk.app/Contents/Frameworks/
 
-          cp -v x86_64-extracted/taystjk.x86_64.app/Contents/MacOS/rd-*_x86_64.dylib universal2-app/JediAcademy/taystjk.app/Contents/MacOS/
-          cp -v arm64-extracted/taystjk.arm64.app/Contents/MacOS/rd-*_arm64.dylib universal2-app/JediAcademy/taystjk.app/Contents/MacOS/
+          cp -v x86_64-extracted/nicjk.x86_64.app/Contents/MacOS/rd-*_x86_64.dylib universal2-app/JediAcademy/nicjk.app/Contents/MacOS/
+          cp -v arm64-extracted/nicjk.arm64.app/Contents/MacOS/rd-*_arm64.dylib universal2-app/JediAcademy/nicjk.app/Contents/MacOS/
 
-          cp -v x86_64-extracted/taystjk.x86_64.app/Contents/MacOS/taystjk/*x86_64.dylib universal2-app/JediAcademy/taystjk.app/Contents/MacOS/taystjk/
-          cp -v arm64-extracted/taystjk.arm64.app/Contents/MacOS/taystjk/*arm64.dylib universal2-app/JediAcademy/taystjk.app/Contents/MacOS/taystjk/
+          cp -v x86_64-extracted/nicjk.x86_64.app/Contents/MacOS/nicjk/*x86_64.dylib universal2-app/JediAcademy/nicjk.app/Contents/MacOS/nicjk/
+          cp -v arm64-extracted/nicjk.arm64.app/Contents/MacOS/nicjk/*arm64.dylib universal2-app/JediAcademy/nicjk.app/Contents/MacOS/nicjk/
 
-      - name: Create TaystJK binary archive
+      - name: Create NicJK binary archive
         working-directory: ${{ github.workspace }}/universal2-app/JediAcademy/
         shell: bash
         run: |
-          chmod +x taystjk.app/Contents/MacOS/taystjk.ub2
-          chmod +x taystjkded
-          codesign --force --deep --sign - taystjk.app 
-          codesign --force --deep --sign - taystjkded
-          tar -czvf TaystJK-macos-universal2-Release-Portable.tar.gz *
+          chmod +x nicjk.app/Contents/MacOS/nicjk.ub2
+          chmod +x nicjkded
+          codesign --force --deep --sign - nicjk.app 
+          codesign --force --deep --sign - nicjkded
+          tar -czvf NicJK-macos-universal2-Release-Portable.tar.gz *
 
       - uses: actions/upload-artifact@6027e3dd177782cd8ab9af838c04fd81a07f1d47 # v4.6.2
         with:
-          name: TaystJK-macos-universal2-Release-Portable
-          path: universal2-app/JediAcademy/TaystJK-macos-universal2-Release-Portable.tar.gz
+          name: NicJK-macos-universal2-Release-Portable
+          path: universal2-app/JediAcademy/NicJK-macos-universal2-Release-Portable.tar.gz
           if-no-files-found: error
 
   generate-release-body:
     name: Generate Release Body
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/TaystJK_AI' || github.ref == 'refs/heads/beta')
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/NicJK_Unlimited' || github.ref == 'refs/heads/beta')
     runs-on: ubuntu-22.04
     outputs:
       release_body: ${{ steps.generate.outputs.release_body }}
@@ -508,8 +506,11 @@ jobs:
           echo "$EOF" >> $GITHUB_OUTPUT
 
   create-latest:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/TaystJK_AI'
-    needs: [msvc, ubuntu, generate-release-body]
+    # The Windows build decides: the release is made when it succeeded, with whatever the Linux
+    # and macOS jobs produced. A platform that failed to build is missing from the release
+    # instead of blocking it.
+    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/NicJK_Unlimited' && needs.msvc.result == 'success' && needs.generate-release-body.result == 'success' }}
+    needs: [msvc, ubuntu, macos-x86_64, macos-arm64, generate-release-body]
     runs-on: ubuntu-22.04
     permissions:
       contents: write
@@ -536,7 +537,7 @@ jobs:
             if [ -d "$artifact_dir" ]; then
               for file in "$artifact_dir"/*; do
                 if [ -f "$file" ]; then
-                  filename=$(basename "$file" | sed -e 's/-Release-Non-Portable//' -e 's/-Release-Portable//' -e 's/-RelWithDebInfo-Portable//')
+                  filename=$(basename "$file" | sed -e 's/-Release-Non-Portable//' -e 's/-Release-Portable//' -e 's/-RelWithDebInfo-Portable//' -e 's/^NicJK-/NicJK_Unlimited-/')
                   cp "$file" "$filename"
                   RELEASE_FILES="$RELEASE_FILES $filename"
                 fi
@@ -554,6 +555,14 @@ jobs:
       # A release made with GITHUB_TOKEN does not fire `release` events for other
       # workflows, so reference-check's release trigger never sees this one. Dispatch
       # is exempt from that rule.
+      # The Windows XP builds come from their own workflow (they need an old toolchain) and are
+      # added to this release when they are done.
+      - name: Start the Windows XP build
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh workflow run build-winxp.yml --repo ${{ github.repository }}             --ref NicJK_Unlimited -f release_tag=latest-build
+
       - name: Trigger reference refresh
         if: github.repository == 'taysta/TaystJK'
         env:

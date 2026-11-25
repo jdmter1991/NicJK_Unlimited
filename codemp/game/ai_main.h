@@ -477,6 +477,7 @@ typedef struct bot_state_s
 	int kataCooldownTime;		// earliest level.time for the next deliberate kata
 	int styleWanted;			// saber style the bot is cycling towards (SS_*), 0 = none
 	int styleDecisionTime;		// level.time of the next style decision
+	qboolean styleNoDesann;		// the heaviest style could not be reached by cycling
 	int styleCyclePresses;		// cycle commands sent for the current decision
 
 	// multi-frame special move input (jump attacks, lunge): see Bot_SpecialSequenceInput
@@ -500,6 +501,7 @@ typedef struct bot_state_s
 	vec3_t idleLongPos;
 	int stuckEpisodeTime;		// level.time the current stuck episode began, 0 = not stuck
 	vec3_t stuckEpisodePos;
+	int proPunishTime;			// next time a rooted enemy may be punished with a special
 	int stuckKicks;				// recovery attempts made in this episode
 } bot_state_t;
 

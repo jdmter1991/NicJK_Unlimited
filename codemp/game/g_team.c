@@ -658,7 +658,9 @@ void Team_ReturnFlagSound( gentity_t *ent, int team ) {
 	te->r.svFlags |= SVF_BROADCAST;
 }
 
+extern void BotEval_NoteEvent(int kind);
 void Team_TakeFlagSound( gentity_t *ent, int team, int playerteam) {
+	BotEval_NoteEvent(0);
 	gentity_t	*te;
 
 	if (ent == NULL) {
@@ -709,6 +711,7 @@ void Team_TakeFlagSound( gentity_t *ent, int team, int playerteam) {
 }
 
 void Team_CaptureFlagSound( gentity_t *ent, int team ) {
+	BotEval_NoteEvent(1);
 	gentity_t	*te;
 
 	if (ent == NULL) {
@@ -727,6 +730,7 @@ void Team_CaptureFlagSound( gentity_t *ent, int team ) {
 }
 
 void Team_ReturnFlag( int team ) {
+	BotEval_NoteEvent(2);
 	Team_ReturnFlagSound(Team_ResetFlag(team), team);
 	if( level.gametype != GT_CTF ) {
 		//PrintMsg(NULL, "The flag has returned!\n" );
@@ -1484,6 +1488,31 @@ gentity_t *SelectRandomTeamSpawnPoint( int teamstate, team_t team, int siegeClas
 	}
 
 	if ( !count ) {	// no spots that won't telefrag
+		// (this used to hand out the first spawn point of that kind, enabled or not, so a whole
+		// wave of players was spawned onto one spot and killed each other in turn)
+		gentity_t *any[MAX_TEAM_SPAWN_POINTS];
+		int anyCount = 0, total = 0;
+		spot = NULL;
+		while ((spot = G_Find (spot, FOFS(classname), classname)) != NULL) {
+			total++;
+			if (mustBeEnabled && !spot->genericValue1) continue;
+			any[anyCount] = spot;
+			if (++anyCount == MAX_TEAM_SPAWN_POINTS) break;
+		}
+		if (level.gametype == GT_SIEGE) {
+			static int lastNote;
+			if (level.time - lastNote > 5000 || lastNote > level.time) {
+				lastNote = level.time;
+				{ int c1 = 0, c2 = 0, cd = 0, cl = 0; gentity_t *q = NULL;
+				while ((q = G_Find(q, FOFS(classname), "info_player_siegeteam1")) != NULL) c1++;
+				q = NULL; while ((q = G_Find(q, FOFS(classname), "info_player_siegeteam2")) != NULL) c2++;
+				q = NULL; while ((q = G_Find(q, FOFS(classname), "info_player_deathmatch")) != NULL) cd++;
+				G_LogPrintf("SpawnNote: no free %s for team %d (of %d, %d enabled); in the map now: siegeteam1 %d siegeteam2 %d deathmatch %d, logical ents %d, entities %d\n", classname, (int)team, total, anyCount, c1, c2, cd, level.num_logicalents, level.num_entities); (void)cl; }
+			}
+		}
+		if (anyCount) {
+			return any[ rand() % anyCount ];
+		}
 		return G_Find( NULL, FOFS(classname), classname);
 	}
 

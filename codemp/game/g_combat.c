@@ -2217,6 +2217,10 @@ void player_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 	if ( self->client->ps.pm_type == PM_DEAD ) {
 		return;
 	}
+	{
+		extern void BotEval_NoteKill(int attacker, int victim, int mod);
+		BotEval_NoteKill(attacker ? attacker->s.number : ENTITYNUM_WORLD, self->s.number, meansOfDeath);
+	}
 
 	if ( level.intermissiontime ) {
 		return;

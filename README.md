@@ -1,51 +1,74 @@
-# TaystJK
+# NicJK Unlimited
 
-[![Build](https://github.com/taysta/TaystJK/actions/workflows/build.yml/badge.svg)](https://github.com/taysta/TaystJK/actions/workflows/build.yml)
-[![License](https://img.shields.io/github/license/taysta/TaystJK.svg)](LICENSE.txt)
+[![Build](https://github.com/jdmter1991/NicJK_Unlimited/actions/workflows/build.yml/badge.svg)](https://github.com/jdmter1991/NicJK_Unlimited/actions/workflows/build.yml)
+[![License](https://img.shields.io/github/license/jdmter1991/NicJK_Unlimited.svg)](LICENSE.txt)
 
-TaystJK is a Jedi Academy multiplayer client and dedicated server built on EternalJK, which is built on OpenJK and jaPRO. It focuses on compatibility across Base JKA, JA+, jaPRO, and Lugormod servers, engine stability and performance, and improvements to everyday play.
+NicJK Unlimited is a Jedi Academy multiplayer client and dedicated server for very large maps and full servers of bots. It is a fork of [TaystJK](https://github.com/taysta/TaystJK), which is built on EternalJK, OpenJK and jaPRO, and it stays compatible with them: the same game files, the same servers, the same mods.
 
-**[Download the latest build](https://github.com/taysta/TaystJK/releases/latest)** · **[Documentation and wiki](https://taysta.github.io/TaystJK/)**
+**[Download the latest build](https://github.com/jdmter1991/NicJK_Unlimited/releases/latest)**
 
-When you join a server, its game module determines the gameplay and which mod-specific features are available.
+What this fork adds on top of TaystJK:
+
+- **Raised engine limits** for maps far larger than the stock game allows.
+- **Faster collision on huge maps**, with built-in server and bot profiling to find what costs time.
+- **A reworked bot AI** that fights with every saber move, uses the Force by the game's own rules, finds its way on maps without bot routes, and plays objectives.
+
+See [docs/NICJK.md](docs/NICJK.md) for the details and measurements, and [docs/NICJK_BOTS.md](docs/NICJK_BOTS.md) for the bot settings.
 
 ## Getting started
 
 You need a copy of Jedi Academy and its retail `base/assets0.pk3` through `base/assets3.pk3` files.
 
-1. Download the [latest build](https://github.com/taysta/TaystJK/releases/latest) for your operating system and architecture, and extract the whole archive into a writable directory.
-2. Copy the game's `base` directory beside the TaystJK executable or macOS app bundle, or point TaystJK at an existing installation with `fs_cdPath` as described in the installation guide.
-3. Launch the TaystJK executable or app included in the archive.
+1. Download the [latest build](https://github.com/jdmter1991/NicJK_Unlimited/releases/latest) for your operating system and extract the whole archive into a writable directory.
+2. Copy the game's `base` directory beside the executable or macOS app bundle, or point the game at an existing installation with `fs_cdPath`.
+3. Launch the executable or app included in the archive.
 
-Follow the [installation guide](https://taysta.github.io/TaystJK/install/) for platform prerequisites, launch commands, and layouts for sharing game files between clients.
+The Vulkan renderer is the default. On a graphics card or driver without Vulkan support, start the game with `+set cl_renderer rd-nicjk` to use the OpenGL renderer instead.
+
+The programs are `nicjk` (client) and `nicjkded` (dedicated server), settings are saved as `nicjk.cfg`, and the fork's own files live in a `nicjk` folder beside `base`.
+
+**Coming from TaystJK or an earlier build of this fork?** Those used a `taystjk` folder. Copy your maps, mods and settings from `GameData/taystjk` into `GameData/nicjk` (and rename `taystjk.cfg` to `nicjk.cfg` if you want to keep your settings). Nothing is read from the old folder automatically.
+
+### Builds
+
+| Build | Status |
+| --- | --- |
+| Windows 64-bit | The main build. All development and testing happens on it. |
+| Windows 32-bit, Linux, macOS (Intel and Apple silicon), Windows XP | Built automatically from the same source. They are not play-tested by this fork. |
+
+### Maps
+
+Large showcase maps are published as separate, optional PK3 downloads next to the builds, not inside them. Put a map's PK3 in your `base` or `nicjk` folder to use it.
 
 ## Documentation
 
-The [documentation site](https://taysta.github.io/TaystJK/) contains the setup guides, feature explanations, and a searchable console reference generated from the source code.
+Everything TaystJK documents applies here too: installation, server hosting, features and the console reference are on the [TaystJK documentation site](https://taysta.github.io/TaystJK/).
 
-| Guide | What it covers |
+| Document | What it covers |
 | --- | --- |
-| [Installation](https://taysta.github.io/TaystJK/install/) | Platform setup, build choices, game files, and mod compatibility. |
-| [Server hosting](https://taysta.github.io/TaystJK/server-hosting/) | Dedicated servers, Docker Compose, bundled game modes, and PK3 downloads. |
-| [Features](https://taysta.github.io/TaystJK/features/) | HUD and movement tools, renderers, cosmetics, scripting, and [what's new](https://taysta.github.io/TaystJK/features/whats-new/). |
-| [Console reference](https://taysta.github.io/TaystJK/reference/) | Cvars and commands, defaults, options, module and renderer scope, and source links. |
-| [Development](https://taysta.github.io/TaystJK/development/) | Compilation, debugging, libraries, and contributing. |
-| [Help](https://taysta.github.io/TaystJK/help/) | Troubleshooting, the glossary, and where to report problems. |
+| [docs/NICJK.md](docs/NICJK.md) | What this fork changes in the engine and the server, and what was measured. |
+| [docs/NICJK_BOTS.md](docs/NICJK_BOTS.md) | The bot AI: what the bots do, the `bot_features` switches, what works and what does not yet. |
 
-## Development and contributions
+## Branches
 
-TaystJK uses CMake. Start with the [compilation guide](https://taysta.github.io/TaystJK/development/compiling/) and [debugging guide](https://taysta.github.io/TaystJK/development/debugging/) for this project's build options and platform instructions.
+| Branch | Purpose |
+| --- | --- |
+| `NicJK_Unlimited` | The main branch. Releases are built from it. |
+| `TaystJK_AI` | Archive of the earlier build of this fork ("TaystJK AI, improved bots"). Not developed further. |
 
-Fork the repository, make your changes on a branch, and open a pull request against `master` unless asked otherwise. The [contributing guide](https://taysta.github.io/TaystJK/development/contributing/) covers review, CI builds, and documenting changes.
+## Building
 
-The documentation site lives on the [`gh-pages` branch](https://github.com/taysta/TaystJK/tree/gh-pages). See [how the site is built](https://taysta.github.io/TaystJK/development/documentation-system/) before editing guides or regenerating the reference.
+The project uses CMake, exactly as TaystJK does. On Windows with Visual Studio 2022:
 
-## Maintainer and upstream projects
+```
+cmake -S . -B build -A x64 -DBuildPortableVersion=ON
+cmake --build build --config Release
+```
 
-Maintained by [tayst](https://github.com/taysta).
+The TaystJK [compilation guide](https://taysta.github.io/TaystJK/development/compiling/) covers the other platforms and the build options.
 
-TaystJK incorporates work from [OpenJK](https://github.com/JACoders/OpenJK), [jaPRO](https://github.com/videoP/jaPRO), [EternalJK](https://github.com/eternalcodes/EternalJK), [SomaZ's rend2](https://github.com/SomaZ/OpenJK/tree/rend2-unified-wip), and [JKSunny's Vulkan renderer](https://github.com/JKSunny/EternalJK), among other community projects.
+## Credits and license
 
-## License
+NicJK Unlimited stands on the work of the TaystJK, EternalJK, jaPRO, OpenJK and Raven Software developers. It is licensed under the GNU GPL v2, like the projects it is built on; see [LICENSE.txt](LICENSE.txt).
 
-TaystJK is free software licensed under GPLv2. You may use, modify, and redistribute it under the terms in [LICENSE.txt](LICENSE.txt).
+Jedi Academy is a trademark of its respective owners. This project is not affiliated with or endorsed by them, and it does not include the game's assets.

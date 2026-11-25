@@ -1202,6 +1202,9 @@ sv_hitch_stacks.log in the working directory. 0 = off (no thread is created).
 #include <windows.h>
 #include <dbghelp.h>
 #include <cstdio>
+#ifndef UNW_FLAG_NHANDLER
+#define UNW_FLAG_NHANDLER 0x0	// missing from the Windows 7.1 SDK the XP toolchain uses
+#endif
 #pragma comment( lib, "dbghelp.lib" )
 
 static HANDLE			svWatchMainThread = NULL;
@@ -1272,7 +1275,7 @@ static DWORD WINAPI SV_WatchdogThread( LPVOID ) {
 			GetModuleFileNameA( NULL, exe, sizeof( exe ) );
 			char *slash = strrchr( exe, '\\' );
 			if ( slash ) *slash = 0;
-			snprintf( path, sizeof( path ), "%s;%s\\taystjk;%s\\base", exe, exe, exe );
+			snprintf( path, sizeof( path ), "%s;%s\\nicjk;%s\\base", exe, exe, exe );
 			SymSetOptions( SYMOPT_UNDNAME | SYMOPT_DEFERRED_LOADS | SYMOPT_LOAD_LINES );
 			SymInitialize( proc, path, TRUE );
 			symReady = true;
@@ -1319,7 +1322,7 @@ static void SV_SymInit( HANDLE proc ) {
 	GetModuleFileNameA( NULL, exe, sizeof( exe ) );
 	char *slash = strrchr( exe, '\\' );
 	if ( slash ) *slash = 0;
-	snprintf( path, sizeof( path ), "%s;%s\\taystjk;%s\\base", exe, exe, exe );
+	snprintf( path, sizeof( path ), "%s;%s\\nicjk;%s\\base", exe, exe, exe );
 	SymSetOptions( SYMOPT_UNDNAME | SYMOPT_DEFERRED_LOADS | SYMOPT_LOAD_LINES );
 	SymInitialize( proc, path, TRUE );
 	done = true;

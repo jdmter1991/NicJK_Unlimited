@@ -167,6 +167,12 @@ void multi_trigger( gentity_t *ent, gentity_t *activator )
 {
 	qboolean haltTrigger = qfalse;
 
+	if ( activator && activator->client && (activator->r.svFlags & SVF_BOT) && (ent->spawnflags & 4) )
+	{
+		extern void BotEval_NoteEvent(int kind);
+		BotEval_NoteEvent(6);
+	}
+
 	if ( ent->think == multi_trigger_run )
 	{//already triggered, just waiting to run
 		return;

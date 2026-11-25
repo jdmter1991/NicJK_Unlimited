@@ -1,8 +1,8 @@
 # Builder image
 FROM ubuntu:22.04 AS builder
 
-ARG TAYSTJK_REF=unknown
-ARG TAYSTJK_COMMIT=unknown
+ARG NICJK_REF=unknown
+ARG NICJK_COMMIT=unknown
 
 # Install build tools and libraries
 RUN dpkg --add-architecture i386 &&\
@@ -11,11 +11,11 @@ RUN dpkg --add-architecture i386 &&\
 	rm -rf /var/lib/apt/lists/*
 
 # Copy sources
-COPY . /usr/src/taystjk
+COPY . /usr/src/nicjk
 
 # Build i386 arch
-RUN mkdir /usr/src/taystjk/build.i386 &&\
-	cd /usr/src/taystjk/build.i386 &&\
+RUN mkdir /usr/src/nicjk/build.i386 &&\
+	cd /usr/src/nicjk/build.i386 &&\
 	cmake -DCMAKE_TOOLCHAIN_FILE=cmake/Toolchains/linux-i686.cmake \
 		-DCMAKE_INSTALL_PREFIX=/opt \
 		-DBuildMPCGame=OFF -DBuildMPEngine=OFF -DBuildMPRdVanilla=OFF -DBuildMPUI=OFF -DBuildMPRend2=OFF -DBuildMPRdVulkan=OFF \
@@ -24,8 +24,8 @@ RUN mkdir /usr/src/taystjk/build.i386 &&\
 	cmake --install .
 
 # Build x86_64 arch
-RUN mkdir /usr/src/taystjk/build.x86_64 &&\
-	cd /usr/src/taystjk/build.x86_64 &&\
+RUN mkdir /usr/src/nicjk/build.x86_64 &&\
+	cd /usr/src/nicjk/build.x86_64 &&\
 	cmake -DCMAKE_INSTALL_PREFIX=/opt \
 		-DBuildMPCGame=OFF -DBuildMPEngine=OFF -DBuildMPRdVanilla=OFF -DBuildMPUI=OFF -DBuildMPRend2=OFF -DBuildMPRdVulkan=OFF \
 		.. &&\
@@ -36,14 +36,14 @@ RUN mkdir /usr/src/taystjk/build.x86_64 &&\
 # Server image
 FROM ubuntu:22.04
 
-ARG TAYSTJK_REF=unknown
-ARG TAYSTJK_COMMIT=unknown
+ARG NICJK_REF=unknown
+ARG NICJK_COMMIT=unknown
 
-LABEL org.opencontainers.image.title="TaystJK"
-LABEL org.opencontainers.image.description="TaystJK dedicated server"
+LABEL org.opencontainers.image.title="NicJK"
+LABEL org.opencontainers.image.description="NicJK dedicated server"
 LABEL org.opencontainers.image.licenses="GPL-2.0-only"
-LABEL io.tayst.taystjk.upstream.ref="${TAYSTJK_REF}"
-LABEL io.tayst.taystjk.upstream.commit="${TAYSTJK_COMMIT}"
+LABEL io.tayst.nicjk.upstream.ref="${NICJK_REF}"
+LABEL io.tayst.nicjk.upstream.commit="${NICJK_COMMIT}"
 
 # Install utilities and libraries
 RUN dpkg --add-architecture i386 &&\
@@ -53,23 +53,23 @@ RUN dpkg --add-architecture i386 &&\
 	useradd --create-home --home-dir /home/container --shell /bin/bash container
 
 # Copy binaries and scripts
-RUN mkdir -p /opt/taystjk/cdpath/base /opt/taystjk/cdpath/taystjk /opt/taystjk/basepath/taystjk /opt/taystjk/homepath
-COPY --from=builder /opt/JediAcademy/taystjkded.* /opt/taystjk/
-COPY --from=builder /opt/JediAcademy/taystjk/ /opt/taystjk/cdpath/taystjk/
-COPY scripts/docker/*.sh /opt/taystjk/
-COPY scripts/docker/*.cfg /opt/taystjk/basepath/taystjk/
-RUN chmod +x /opt/taystjk/taystjkded.* /opt/taystjk/*.sh \
-    && chown -R container:container /opt/taystjk
+RUN mkdir -p /opt/nicjk/cdpath/base /opt/nicjk/cdpath/nicjk /opt/nicjk/basepath/nicjk /opt/nicjk/homepath
+COPY --from=builder /opt/JediAcademy/nicjkded.* /opt/nicjk/
+COPY --from=builder /opt/JediAcademy/nicjk/ /opt/nicjk/cdpath/nicjk/
+COPY scripts/docker/*.sh /opt/nicjk/
+COPY scripts/docker/*.cfg /opt/nicjk/basepath/nicjk/
+RUN chmod +x /opt/nicjk/nicjkded.* /opt/nicjk/*.sh \
+    && chown -R container:container /opt/nicjk
 
 # Write metadata
-RUN printf '%s\n' "${TAYSTJK_COMMIT}" > /opt/taystjk/.upstream-commit \
-	&& printf '%s\n' "${TAYSTJK_REF}" > /opt/taystjk/.upstream-ref
+RUN printf '%s\n' "${NICJK_COMMIT}" > /opt/nicjk/.upstream-commit \
+	&& printf '%s\n' "${NICJK_REF}" > /opt/nicjk/.upstream-ref
 
 # Execution
 ENV TJK_OPTS="+exec server.cfg"
 EXPOSE 29070/udp
 EXPOSE 18200/tcp
-HEALTHCHECK --interval=10s --timeout=9s --retries=6 CMD ["/opt/taystjk/healthcheck.sh"]
+HEALTHCHECK --interval=10s --timeout=9s --retries=6 CMD ["/opt/nicjk/healthcheck.sh"]
 USER container
 ENV USER=container HOME=/home/container
-CMD ["/opt/taystjk/run.sh"]
+CMD ["/opt/nicjk/run.sh"]

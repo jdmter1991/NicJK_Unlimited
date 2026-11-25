@@ -1,4 +1,4 @@
-# TaystJK dedicated server
+# NicJK dedicated server
 #
 # Pull from registry:
 #   docker compose pull && docker compose up
@@ -15,41 +15,41 @@
 # Server configuration:
 #   A default server.cfg is included in the image.
 #   To override it, place your server.cfg in the homepath directory:
-#     ./homepath/taystjk/server.cfg
+#     ./homepath/nicjk/server.cfg
 #
 # Custom PK3s:
 #   Base JKA maps/assets go in ./base.
-#   TaystJK-specific PK3s go in ./homepath/taystjk.
+#   NicJK-specific PK3s go in ./homepath/nicjk.
 
 services:
-  taystjk:
+  nicjk:
     image: ghcr.io/taysta/taystjk:latest
     ports:
       - "29070:29070/udp"
       - "18200:18200/tcp"
     volumes:
-      - ./base:/opt/taystjk/cdpath/base
-      - ./homepath:/opt/taystjk/homepath
+      - ./base:/opt/nicjk/cdpath/base
+      - ./homepath:/opt/nicjk/homepath
     environment:
-      - TJK_MOD=taystjk
+      - TJK_MOD=nicjk
       - TJK_ARCH=x86_64
     restart: unless-stopped
 
-  taystjk-build:
+  nicjk-build:
     build:
       context: .
       dockerfile: Dockerfile
       args:
-        TAYSTJK_REF: master
-        TAYSTJK_COMMIT: unknown
+        NICJK_REF: master
+        NICJK_COMMIT: unknown
     profiles: ["build"]
     ports:
       - "29070:29070/udp"
       - "18200:18200/tcp"
     volumes:
-      - ./base:/opt/taystjk/cdpath/base
-      - ./homepath:/opt/taystjk/homepath
+      - ./base:/opt/nicjk/cdpath/base
+      - ./homepath:/opt/nicjk/homepath
     environment:
-      - TJK_MOD=taystjk
+      - TJK_MOD=nicjk
       - TJK_ARCH=x86_64
     restart: unless-stopped

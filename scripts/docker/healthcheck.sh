@@ -1,10 +1,10 @@
 #!/bin/bash
 #
-# TaystJK server health check script.
+# NicJK server health check script.
 #
 
 # Set variables
-TJK_DIR="/opt/taystjk"
+TJK_DIR="/opt/nicjk"
 RET=0
 
 # Load functions

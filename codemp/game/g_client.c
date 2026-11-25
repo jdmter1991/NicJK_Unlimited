@@ -2325,7 +2325,7 @@ void LoadModelScaleConfig(void) {
 	if (scaleConfigLoaded) return; // Already loaded
 
 	char filename[MAX_QPATH];
-	// Correct path for TaystJK structure
+	// Correct path for NicJK structure
 	Com_sprintf(filename, sizeof(filename), "modelscale.cfg");
 
 	len = trap->FS_Open(filename, &fileHandle, FS_READ);
@@ -2379,7 +2379,7 @@ void LoadModelScaleConfig(void) {
 	}
 	else {
 		Com_Printf("ModelScale: Could not load %s (len=%d), using defaults\n", filename, len);
-		Com_Printf("ModelScale: Create GameData/taystjk/modelscale.cfg with your model scales\n");
+		Com_Printf("ModelScale: Create GameData/nicjk/modelscale.cfg with your model scales\n");
 		scaleConfigLoaded = qtrue; // Don't try again
 	}
 }
