@@ -18542,7 +18542,7 @@ int BotAISetup(int restart) {
 	trap->Cvar_Register(&bot_profile, "bot_profile", "0", 0);
 	trap->Cvar_Register(&bot_fixes, "bot_fixes", "1", CVAR_ARCHIVE);
 	trap->Cvar_Register(&bot_abBase, "bot_abBase", "0", 0);	// features of the baseline group in an A/B test
-	trap->Cvar_Register(&bot_features, "bot_features", "4188671", CVAR_ARCHIVE);	// everything measured to help or do no harm: all bits except 512 (guide tactics), 1024 (counters) and 4096 (swing table), which lost their A/B tests
+	trap->Cvar_Register(&bot_features, "bot_features", "3926527", CVAR_ARCHIVE);	// everything measured to help or do no harm: all bits except 512 (guide tactics), 1024 (counters), 4096 (swing table) and 262144 (gun distances), which lost their A/B tests
 	trap->Cvar_Register(&bot_abTest, "bot_abTest", "0", 0);
 	trap->Cvar_Register(&bot_attachments, "bot_attachments", "1", 0);
 	trap->Cvar_Register(&bot_camp, "bot_camp", "1", 0);
