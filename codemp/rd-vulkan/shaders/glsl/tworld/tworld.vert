@@ -9,6 +9,9 @@
 //
 // Animation (in_params.z): 0 none, 1 water (fragment shader), 2 vegetation swaying in the wind,
 // 3 cloth hanging from its top edge, 4 falling water / foam (fragment shader). Time is u_entity.ambientLight.a.
+// 6 billboard (the source's backdrop trees: one bent card each, turned towards the camera about the vertical axis
+// as the original game does): in_position is the plant's base plus the vertex height, in_tex_coord.zw the
+// vertex offset in the card's own frame (x: depth, the card faces -x; y: sideways), in_normal is in that frame.
 // Foam meshes carry a fade factor in the length of their normals (0.25 = fully faded .. 1).
 
 layout(push_constant) uniform Transform {
@@ -20,6 +23,8 @@ layout(set = 0, binding = 0) uniform TWorld {
 	vec4 skyZenith;
 	vec4 skyHorizon;
 	vec4 spare;				// y: light reaching foliage (leaves shade each other; the source's canopies are dark inside)
+	vec4 lightPos[4];
+	vec4 lightColor[4];		// [0].a: share of the ambient light that reaches a fully enclosed placement
 } u_tw;
 
 layout(set = 0, binding = 2) uniform Entity {
@@ -31,9 +36,9 @@ layout(set = 0, binding = 2) uniform Entity {
 							// [3] x: receiver offset along its normal (units), y: depth bias, z: shadow strength (0 = off)
 } u_entity;
 
-layout(location = 0) in vec3 in_position;
+layout(location = 0) in vec4 in_position4;		// xyz position, w: ambient openness of the vertex (1 = open; maps/<name>.tao)
 layout(location = 1) in vec3 in_normal;
-layout(location = 2) in vec2 in_tex_coord;
+layout(location = 2) in vec4 in_tex_coord;		// xy: texture coordinates, zw: second set for the normal map (same as xy unless the map has a .tuv2 file)
 
 layout(location = 3) in vec4 in_row0;		// per instance
 layout(location = 4) in vec4 in_row1;
@@ -61,19 +66,30 @@ layout(location = 9) out float frag_fade;			// foam: the mesh's fade factor
 layout(location = 10) flat out float frag_ref;		// in_params.w
 layout(location = 11) out vec3 frag_normal;			// world-space normal
 layout(location = 12) flat out vec3 frag_tint;
-layout(location = 13) flat out vec2 frag_tile;		// repeats of the tiling colour layer per unit of UV, 0 = none
+layout(location = 13) flat out vec2 frag_tile;
+layout(location = 14) out vec2 frag_tex_coord2;
+layout(location = 16) out float frag_ao;				// the vertex's ambient openness after the strength setting
+layout(location = 15) flat out float frag_amb;		// how much of the sky this placement cannot see (0 .. 1)		// second UV set (normal map)		// repeats of the tiling colour layer per unit of UV, 0 = none
 
 out gl_PerVertex {
 	vec4 gl_Position;
 };
 
 void main() {
+	vec3 in_position = in_position4.xyz;
 	vec4 p = vec4( in_position, 1.0 );
 	vec3 world = vec3( dot( in_row0, p ), dot( in_row1, p ), dot( in_row2, p ) );
 	vec3 n = normalize( vec3( dot( in_row0.xyz, in_normal ), dot( in_row1.xyz, in_normal ), dot( in_row2.xyz, in_normal ) ) );
 
 	float time = u_entity.ambientLight.a;
-	int anim = int( in_params.z + 0.5 );
+	// in_params.z: animation type plus, in its fraction, how much of the sky the placement cannot see (0 .. 0.98)
+	float animf = floor( in_params.z + 0.005 );
+	int anim = int( animf + 0.5 );
+	float occ = clamp( ( in_params.z - animf ) / 0.98, 0.0, 1.0 );
+	float ambShare = mix( 1.0, u_tw.lightColor[0].a, occ * occ );		// partly open streets keep most of their sky light
+	// the mesh's own occlusion (reveals, cornices, arcades), strength in lightColor[2].a
+	float vao = mix( 1.0, clamp( in_position4.w, 0.0, 1.0 ), u_tw.lightColor[2].a );
+	ambShare *= vao;
 
 	if ( anim == 2 ) {
 		// vegetation: the whole plant leans with slow gusts, more the higher above its base; leaves flutter a little
@@ -83,6 +99,12 @@ void main() {
 		float flutter = sin( time * 5.0 + dot( in_position, vec3( 0.11, 0.13, 0.17 ) ) );
 		world.xy += vec2( 0.8, 0.6 ) * ( sway * h * 0.012 );
 		world += n * ( flutter * min( h, 60.0 ) * 0.004 );
+	} else if ( anim == 6 ) {
+		vec2 tc = u_tw.eye.xy - world.xy;
+		tc *= inversesqrt( max( dot( tc, tc ), 1e-6 ) );
+		vec2 side = vec2( tc.y, -tc.x );
+		world.xy += side * in_tex_coord.w - tc * in_tex_coord.z;
+		n = normalize( vec3( side * in_normal.y - tc * in_normal.x, in_normal.z ) );
 	} else if ( anim == 3 ) {
 		// cloth: pinned along its top edge, waves travel across it, stronger towards the bottom
 		float h = max( in_params.w - in_position.z, 0.0 );
@@ -93,9 +115,17 @@ void main() {
 
 	float ndl = dot( n, u_entity.localLightOrigin.xyz );
 	vec3 sunLight = u_entity.directedLight.rgb * ( 1.2 * clamp( ndl, 0.001, 1.0 ) );
-	vec3 ambLight = u_entity.ambientLight.rgb * ( 1.7 * max( ndl, 0.5 ) );
+	// ambient: sky light from above, a weaker warm bounce from the ground below (walls get 0.85, floors 1.15,
+	// undersides 0.5), with a slight lean towards the sun side
+	float hemi = mix( 0.5, 1.15, n.z * 0.5 + 0.5 ) * ( 0.92 + 0.08 * ndl );
+	vec3 ambLight = u_entity.ambientLight.rgb * ( 1.7 * hemi * ambShare ) * mix( vec3( 1.06, 1.0, 0.92 ), vec3( 1.0 ), clamp( n.z + 1.0, 0.0, 1.0 ) );
 
-	if ( anim == 2 ) {
+	// enclosed placements: the baked sun shadow map does not know the roofs above them well enough, so the direct
+	// sun is faded out there, and the ambient light turns warm (light that has bounced off stone and wood)
+	sunLight *= 1.0 - smoothstep( 0.8, 0.97, occ );
+	ambLight *= mix( vec3( 1.0 ), vec3( 1.22, 1.0, 0.80 ), occ * occ );
+
+	if ( anim == 2 || anim == 6 ) {
 		ambLight *= u_tw.spare.y;
 		sunLight *= 0.5 + 0.5 * u_tw.spare.y;
 	}
@@ -106,8 +136,9 @@ void main() {
 	// look the receiver up a little in front of its surface: removes self-shadowing without a large depth bias
 	vec4 sp = vec4( world + n * u_entity.modelMatrix[3].x, 1.0 );
 	frag_shadow = vec3( dot( u_entity.modelMatrix[0], sp ), dot( u_entity.modelMatrix[1], sp ), dot( u_entity.modelMatrix[2], sp ) );
-	frag_tex_coord = in_tex_coord;
-	frag_detail_coord = in_tex_coord * in_params.x;
+	frag_tex_coord = in_tex_coord.xy;
+	frag_tex_coord2 = ( anim == 6 ) ? in_tex_coord.xy : in_tex_coord.zw;
+	frag_detail_coord = in_tex_coord.xy * in_params.x;
 	frag_detail = in_params.x;
 	float py = in_params.y;
 	float tv = floor( py / 1024.0 );
@@ -119,6 +150,8 @@ void main() {
 	frag_ref = in_params.w;
 	frag_normal = n;
 	frag_tint = in_tint.rgb;
-	frag_anim = vec2( in_params.z, time );
+	frag_anim = vec2( animf, time );
+	frag_amb = occ;
+	frag_ao = vao;
 	gl_Position = mvp * vec4( world, 1.0 );
 }

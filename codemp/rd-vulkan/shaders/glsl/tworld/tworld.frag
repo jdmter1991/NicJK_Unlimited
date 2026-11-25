@@ -65,6 +65,9 @@ layout(location = 10) flat in float frag_ref;
 layout(location = 11) in vec3 frag_normal;
 layout(location = 12) flat in vec3 frag_tint;
 layout(location = 13) flat in vec2 frag_tile;
+layout(location = 14) in vec2 frag_tex_coord2;
+layout(location = 15) flat in float frag_amb;
+layout(location = 16) in float frag_ao;
 
 // light from the nearby lamps on a surface with normal n (display-space, added to the diffuse light)
 vec3 local_lights( vec3 n ) {
@@ -152,7 +155,7 @@ void main() {
 		base.rgb *= texture( texture1, frag_detail_coord ).rgb * 2.0;
 	}
 
-	bool pbr = u_tw.spare.x > 0.5 && frag_anim.x < 0.5;
+	bool pbr = u_tw.spare.x > 0.5 && ( frag_anim.x < 0.5 || frag_anim.x > 5.5 );		// 6 = billboard: shaded like a static surface
 
 	float vis = sun_visibility();
 	vec3 lamps = local_lights( normalize( frag_normal ) );
@@ -176,7 +179,7 @@ void main() {
 			Ng = -Ng;								// two-sided materials
 		vec3 N = Ng;
 		if ( frag_detail < 0.0 ) {
-			vec2 nuv = frag_tex_coord * ( -frag_detail );
+			vec2 nuv = frag_tex_coord2 * ( -frag_detail );		// the normal map's own UV set
 			vec4 nt = texture( texture1, nuv );
 			vec2 xy = nt.rg * 2.0 - 1.0;
 			float z = sqrt( max( 1.0 - dot( xy, xy ), 0.0 ) );
@@ -203,10 +206,14 @@ void main() {
 		float ndh = max( dot( N, H ), 0.0 ), vdh = max( dot( V, H ), 0.0 );
 
 		vec3 albedo = pow( min( base.rgb * frag_tint, vec3( 1.0 ) ), vec3( 2.2 ) );
-		vec3 ambL = u_entity.ambientLight.rgb * 1.7, sunL = u_entity.directedLight.rgb * 1.2;
+		float ambShare = mix( 1.0, u_tw.lightColor[0].a, frag_amb * frag_amb ) * frag_ao;
+		vec3 ambL = u_entity.ambientLight.rgb * ( 1.7 * ambShare ) * mix( vec3( 1.0 ), vec3( 1.22, 1.0, 0.80 ), frag_amb * frag_amb );
+		vec3 sunL = u_entity.directedLight.rgb * ( 1.2 * ( 1.0 - smoothstep( 0.8, 0.97, frag_amb ) ) );
 		// the classic path's light, split into its ambient and sun parts in linear terms: a rough non-metal ends up
 		// exactly as bright as there
-		vec3 ambF = ambL * max( dot( N, L ), 0.5 );
+		// the same sky / ground hemisphere as the vertex shader, here with the normal map's normal
+		float hemi = mix( 0.5, 1.15, N.z * 0.5 + 0.5 ) * ( 0.92 + 0.08 * dot( N, L ) );
+		vec3 ambF = ambL * hemi * mix( vec3( 1.06, 1.0, 0.92 ), vec3( 1.0 ), clamp( N.z + 1.0, 0.0, 1.0 ) );
 		vec3 Eamb = pow( ambF, vec3( 2.2 ) );
 		vec3 Esun = pow( ambF + sunL * ( ndl * vis ), vec3( 2.2 ) ) - Eamb;
 
@@ -222,11 +229,13 @@ void main() {
 
 		vec3 R = reflect( -V, N );
 		vec3 skyc = ( R.z > 0.0 ) ? mix( u_tw.skyHorizon.rgb, u_tw.skyZenith.rgb, pow( R.z, 0.5 ) ) : u_tw.skyHorizon.rgb * mix( 1.0, 0.35, clamp( -R.z * 4.0, 0.0, 1.0 ) );
-		vec3 env = pow( skyc * 0.7, vec3( 2.2 ) );
+		vec3 env = pow( skyc * ( 0.7 * ambShare ), vec3( 2.2 ) );		// enclosed placements do not mirror the sky
 		vec3 Fr = F0 + ( max( vec3( 1.0 - rough ), F0 ) - F0 ) * pow( 1.0 - ndv, 5.0 );
 		vec3 specAmb = env * Fr * ( ( 1.0 - rough ) * ( 1.0 - rough ) );		// rough surfaces show no sky reflection
 
-		vec3 kd = vec3( 1.0 - metal );
+		// a mirror-smooth metal shows only reflections; a rough one scatters the light around it, which here is the
+		// same light a non-metal receives, tinted by the metal's colour (without this, rough metals came out black)
+		vec3 kd = vec3( 1.0 - metal * ( 1.0 - rough ) * ( 1.0 - rough ) );
 		vec3 lin = kd * albedo * ( Eamb + Esun + pow( local_lights( N ), vec3( 2.2 ) ) ) + specSun + specAmb;
 		color.rgb = pow( lin, vec3( 1.0 / 2.2 ) );
 	}
@@ -245,9 +254,12 @@ void main() {
 		float glint = pow( max( dot( R, u_entity.localLightOrigin.xyz ), 0.0 ), 1500.0 ) * 3.0 * vis;
 		color.rgb = lit * ( 1.0 - F ) + sky * ( F * 0.7 ) + u_entity.directedLight.rgb * glint;	// 0.7: part of what a real surface would mirror is buildings, not sky
 		color.a = mix( frag_color.a, 1.0, F );
-	} else if ( frag_anim.x > 4.5 ) {
+	} else if ( frag_anim.x > 4.5 && frag_anim.x < 5.5 ) {
 		color = vec4( frag_tint * base.a, 1.0 );
-	} else if ( frag_anim.x > 3.5 ) {
+		// fixtures the source leaves switched off in daylight (opacity value 0.5): lit only where the sky is occluded
+		if ( frag_color.a < 0.75 )
+			color.rgb *= smoothstep( 0.35, 0.65, frag_amb );
+	} else if ( frag_anim.x > 3.5 && frag_anim.x < 4.5 ) {
 		float t = frag_anim.y;
 		vec2 uv = vec2( frag_tex_coord.x, 1.0 - frag_tex_coord.y );		// the source's UV space (V up)
 		vec2 c1 = uv * vec2( 1.50, 0.50 ) + t * vec2( -0.012, 0.06 );
@@ -263,10 +275,18 @@ void main() {
 		color = vec4( lit + vec3( 0.25, 0.28, 0.30 ) * a, a );
 	}
 
+	// window panes (animation type 7): seen from an enclosed place they show the daylight outside, as the
+	// source's interior renders do; from outside they stay dark glass. lightColor[1].a = how enclosed the viewer is.
+	if ( frag_anim.x > 6.5 ) {
+		float w = u_tw.lightColor[1].a * smoothstep( 0.25, 0.5, frag_amb );
+		vec3 day = min( mix( u_tw.skyHorizon.rgb, u_tw.skyZenith.rgb, 0.25 ) * 1.25 + vec3( 0.08 ), vec3( 1.0 ) );
+		color = mix( color, vec4( day, 1.0 ), w );
+	}
+
 	// distance haze towards the sky's horizon colour, as the source's height fog greys the far city and hills
 	if ( u_tw.spare.z > 0.0 ) {
 		float clear = exp( -distance( u_tw.eye.xyz, frag_world ) * u_tw.spare.z );
-		if ( frag_anim.x > 4.5 )
+		if ( frag_anim.x > 4.5 && frag_anim.x < 5.5 )
 			color.rgb *= clear;							// additive glow: fades out
 		else
 			color.rgb = mix( u_tw.skyHorizon.rgb, color.rgb, clear );

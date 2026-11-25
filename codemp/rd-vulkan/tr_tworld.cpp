@@ -175,6 +175,9 @@ typedef struct tworld_s {
 	float			*tilePacks;			// 2 * repeats in U + 1024 * repeats in V
 	int				numPbrMaps;
 
+	// sky occlusion per placement (maps/<name>.tsky): 0 = open sky .. 255 = enclosed; NULL without the file
+	byte			*skyOcc;
+
 	// local lights (maps/<name>.tlights): lamps that light their surroundings
 	int				numLights;
 	float			*lights;			// 8 floats each: position, radius, colour (already times intensity), unused
@@ -209,6 +212,8 @@ static cvar_t	*r_tworldPBR;
 static cvar_t	*r_tworldFoliageLight;
 static cvar_t	*r_tworldHaze;
 static cvar_t	*r_tworldLamps;
+static cvar_t	*r_tworldIndoor;
+static cvar_t	*r_tworldAO;
 
 
 static const int64_t		*s_cellKeys;
@@ -487,6 +492,11 @@ void R_LoadTWorld( const char *bspName )
 	const twSubmesh_t	*fsub;
 	const twInstance_t	*finst;
 	const twVertex_t	*fvert;
+	const float			**uv2Table = NULL;
+	byte				*aoBuf = NULL;
+	const byte			*aoVerts = NULL;		// one byte per vertex of the file, or NULL
+	uint32_t			numInstFile = 0;
+	byte				*uv2Buf = NULL;
 	const uint32_t		*findex;
 	shader_t		**shaders;
 	tworld_t		*tw;
@@ -511,6 +521,8 @@ void R_LoadTWorld( const char *bspName )
 	r_tworldPBR = ri.Cvar_Get( "r_tworldPBR", "1", CVAR_ARCHIVE_ND, "Cooked world: 1 = physically based shading (normal maps, roughness, metallic), 0 = classic shading" );
 	r_tworldFoliageLight = ri.Cvar_Get( "r_tworldFoliageLight", "0.6", CVAR_ARCHIVE_ND, "Cooked world: share of the ambient light that reaches foliage (1 = lit like open surfaces)" );
 	r_tworldHaze = ri.Cvar_Get( "r_tworldHaze", "110000", CVAR_ARCHIVE_ND, "Cooked world: distance in world units at which haze has taken half of the view (0 = no haze)" );
+	r_tworldAO = ri.Cvar_Get( "r_tworldAO", "0.6", CVAR_ARCHIVE_ND, "Cooked world: strength of the baked ambient occlusion of each mesh (0 = off)" );
+	r_tworldIndoor = ri.Cvar_Get( "r_tworldIndoor", "0.55", CVAR_ARCHIVE_ND, "Cooked world: share of the ambient light inside fully enclosed spaces (1 = no darkening)" );
 	r_tworldLamps = ri.Cvar_Get( "r_tworldLamps", "1", CVAR_ARCHIVE_ND, "Cooked world: brightness of the local lights (lamps), 0 = off" );
 	r_tworldInstancing = ri.Cvar_Get( "r_tworldInstancing", "1", CVAR_ARCHIVE_ND, "Cooked world: 1 = one instanced draw per mesh level and material, 0 = one draw per placement through the model path" );
 
@@ -646,6 +658,49 @@ void R_LoadTWorld( const char *bspName )
 	tw->subOrder = (int *)ri.Hunk_Alloc( sizeof( int ) * ( h->numSubmeshes + 1 ), h_low );
 	tw->blendSurfaceType = SF_TWORLD;
 
+	// optional second UV set (maps/<name>.tuv2): "TUV2", version 1, count, then per entry the mesh index, its vertex
+	// count and two floats per vertex. Meshes whose colour texture uses another UV set than their normal map.
+	{
+		char uname[MAX_QPATH];
+		long ulen;
+		COM_StripExtension( bspName, uname, sizeof( uname ) );
+		Q_strcat( uname, sizeof( uname ), ".tuv2" );
+		uv2Table = (const float **)ri.Hunk_AllocateTempMemory( sizeof( float * ) * ( h->numMeshes + 1 ) );
+		Com_Memset( uv2Table, 0, sizeof( float * ) * ( h->numMeshes + 1 ) );
+		ulen = ri.FS_ReadFile( uname, (void **)&uv2Buf );
+		if ( ulen >= 12 && uv2Buf && !memcmp( uv2Buf, "TUV2", 4 ) && ( (const uint32_t *)uv2Buf )[1] == 1 ) {
+			const uint32_t n = ( (const uint32_t *)uv2Buf )[2];
+			size_t o = 12;
+			uint32_t e, used = 0;
+			for ( e = 0; e < n && o + 8 <= (size_t)ulen; e++ ) {
+				const uint32_t mi = *(const uint32_t *)( uv2Buf + o ), nv = *(const uint32_t *)( uv2Buf + o + 4 );
+				o += 8;
+				if ( o + (size_t)nv * 8 > (size_t)ulen )
+					break;
+				if ( mi < h->numMeshes && nv == fmesh[mi].numVerts ) {
+					uv2Table[mi] = (const float *)( uv2Buf + o );
+					used++;
+				}
+				o += (size_t)nv * 8;
+			}
+			ri.Printf( PRINT_ALL, "R_LoadTWorld: %s: second UV set for %u meshes\n", uname, used );
+		}
+	}
+
+	{
+		// optional ambient occlusion per vertex: "TAO1", version 1, vertex count, then one byte per vertex
+		char aname[MAX_QPATH];
+		long alen;
+		COM_StripExtension( bspName, aname, sizeof( aname ) );
+		Q_strcat( aname, sizeof( aname ), ".tao" );
+		alen = ri.FS_ReadFile( aname, (void **)&aoBuf );
+		if ( alen >= 12 && aoBuf && !memcmp( aoBuf, "TAO1", 4 ) && ( (const uint32_t *)aoBuf )[1] == 1
+			&& ( (const uint32_t *)aoBuf )[2] == h->numVerts && (size_t)alen == 12 + (size_t)h->numVerts ) {
+			aoVerts = aoBuf + 12;
+			ri.Printf( PRINT_ALL, "R_LoadTWorld: %s: ambient occlusion for %u vertices\n", aname, h->numVerts );
+		}
+	}
+
 	// one vertex buffer and one index buffer per mesh (all detail levels), in the MD3 VBO layout
 	for ( i = 0; i < h->numMeshes; i++ ) {
 		const twMesh_t *m = &fmesh[i];
@@ -663,9 +718,15 @@ void R_LoadTWorld( const char *bspName )
 			float *out = (float *)p;
 			if ( v->xyz[2] < tw->meshes[i].zmin ) tw->meshes[i].zmin = v->xyz[2];
 			if ( v->xyz[2] > tw->meshes[i].zmax ) tw->meshes[i].zmax = v->xyz[2];
-			out[0] = v->xyz[0]; out[1] = v->xyz[1]; out[2] = v->xyz[2]; out[3] = 0.0f;
+			out[0] = v->xyz[0]; out[1] = v->xyz[1]; out[2] = v->xyz[2];
+			out[3] = aoVerts ? aoVerts[m->firstVert + j] * ( 1.0f / 255.0f ) : 1.0f;
 			out[4] = v->normal[0]; out[5] = v->normal[1]; out[6] = v->normal[2]; out[7] = 0.0f;
 			out[8] = v->st[0]; out[9] = v->st[1];
+			if ( uv2Table[i] ) {
+				Com_Memcpy( out + 10, uv2Table[i] + j * 2, 8 );		// the file is not aligned
+			} else {
+				out[10] = v->st[0]; out[11] = v->st[1];
+			}
 		}
 
 		Com_sprintf( bufName, sizeof( bufName ), "tworld_%u", i );
@@ -732,7 +793,30 @@ void R_LoadTWorld( const char *bspName )
 		name, h->numMeshes, h->numSubmeshes, h->numInstances, h->numMaterials, h->numVerts, h->numIndexes / 3,
 		len / ( 1024.0f * 1024.0f ), ri.Milliseconds() - startTime );
 
+	numInstFile = h->numInstances;		// the header lives in the file buffer, which is released next
 	ri.FS_FreeFile( buffer );
+	if ( aoBuf )
+		ri.FS_FreeFile( aoBuf );
+	if ( uv2Buf )
+		ri.FS_FreeFile( uv2Buf );
+	ri.Hunk_FreeTempMemory( uv2Table );
+	{
+		// optional sky occlusion: "TSKY", version 1, placement count, then one byte per placement
+		char kname[MAX_QPATH];
+		byte *kbuf = NULL;
+		long klen;
+		COM_StripExtension( bspName, kname, sizeof( kname ) );
+		Q_strcat( kname, sizeof( kname ), ".tsky" );
+		klen = ri.FS_ReadFile( kname, (void **)&kbuf );
+		if ( klen >= 12 && kbuf && !memcmp( kbuf, "TSKY", 4 ) && ( (const uint32_t *)kbuf )[1] == 1
+			&& ( (const uint32_t *)kbuf )[2] == numInstFile && (size_t)klen == 12 + (size_t)numInstFile ) {
+			tw->skyOcc = (byte *)ri.Hunk_Alloc( numInstFile + 1, h_low );
+			Com_Memcpy( tw->skyOcc, kbuf + 12, numInstFile );
+			ri.Printf( PRINT_ALL, "R_LoadTWorld: %s: sky occlusion for %u placements\n", kname, numInstFile );
+		}
+		if ( kbuf )
+			ri.FS_FreeFile( kbuf );
+	}
 	TW_BuildCells( tw );
 	{
 		// optional local lights: "TLGT", version 1, count, then 8 floats per light
@@ -968,6 +1052,34 @@ static qboolean RB_TWorldInstanced( tworld_t *tw, const int pass )
 		f[12] = usePbr ? 1.0f : 0.0f;
 		f[13] = r_tworldFoliageLight->value;
 		f[14] = ( r_tworldHaze->value > 1.0f ) ? 0.693147f / r_tworldHaze->value : 0.0f;
+		f[35] = Com_Clamp( 0.0f, 1.0f, r_tworldIndoor->value );
+		f[43] = Com_Clamp( 0.0f, 1.0f, r_tworldAO->value );
+		{
+			// how enclosed the viewer is: the sky occlusion of the small placements within 500 units, nearer ones
+			// counting more, eased over a few frames (window panes show daylight only to a viewer indoors)
+			static float viewerIndoor = 0.0f;
+			float sum = 0.0f, wsum = 0.0f, target = 0.0f;
+			if ( tw->skyOcc ) {
+				int ii;
+				for ( ii = 0; ii < tw->numInstances; ii++ ) {
+					const tworldInst_t *in = &tw->instances[ii];
+					vec3_t dd;
+					float d2;
+					if ( in->radius < 40.0f || in->radius > 900.0f )
+						continue;
+					VectorSubtract( in->center, viewOrg, dd );
+					d2 = DotProduct( dd, dd );
+					if ( d2 < 500.0f * 500.0f ) {
+						const float wgt = 1.0f / ( 100.0f + sqrtf( d2 ) );
+						sum += wgt * tw->skyOcc[ii]; wsum += wgt;
+					}
+				}
+				if ( wsum > 0.0f )
+					target = Com_Clamp( 0.0f, 1.0f, ( sum / wsum / 255.0f - 0.35f ) / 0.3f );
+			}
+			viewerIndoor += ( target - viewerIndoor ) * 0.15f;
+			f[39] = viewerIndoor;
+		}
 		f[11] = tw->originM[0];
 		f[15] = tw->originM[1];
 		if ( tw->numLights && r_tworldLamps->value > 0.0f ) {
@@ -1036,8 +1148,9 @@ static qboolean RB_TWorldInstanced( tworld_t *tw, const int pass )
 			out->tint[3] = tw->alphas[sub->tintIndex];
 			out->params[0] = tw->details[sub->tintIndex];
 			out->params[1] = sub->texNoScale + tw->tilePacks[sub->tintIndex];
-			out->params[2] = (float)tw->anims[sub->tintIndex];
-			if ( tw->anims[sub->tintIndex] == 0 ) {
+			// animation type, plus the placement's sky occlusion in the fraction (0 .. 0.98)
+			out->params[2] = (float)tw->anims[sub->tintIndex] + ( tw->skyOcc ? tw->skyOcc[tw->visInst[i]] * ( 0.98f / 255.0f ) : 0.0f );
+			if ( tw->anims[sub->tintIndex] == 0 || tw->anims[sub->tintIndex] >= 6 ) {
 				// physically based path: packed material values; a normal map takes the second texture slot
 				out->params[3] = tw->pbrPacks[sub->tintIndex];
 				if ( usePbr && out->params[0] <= 0.0f && tw->pbrImages[sub->tintIndex] && ( (int)tw->tilePacks[sub->tintIndex] >> 10 ) != 254 )
@@ -1094,7 +1207,7 @@ static qboolean RB_TWorldInstanced( tworld_t *tw, const int pass )
 			const shaderStage_t *ds = ( tw->details[sub->tintIndex] > 0.0f || tw->anims[sub->tintIndex] == 1 || tw->anims[sub->tintIndex] == 4 ) ? sub->shader->stages[1] : NULL;
 			image_t *detail = ( ds && ds->bundle[0].image[0] ) ? ds->bundle[0].image[0] : tr.whiteImage;
 			// blended ground (tile code 254): the second texture is its weight map, with or without the PBR path
-			if ( !ds && tw->anims[sub->tintIndex] == 0 && tw->pbrImages[sub->tintIndex] && ( usePbr || ( (int)tw->tilePacks[sub->tintIndex] >> 10 ) == 254 ) )
+			if ( !ds && ( tw->anims[sub->tintIndex] == 0 || tw->anims[sub->tintIndex] >= 6 ) && tw->pbrImages[sub->tintIndex] && ( usePbr || ( (int)tw->tilePacks[sub->tintIndex] >> 10 ) == 254 ) )
 				detail = tw->pbrImages[sub->tintIndex];
 			vk_update_descriptor( VK_DESC_TEXTURE0 + 1, detail->descriptor_set );
 		}
