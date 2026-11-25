@@ -195,6 +195,8 @@ vmCvar_t bot_abTest;
 // 8192: force powers and saber throw only inside the ranges and conditions the game code gives
 //       them, and used on purpose at those ranges
 #define BOTF_FORCE		8192
+// 16384: step in when the bot's own swing is predicted to fall short
+#define BOTF_SWINGTRACK	16384
 
 #define BOTINTENT_EVADE		8	// applied whatever the buttons are, and releases attack
 #define BOTINTENT_WORLD		16	// move along bs->intentWorldDir (navigation jump / unstick), always applied
@@ -203,6 +205,7 @@ static int botEvalNavHighJumps, botEvalNavGapJumps, botEvalIdleKicks, botEvalStu
 static int botEvalStuckInSolid, botEvalLedgeHops;
 static int botEvalPredThreats, botEvalPredEvades, botEvalLearnSamples, botEvalLearnOverrides, botEvalLearnExplore;
 static int Bot_LearnTotal(void);
+static int botEvalPredChase, botEvalPredOnTarget;
 static int botEvalForceUse[5];		// lightning, drain, pull, push, saber throw started by the force tactics
 static int botEvalForceBlocked[6];	// uses by the older logic stopped because they could not work: lightning, drain, grip, push, pull, throw
 static int botEvalProPunish, botEvalProHoldOff, botEvalProCounterFrames, botEvalProCrouchFrames;
@@ -309,6 +312,7 @@ static void BotEval_Report(void) {
 	trap->Print("BOTEVAL bots found standing inside solid geometry and respawned: %d; hops over low ledges while moving: %d\n", botEvalStuckInSolid, botEvalLedgeHops);
 	trap->Print("BOTEVAL machine: predicted blade hits %d, evaded %d; learning: results recorded %d, swing choices changed by what was learned %d, exploratory choices %d, table holds %d results\n",
 		botEvalPredThreats, botEvalPredEvades, botEvalLearnSamples, botEvalLearnOverrides, botEvalLearnExplore, Bot_LearnTotal());
+	trap->Print("BOTEVAL machine attack: swing frames predicted to land %d, predicted to fall short and closed in %d\n", botEvalPredOnTarget, botEvalPredChase);
 	trap->Print("BOTEVAL force: started lightning %d drain %d pull %d push %d saber throw %d; stopped as out of range or pointless: lightning %d drain %d grip %d push %d pull %d throw %d\n",
 		botEvalForceUse[0], botEvalForceUse[1], botEvalForceUse[2], botEvalForceUse[3], botEvalForceUse[4],
 		botEvalForceBlocked[0], botEvalForceBlocked[1], botEvalForceBlocked[2], botEvalForceBlocked[3], botEvalForceBlocked[4], botEvalForceBlocked[5]);
@@ -938,6 +942,7 @@ An enemy with Absorb up turns lightning, drain and grip into force for himself.
 */
 void Bot_HoldButtons(bot_state_t* bs, int buttons, int ms);
 qboolean Bot_SendGenCmd(bot_state_t* bs, int genCmd, int debounceMs);
+static int BotPred_BladeHits(gentity_t* attacker, gentity_t* target, int horizonMs);
 static qboolean Bot_ForceCrowded(bot_state_t* bs, float radius) {
 	int i;
 	for (i = 0; i < MAX_CLIENTS; i++) {
@@ -1274,6 +1279,25 @@ void BotInputToUserCommand(bot_state_t* bs, bot_input_t* bi, usercmd_t* ucmd, in
 				ucmd->upmove = -127;
 				if (ucmd->forwardmove > 0) ucmd->forwardmove = 0;
 				botEvalProCrouchFrames++;
+			}
+		}
+	}
+
+	// The bot's own swing, looked at the same way as the enemy's: carried forward, will the blade
+	// reach him? If the swing is going to fall short of an enemy who is nearly in reach, step in so
+	// that it lands, instead of finishing the swing in the air. Skill 5 looks 250 ms ahead.
+	if ((bs->features & BOTF_SWINGTRACK) && !bs->seqType && !(bs->intentFlags & (BOTINTENT_WORLD | BOTINTENT_KATA | BOTINTENT_EVADE))
+		&& bs->currentEnemy && bs->currentEnemy->client && bs->frame_Enemy_Vis && bs->frame_Enemy_Len >= 40 && bs->frame_Enemy_Len <= 135
+		&& g_entities[bs->client].client && (int)bs->settings.skill >= 3) {
+		const playerState_t *mp = &g_entities[bs->client].client->ps;
+		if (mp->stats[STAT_HEALTH] > 0 && mp->weapon == WP_SABER && BG_SaberInAttack(mp->saberMove) && !BG_SaberInSpecial(mp->saberMove)
+			&& mp->groundEntityNum != ENTITYNUM_NONE) {
+			if (BotPred_BladeHits(&g_entities[bs->client], bs->currentEnemy, 50 + (int)bs->settings.skill * 40) >= 0) {
+				botEvalPredOnTarget++;
+			} else {
+				ucmd->forwardmove = 127;	// the view is on the enemy, so forward is toward him
+				if (ucmd->upmove < 0) ucmd->upmove = 0;
+				botEvalPredChase++;
 			}
 		}
 	}
@@ -11869,9 +11893,15 @@ radius, or -1. Everything used here is on screen for a human player too; the dif
 the bot measures it exactly and every frame.
 ==============
 */
+static int BotPred_BladeHits(gentity_t* attacker, gentity_t* target, int horizonMs);
 static int BotPred_BladeThreat(bot_state_t* bs, gentity_t* enemy, int horizonMs) {
-	gclient_t *en = enemy->client;
-	gclient_t *cl = g_entities[bs->client].client;
+	return BotPred_BladeHits(enemy, &g_entities[bs->client], horizonMs);
+}
+
+// time in ms until one of "attacker"'s blades reaches "target"'s body, or -1
+static int BotPred_BladeHits(gentity_t* attacker, gentity_t* target, int horizonMs) {
+	gclient_t *en = attacker->client;
+	gclient_t *cl = target->client;
 	int dt = level.time - level.previousTime;
 	int frames, s, b, k, j;
 
@@ -11910,7 +11940,7 @@ static int BotPred_BladeThreat(bot_state_t* bs, gentity_t* enemy, int horizonMs)
 
 				VectorMA(bl->muzzlePoint, (float)k, vBase, bk);
 				VectorMA(tip, (float)k, vTip, tk);
-				VectorMA(bs->origin, secs, cl->ps.velocity, body);
+				VectorMA(cl->ps.origin, secs, cl->ps.velocity, body);
 				// five points along the blade against the body's vertical axis (feet -24 .. head +40)
 				for (j = 1; j <= 5; j++) {
 					vec3_t pt;
@@ -17357,7 +17387,7 @@ int BotAISetup(int restart) {
 	trap->Cvar_Register(&bot_profile, "bot_profile", "0", 0);
 	trap->Cvar_Register(&bot_fixes, "bot_fixes", "1", CVAR_ARCHIVE);
 	trap->Cvar_Register(&bot_abBase, "bot_abBase", "0", 0);	// features of the baseline group in an A/B test
-	trap->Cvar_Register(&bot_features, "bot_features", "14831", CVAR_ARCHIVE);	// 495 + 2048 (blade prediction) + 4096 (learning) + 8192 (force rules); 16, 512, 1024 lost their A/B tests
+	trap->Cvar_Register(&bot_features, "bot_features", "31215", CVAR_ARCHIVE);	// 495 + 2048 blade prediction + 4096 learning + 8192 force rules + 16384 swing tracking; 16, 512, 1024 lost their A/B tests
 	trap->Cvar_Register(&bot_abTest, "bot_abTest", "0", 0);
 	trap->Cvar_Register(&bot_attachments, "bot_attachments", "1", 0);
 	trap->Cvar_Register(&bot_camp, "bot_camp", "1", 0);
