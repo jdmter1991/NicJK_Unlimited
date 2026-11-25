@@ -1,12 +1,15 @@
 name: build-winxp
 
 # runs every 4 months
+# Started by the main build workflow after it has made a release (or by hand); the XP builds are
+# added to that release.
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "0 0 1 */4 *"
-  release:
-    types: [published]
+    inputs:
+      release_tag:
+        description: "Release to add the Windows XP builds to"
+        required: false
+        default: "latest-build"
 
 jobs:
   msvc-xp:
@@ -119,7 +122,7 @@ jobs:
           if-no-files-found: error
 
   create-winxp:
-    if: (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') && github.ref == 'refs/heads/master'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/NicJK_Unlimited'
     needs: [msvc-xp]
     runs-on: ubuntu-22.04
     permissions:
@@ -127,94 +130,25 @@ jobs:
     steps:
       - uses: actions/checkout@85e6279cec87321a52edac9c87bce653a07cf6c2 # v4.2.2
         with:
-          submodules: recursive
-          fetch-depth: 0
+          fetch-depth: 1
 
       - name: Download Artifacts
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           path: artifacts
 
-      - name: Create latest XP build
+      - name: Add the XP builds to the release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          LATEST_RELEASE_COMMIT=$(gh api repos/${{ github.repository }}/releases/tags/winxp --jq '.target_commitish' 2>/dev/null || echo "")
-          gh release delete winxp --cleanup-tag --yes 2>/dev/null || true
-
-          RELEASE_BODY="## Commits"
-
-          if [ -n "$LATEST_RELEASE_COMMIT" ] && git rev-parse --quiet --verify "$LATEST_RELEASE_COMMIT^{commit}" >/dev/null; then
-            COMMITS=$(git log $LATEST_RELEASE_COMMIT..HEAD --pretty=format:"%h|%s|%an")
-          else
-            COMMITS=$(git log -3 --pretty=format:"%h|%s|%an")
-          fi
-
-          while IFS='|' read -r hash subject author; do
-            if [[ $subject =~ ^Merge\ pull\ request\ \#([0-9]+) ]]; then
-              PR_NUM="${BASH_REMATCH[1]}"
-              PR_LINK=" [#${PR_NUM}](https://github.com/${{ github.repository }}/pull/${PR_NUM})"
-              RELEASE_BODY+=$'\n'"- $hash: $subject ($author)${PR_LINK}"
-            elif [[ $subject =~ \(#([0-9]+)\)$ ]]; then
-              PR_NUM="${BASH_REMATCH[1]}"
-              subject=$(echo "$subject" | sed 's/ (#[0-9]\+)$//')
-              PR_LINK=" [#${PR_NUM}](https://github.com/${{ github.repository }}/pull/${PR_NUM})"
-              RELEASE_BODY+=$'\n'"- $hash: $subject ($author)${PR_LINK}"
-            else
-              RELEASE_BODY+=$'\n'"- $hash: $subject ($author)"
-            fi
-          done <<< "$COMMITS"
-
-          RELEASE_FILES=""
+          TAG="${{ github.event.inputs.release_tag || 'latest-build' }}"
           for artifact_dir in artifacts/*; do
             if [ -d "$artifact_dir" ]; then
               for file in "$artifact_dir"/*; do
                 if [ -f "$file" ]; then
-                  filename=$(basename "$file" | sed -e 's/-Release-Non-Portable//' -e 's/-Release-Portable//')
+                  filename=$(basename "$file" | sed -e 's/-Release-Non-Portable//' -e 's/-Release-Portable//' -e 's/^TaystJK-/NicJK_Unlimited-/')
                   cp "$file" "$filename"
-                  RELEASE_FILES="$RELEASE_FILES $filename"
-                fi
-              done
-            fi
-          done
-
-          gh release create winxp \
-            --title "Latest WinXP Build" \
-            --notes "$RELEASE_BODY" \
-            --target ${{ github.sha }} \
-            --latest=false \
-            $RELEASE_FILES
-
-  create-release-winxp:
-    if: github.event_name == 'release'
-    needs: [msvc-xp]
-    runs-on: ubuntu-22.04
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@85e6279cec87321a52edac9c87bce653a07cf6c2 # v4.2.2
-        with:
-          submodules: recursive
-          fetch-depth: 0
-
-      - name: Download Artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          path: artifacts
-
-      - name: Upload archives
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          for artifact_dir in artifacts/*; do
-            if [ -d "$artifact_dir" ]; then
-              for file in "$artifact_dir"/*; do
-                if [ -f "$file" ]; then
-                  filename=$(basename "$file" | sed -e 's/-Release-Non-Portable//' -e 's/-Release-Portable//')
-                  gh release upload "${{ github.event.release.tag_name }}" \
-                    "$file" \
-                    --clobber \
-                    --name "$filename"
+                  gh release upload "$TAG" "$filename" --clobber
                 fi
               done
             fi
