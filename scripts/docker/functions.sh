@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# TaystJK server utility functions.
+# NicJK server utility functions.
 #
 
 # Send and receive UDP datagrams

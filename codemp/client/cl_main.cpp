@@ -2741,7 +2741,12 @@ static IHeapAllocator *GetG2VertSpaceServer( void ) {
 	return G2VertSpaceServer;
 }
 
-#define DEFAULT_RENDER_LIBRARY "rd-taystjk"
+// The Vulkan renderer is the default: it is the one this fork is developed and measured on.
+// The OpenGL renderer is the fallback where the Vulkan one is not there to load (it is not built
+// for every platform). On a machine whose graphics driver has no Vulkan support, start the game
+// with  +set cl_renderer rd-nicjk
+#define DEFAULT_RENDER_LIBRARY "rd-vulkant"
+#define FALLBACK_RENDER_LIBRARY "rd-nicjk"
 
 void CL_InitRef( void ) {
 	static refimport_t ri;
@@ -2761,6 +2766,14 @@ void CL_InitRef( void ) {
 		Cvar_ForceReset( "cl_renderer" );
 
 		Com_sprintf( dllName, sizeof( dllName ), DEFAULT_RENDER_LIBRARY "_" ARCH_STRING DLL_EXT );
+		rendererLib = Sys_LoadDll( dllName, qfalse );
+	}
+
+	if ( !rendererLib )
+	{
+		Com_Printf( "failed: trying to load the OpenGL renderer\n" );
+		Cvar_Set( "cl_renderer", FALLBACK_RENDER_LIBRARY );
+		Com_sprintf( dllName, sizeof( dllName ), FALLBACK_RENDER_LIBRARY "_" ARCH_STRING DLL_EXT );
 		rendererLib = Sys_LoadDll( dllName, qfalse );
 	}
 

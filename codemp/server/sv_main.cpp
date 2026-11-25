@@ -1275,7 +1275,7 @@ static DWORD WINAPI SV_WatchdogThread( LPVOID ) {
 			GetModuleFileNameA( NULL, exe, sizeof( exe ) );
 			char *slash = strrchr( exe, '\\' );
 			if ( slash ) *slash = 0;
-			snprintf( path, sizeof( path ), "%s;%s\\taystjk;%s\\base", exe, exe, exe );
+			snprintf( path, sizeof( path ), "%s;%s\\nicjk;%s\\base", exe, exe, exe );
 			SymSetOptions( SYMOPT_UNDNAME | SYMOPT_DEFERRED_LOADS | SYMOPT_LOAD_LINES );
 			SymInitialize( proc, path, TRUE );
 			symReady = true;
@@ -1322,7 +1322,7 @@ static void SV_SymInit( HANDLE proc ) {
 	GetModuleFileNameA( NULL, exe, sizeof( exe ) );
 	char *slash = strrchr( exe, '\\' );
 	if ( slash ) *slash = 0;
-	snprintf( path, sizeof( path ), "%s;%s\\taystjk;%s\\base", exe, exe, exe );
+	snprintf( path, sizeof( path ), "%s;%s\\nicjk;%s\\base", exe, exe, exe );
 	SymSetOptions( SYMOPT_UNDNAME | SYMOPT_DEFERRED_LOADS | SYMOPT_LOAD_LINES );
 	SymInitialize( proc, path, TRUE );
 	done = true;

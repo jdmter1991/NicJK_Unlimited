@@ -23,7 +23,11 @@ You need a copy of Jedi Academy and its retail `base/assets0.pk3` through `base/
 2. Copy the game's `base` directory beside the executable or macOS app bundle, or point the game at an existing installation with `fs_cdPath`.
 3. Launch the executable or app included in the archive.
 
-The executables keep TaystJK's names (`taystjk`, `taystjkded`) and its `taystjk` mod folder, so an existing TaystJK setup, its configuration and its mods carry over unchanged.
+The Vulkan renderer is the default. On a graphics card or driver without Vulkan support, start the game with `+set cl_renderer rd-nicjk` to use the OpenGL renderer instead.
+
+The programs are `nicjk` (client) and `nicjkded` (dedicated server), settings are saved as `nicjk.cfg`, and the fork's own files live in a `nicjk` folder beside `base`.
+
+**Coming from TaystJK or an earlier build of this fork?** Those used a `taystjk` folder. Copy your maps, mods and settings from `GameData/taystjk` into `GameData/nicjk` (and rename `taystjk.cfg` to `nicjk.cfg` if you want to keep your settings). Nothing is read from the old folder automatically.
 
 ### Builds
 
@@ -34,7 +38,7 @@ The executables keep TaystJK's names (`taystjk`, `taystjkded`) and its `taystjk`
 
 ### Maps
 
-Large showcase maps are published as separate, optional PK3 downloads next to the builds, not inside them. Put a map's PK3 in your `base` or `taystjk` folder to use it.
+Large showcase maps are published as separate, optional PK3 downloads next to the builds, not inside them. Put a map's PK3 in your `base` or `nicjk` folder to use it.
 
 ## Documentation
 

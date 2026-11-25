@@ -161,17 +161,17 @@ endif()
 if(MakeApplicationBundles AND BuildMPEngine)
 	install(TARGETS ${MPCGame}
 		LIBRARY
-		DESTINATION "${JKAInstallDir}/${MPEngine}.app/Contents/MacOS/taystjk"
+		DESTINATION "${JKAInstallDir}/${MPEngine}.app/Contents/MacOS/nicjk"
 		COMPONENT ${JKAMPCoreComponent})
 elseif(WIN32)
 	install(TARGETS ${MPCGame}
 		RUNTIME
-		DESTINATION "${JKAInstallDir}/taystjk"
+		DESTINATION "${JKAInstallDir}/nicjk"
 		COMPONENT ${JKAMPCoreComponent})
 else()
 	install(TARGETS ${MPCGame}
 		LIBRARY
-		DESTINATION "${JKAInstallDir}/taystjk"
+		DESTINATION "${JKAInstallDir}/nicjk"
 		COMPONENT ${JKAMPCoreComponent})
 endif()
 

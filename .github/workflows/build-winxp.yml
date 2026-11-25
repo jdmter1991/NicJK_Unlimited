@@ -112,13 +112,13 @@ jobs:
         working-directory: ${{ github.workspace }}/build/bin/JediAcademy
         shell: bash
         run: |
-          7z a -r TaystJK-windowsxp-${{ matrix.arch }}-${{ matrix.build_type }}-${{ matrix.portable }}.zip *
+          7z a -r NicJK-windowsxp-${{ matrix.arch }}-${{ matrix.build_type }}-${{ matrix.portable }}.zip *
 
       - uses: actions/upload-artifact@6027e3dd177782cd8ab9af838c04fd81a07f1d47 # v4.6.2
         if: ${{ matrix.build_type == 'Release' }}
         with:
-          name: TaystJK-windowsxp-${{ matrix.arch }}-${{ matrix.build_type }}-${{ matrix.portable }}
-          path: ${{ github.workspace }}/build/bin/JediAcademy/TaystJK-windowsxp-${{ matrix.arch }}-${{ matrix.build_type }}-${{ matrix.portable }}.zip
+          name: NicJK-windowsxp-${{ matrix.arch }}-${{ matrix.build_type }}-${{ matrix.portable }}
+          path: ${{ github.workspace }}/build/bin/JediAcademy/NicJK-windowsxp-${{ matrix.arch }}-${{ matrix.build_type }}-${{ matrix.portable }}.zip
           if-no-files-found: error
 
   create-winxp:
@@ -146,7 +146,7 @@ jobs:
             if [ -d "$artifact_dir" ]; then
               for file in "$artifact_dir"/*; do
                 if [ -f "$file" ]; then
-                  filename=$(basename "$file" | sed -e 's/-Release-Non-Portable//' -e 's/-Release-Portable//' -e 's/^TaystJK-/NicJK_Unlimited-/')
+                  filename=$(basename "$file" | sed -e 's/-Release-Non-Portable//' -e 's/-Release-Portable//' -e 's/^NicJK-/NicJK_Unlimited-/')
                   cp "$file" "$filename"
                   gh release upload "$TAG" "$filename" --clobber
                 fi

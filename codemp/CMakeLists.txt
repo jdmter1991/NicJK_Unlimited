@@ -634,9 +634,9 @@ if(BuildMPEngine)
 	if(MakeApplicationBundles)
 		set(MACOSX_BUNDLE_BUNDLE_NAME ${MPEngine})
 		set(MACOSX_BUNDLE_DISPLAY_NAME ${MPEngine})
-		set(MACOSX_BUNDLE_ICON_FILE TaystJK.icns)
-		set_source_files_properties(${MPDir}/macosx/TaystJK.icns PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
-		set(MPEngineFiles ${MPEngineFiles} ${MPDir}/macosx/TaystJK.icns)
+		set(MACOSX_BUNDLE_ICON_FILE NicJK.icns)
+		set_source_files_properties(${MPDir}/macosx/NicJK.icns PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
+		set(MPEngineFiles ${MPEngineFiles} ${MPDir}/macosx/NicJK.icns)
 		set_source_files_properties(${MPDir}/macosx/English.lproj/InfoPlist.strings PROPERTIES MACOSX_PACKAGE_LOCATION Resources/English.lproj)
 		set(MPEngineFiles ${MPEngineFiles} ${MPDir}/macosx/English.lproj/InfoPlist.strings)
 	endif(MakeApplicationBundles)
@@ -657,7 +657,7 @@ if(BuildMPEngine)
 	else(WIN32)
 		if(MakeApplicationBundles)
 			add_executable(${MPEngine} MACOSX_BUNDLE ${MPEngineFiles})
-			set_target_properties(${MPEngine} PROPERTIES MACOSX_BUNDLE_INFO_PLIST "${MPDir}/macosx/TaystJKInfo.plist")
+			set_target_properties(${MPEngine} PROPERTIES MACOSX_BUNDLE_INFO_PLIST "${MPDir}/macosx/NicJKInfo.plist")
 		else(MakeApplicationBundles)
 			add_executable(${MPEngine} ${MPEngineFiles})
 		endif(MakeApplicationBundles)
@@ -901,15 +901,15 @@ endif(BuildMPDed)
 
 install(FILES
 		${CMAKE_CURRENT_BINARY_DIR}/japro-assets.pk3
-		DESTINATION "${JKAInstallDir}/taystjk"
+		DESTINATION "${JKAInstallDir}/nicjk"
 		COMPONENT ${JKAMPCoreComponent})
 
 install(FILES
 		${CMAKE_SOURCE_DIR}/assets/settings/cosmetics/example.cosmetic
-		DESTINATION "${JKAInstallDir}/taystjk/settings/cosmetics/hats/"
+		DESTINATION "${JKAInstallDir}/nicjk/settings/cosmetics/hats/"
 		COMPONENT ${JKAMPCoreComponent})
 
 install(FILES
 		${CMAKE_SOURCE_DIR}/assets/settings/cosmetics/example.cosmetic
-		DESTINATION "${JKAInstallDir}/taystjk/settings/cosmetics/capes/"
+		DESTINATION "${JKAInstallDir}/nicjk/settings/cosmetics/capes/"
 		COMPONENT ${JKAMPCoreComponent})

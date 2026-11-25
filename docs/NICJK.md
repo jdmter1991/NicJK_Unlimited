@@ -34,4 +34,4 @@ The bot AI is the largest part of the fork. It has its own page: [NICJK_BOTS.md]
 
 ## What stays the same
 
-Game rules, movement, saber and Force mechanics are TaystJK's. The bots play through the same input a player has; nothing gives them abilities, damage or information a player would not have. Network protocol and mod compatibility are unchanged.
+Game rules, movement, saber and Force mechanics are TaystJK's. The bots play through the same input a player has; nothing gives them abilities, damage or information a player would not have. Network protocol and mod compatibility are unchanged: the fork still identifies its extra features to servers and clients the way TaystJK does. Only the names changed: programs, settings file and mod folder are `nicjk` instead of `taystjk`.

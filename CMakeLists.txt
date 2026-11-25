@@ -23,7 +23,7 @@ set(CMAKE_OSX_DEPLOYMENT_TARGET "10.11" CACHE STRING "Minimum OS X deployment ve
 
 set(InOpenJK ON)
 
-set(ProjectName "TaystJK" CACHE STRING "Project Name")
+set(ProjectName "NicJK" CACHE STRING "Project Name")
 project(${ProjectName})
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
@@ -35,10 +35,10 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 #=============================================================================
 option(BuildPortableVersion "Build portable version (does not read or write files from your user/home directory" OFF)
 
-option(BuildMPEngine "Whether to create projects for the MP client (taystjk.x86.exe)" ON)
-option(BuildMPRdVanilla "Whether to create projects for the MP default renderer (rd-taystjk_x86.dll)" ON)
+option(BuildMPEngine "Whether to create projects for the MP client (nicjk.x86.exe)" ON)
+option(BuildMPRdVanilla "Whether to create projects for the MP default renderer (rd-nicjk_x86.dll)" ON)
 option(BuildMPRdVulkan "Whether to create projects for the MP vulkan renderer (rd-vulkant_x86.dll)" ON)
-option(BuildMPDed "Whether to create projects for the MP dedicated server (taystjkded.exe)" ON)
+option(BuildMPDed "Whether to create projects for the MP dedicated server (nicjkded.exe)" ON)
 option(BuildMPGame "Whether to create projects for the MP server-side gamecode (jampgamex86.dll)" ON)
 option(BuildMPCGame "Whether to create projects for the MP clientside gamecode (cgamex86.dll)" ON)
 option(BuildMPUI "Whether to create projects for the MP UI code (uix86.dll)" ON)
@@ -184,11 +184,11 @@ endif()
 # Binary names
 #
 #=============================================================================
-set(MPEngine "taystjk.${Architecture}")
-set(MPVanillaRenderer "rd-taystjk_${Architecture}")
+set(MPEngine "nicjk.${Architecture}")
+set(MPVanillaRenderer "rd-nicjk_${Architecture}")
 set(MPVulkanRenderer "rd-vulkant_${Architecture}")
 set(MPRend2 "rd-rend2t_${Architecture}")
-set(MPDed "taystjkded.${Architecture}")
+set(MPDed "nicjkded.${Architecture}")
 set(MPGame "jampgame${Architecture}")
 set(MPCGame "cgame${Architecture}")
 set(MPUI "ui${Architecture}")
