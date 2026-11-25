@@ -12,6 +12,8 @@
 // The normal map (second texture, when in_params.x < 0) is applied through a tangent frame built from screen-space
 // derivatives, so meshes need no tangents. Roughness can come from the base texture's alpha (smoothness), metallic
 // from the normal map's alpha or blue channel; otherwise per-material constants.
+// Glow (animation type 5), the source's emissive light decorations: unlit, the texture's alpha is the intensity,
+// the tint its colour and gain; drawn additively (blend state from the material's shader script).
 // Falling water / foam (animation type 4): white, alpha = (n1.r + n2.r) * n3.b [* m.g] * fade * 0.75 with three
 // scrolling samples of the first texture and optionally one of the second, as in the source material.
 // Alpha test uses the same specialization constants as the generic fragment shader.
@@ -108,7 +110,7 @@ void main() {
 	vec4 color = vec4( base.rgb * lit, base.a * frag_color.a );
 
 	if ( pbr ) {
-		float rough = 0.7, metal = 0.0;
+		float rough = 0.85, metal = 0.0;
 		int flags = 0;
 		if ( frag_ref > 0.5 ) {
 			float fl = floor( frag_ref / 65536.0 );
@@ -150,8 +152,11 @@ void main() {
 
 		vec3 albedo = pow( min( base.rgb * frag_tint, vec3( 1.0 ) ), vec3( 2.2 ) );
 		vec3 ambL = u_entity.ambientLight.rgb * 1.7, sunL = u_entity.directedLight.rgb * 1.2;
-		vec3 Eamb = pow( ambL * ( 0.72 + 0.28 * N.z ), vec3( 2.2 ) );
-		vec3 Esun = ( pow( ambL + sunL, vec3( 2.2 ) ) - pow( ambL, vec3( 2.2 ) ) ) * ( ndl * vis );
+		// the classic path's light, split into its ambient and sun parts in linear terms: a rough non-metal ends up
+		// exactly as bright as there
+		vec3 ambF = ambL * max( dot( N, L ), 0.5 );
+		vec3 Eamb = pow( ambF, vec3( 2.2 ) );
+		vec3 Esun = pow( ambF + sunL * ( ndl * vis ), vec3( 2.2 ) ) - Eamb;
 
 		vec3 F0 = mix( vec3( 0.04 ), albedo, metal );
 		float a2 = rough * rough; a2 *= a2;
@@ -167,9 +172,9 @@ void main() {
 		vec3 skyc = ( R.z > 0.0 ) ? mix( u_tw.skyHorizon.rgb, u_tw.skyZenith.rgb, pow( R.z, 0.5 ) ) : u_tw.skyHorizon.rgb * mix( 1.0, 0.35, clamp( -R.z * 4.0, 0.0, 1.0 ) );
 		vec3 env = pow( skyc * 0.7, vec3( 2.2 ) );
 		vec3 Fr = F0 + ( max( vec3( 1.0 - rough ), F0 ) - F0 ) * pow( 1.0 - ndv, 5.0 );
-		vec3 specAmb = env * Fr * ( 1.0 - 0.75 * rough );
+		vec3 specAmb = env * Fr * ( ( 1.0 - rough ) * ( 1.0 - rough ) );		// rough surfaces show no sky reflection
 
-		vec3 kd = ( 1.0 - F0 ) * ( 1.0 - metal );
+		vec3 kd = vec3( 1.0 - metal );
 		vec3 lin = kd * albedo * ( Eamb + Esun ) + specSun + specAmb;
 		color.rgb = pow( lin, vec3( 1.0 / 2.2 ) );
 	}
@@ -188,6 +193,8 @@ void main() {
 		float glint = pow( max( dot( R, u_entity.localLightOrigin.xyz ), 0.0 ), 1500.0 ) * 3.0 * vis;
 		color.rgb = lit * ( 1.0 - F ) + sky * ( F * 0.7 ) + u_entity.directedLight.rgb * glint;	// 0.7: part of what a real surface would mirror is buildings, not sky
 		color.a = mix( frag_color.a, 1.0, F );
+	} else if ( frag_anim.x > 4.5 ) {
+		color = vec4( frag_tint * base.a, 1.0 );
 	} else if ( frag_anim.x > 3.5 ) {
 		float t = frag_anim.y;
 		vec2 uv = vec2( frag_tex_coord.x, 1.0 - frag_tex_coord.y );		// the source's UV space (V up)
