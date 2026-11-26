@@ -182,6 +182,14 @@ if cc.get("drop_terrain_under_floors", True) and len(terr):
                 k = gx * 1000003 + gy
                 if k in want:
                     bucket.setdefault(k, []).append(i)
+    bucket2 = {}
+    for i in range(len(F)):
+        if (gx1[i] - gx0[i] + 1) * (gy1[i] - gy0[i] + 1) > 4096:
+            continue
+        for gx in range(gx0[i], gx1[i] + 1):
+            for gy in range(gy0[i], gy1[i] + 1):
+                bucket2.setdefault(gx * 1000003 + gy, []).append(i)
+    bucket2 = {k: np.array(v) for k, v in bucket2.items()}
     drop = np.zeros(len(TT), bool)
     for k, ti in want.items():
         fi = bucket.get(k)
@@ -197,6 +205,30 @@ if cc.get("drop_terrain_under_floors", True) and len(terr):
         z = a[None, :, 2] + u * e1[None, :, 2] + v * e2[None, :, 2]
         hz = (z - P_[:, None, 2])
         drop[ti] = (inside & (hz > GAP) & (hz < REACH)).any(1)
+    # only where the floor above covers a wide area (plazas, terraces, the palace): not under bridges, balconies,
+    # awnings or hedges, where the ground is visible and walkable. Test four points around each dropped centre
+    RAD = float(cc.get("floor_cover_radius_units", 300.0))
+    if RAD > 0 and drop.any():
+        keep_any = np.zeros(len(TT), bool)
+        idx = np.flatnonzero(drop)
+        for ox, oy in ((RAD, 0.0), (-RAD, 0.0), (0.0, RAD), (0.0, -RAD)):
+            Q = C_[idx] + np.array([ox, oy, 0.0])
+            qx = np.floor(Q[:, 0] / CELL_).astype(np.int64); qy = np.floor(Q[:, 1] / CELL_).astype(np.int64)
+            covered = np.zeros(len(idx), bool)
+            for n_, (kx, ky) in enumerate(zip(qx, qy)):
+                fi = bucket2.get(int(kx * 1000003 + ky))
+                if fi is None:
+                    continue
+                a = F[fi, 0]; e1 = F[fi, 1] - a; e2 = F[fi, 2] - a
+                det = e1[:, 0] * e2[:, 1] - e1[:, 1] * e2[:, 0]
+                ddx = Q[n_, 0] - a[:, 0]; ddy = Q[n_, 1] - a[:, 1]
+                with np.errstate(divide="ignore", invalid="ignore"):
+                    u = (ddx * e2[:, 1] - ddy * e2[:, 0]) / det; v = (ddy * e1[:, 0] - ddx * e1[:, 1]) / det
+                ins = (np.abs(det) > 1e-9) & (u >= 0) & (v >= 0) & (u + v <= 1)
+                hz = a[:, 2] + u * e1[:, 2] + v * e2[:, 2] - Q[n_, 2]
+                covered[n_] = bool((ins & (hz > GAP) & (hz < REACH)).any())
+            keep_any[idx[~covered]] = True
+        drop &= ~keep_any
     terr = terr.reshape(-1, 3, 3)[~drop].reshape(-1, *terr.shape[1:]) if terr.ndim == 3 else terr[~drop]
     under_info.update({"terrain_tris_dropped_under_floors": int(drop.sum()), "terrain_tris_kept": int(len(terr))})
 print("terrain under floors:", under_info)

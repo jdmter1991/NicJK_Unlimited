@@ -102,7 +102,7 @@ def analyse(run):
         by_client.setdefault(p[1], []).append(p)
     for t, mod, cl, x, y, z, name in D:
         if mod == MOD_TRIGGER_HURT:
-            prev = [p for p in by_client.get(cl, []) if p[0] <= t and p[4] > z + 200]
+            prev = [p for p in by_client.get(cl, []) if p[0] <= t and p[5] == 1 and p[4] > z + 200]       # last time on solid ground
             fell.append(list(prev[-1][2:5]) if prev else [x, y, z])
         elif mod == MOD_WATER:
             drowned.append([x, y, z])

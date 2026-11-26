@@ -163,3 +163,28 @@ Suicides may be bots killing themselves when stuck; to be matched with positions
   ground tiles (`gt_<x>_<y>`, e.g. gt_7_15 / gt_8_15 / gt_7_16 / gt_8_16 as found earlier): each tile is baked on its
   own and they do not match. Fix: bake the ground tiles with the same exposure and colour scale, then blend a strip
   along every tile border; verify by sampling the colour on both sides of every border.
+
+## Round 2 (2026-11-26 evening): fixes and three 20-minute bot runs
+
+Changes: exact source terrain and water (no lowering, no generated water); collision export with cut-out materials
+solid (crates, chairs, speeder, metal fences), hedges as blocks (bushes named "nocollision" stay passable), vertex
+welding before reduction, budget 8 % (100-2000 triangles per object, boxes below 1 m); no terrain collision where a
+wide floor covers it (13,419 triangles); bot-only walls (monster clip) along open-water edges, 320 units high
+(2,174 brushes); a kill volume over the hull floor. Map file 910 MB (was 277 MB): too large, the writer needs
+optimising before a release. Floor check: 89.5 % of drawn floors have collision within 64 units; the remaining holes
+are mostly roofs, backdrop cliffs and terrain hidden under building floors; on walkable surfaces mainly quay stone
+tiles (149 samples), concrete (66) and projected paving (51).
+
+Bot runs (31 bots, spectator, positions every 2 s; `naboo\bottests\run1..3`, analysis.md in each):
+
+| | run 1 | run 2 | run 3 |
+|---|---|---|---|
+| positions below the ground | 7 | 16 | 22 |
+| fell out of the world | 4 | 7 | 5 |
+| stuck 30 s or more | 21 | 19 | 29 |
+| time in water | 23 % | 18 % | 16 % |
+
+Worst spots (all runs, `run3\analysis_all_runs.json`): falling out near `setviewpos 455 -414 40 0` (one gap, most
+falls); stuck at `setviewpos -3379 -14475 -52 0` (16 times); water entered mostly from low banks and steps around
+x -5016 y -10104 and x 5126 y -8050 (bots step in from about 40 units above the surface, where the bot walls do not
+stand). Beta 2 pk3s built from this state and installed in the Steam install (beta 1 kept in backups).

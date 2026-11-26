@@ -34,12 +34,13 @@
    "collision": {
     "box_below_extent_m": 1.0,
     "skip_below_extent_m": 0.3,
-    "decimate_fraction": 0.25,
-    "decimate_min_tris": 150,
-    "decimate_max_tris": 6000,
+    "decimate_fraction": 0.08,
+    "decimate_min_tris": 100,
+    "decimate_max_tris": 2000,
     "planar_first": true,
     "planar_angle_deg": 1.0,
-    "terrain_stride": 2
+    "terrain_stride": 2,
+    "weld_m": 0.005
    }
   }
  },
@@ -113,7 +114,8 @@
   "plane_tolerance": 0.05,
   "line_tolerance": 0.05,
   "merge_max_corners": 12,
-  "merge_max_extent": 1024.0
+  "merge_max_extent": 1024.0,
+  "bot_wall_above": 320.0
  },
  "shadow": {
   "size": 6912,
@@ -166,5 +168,8 @@
  "carve_terrain_under_water": false,
  "water_gap_m": 0.0,
  "far_water_gap_m": 0.0,
- "_note_exact_geometry": "2026-11-26, user: the whole map's geometry should match the source file exactly. Terrain lowering under water and generated gap-fill water are off; only invisible gameplay helpers (deep-water floor, kill volume, bot walls) are added."
+ "_note_exact_geometry": "2026-11-26, user: the whole map's geometry should match the source file exactly. Terrain lowering under water and generated gap-fill water are off; only invisible gameplay helpers (deep-water floor, kill volume, bot walls) are added.",
+ "collision_terrain": {
+  "floor_cover_radius_units": 300.0
+ }
 }

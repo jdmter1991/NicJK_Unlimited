@@ -307,6 +307,41 @@ def water_edge_walls(wb):
     wet = np.zeros((ny + 2, nx + 2), bool); top = np.full((ny + 2, nx + 2), np.nan)
     for k in range(len(wb)):
         wet[jy[k] + 1, i0[k] + 1:i1[k] + 1] = True; top[jy[k] + 1, i0[k] + 1:i1[k] + 1] = wb[k, 1, 2]
+    # open water: no solid surface above the water within reach. The source's water continues under quay paving and
+    # bridges; walls belong where open water meets anything else (the quay edge), not at the hidden wet/dry line
+    jj_, ii_ = np.nonzero(wet)
+    cxs = X0 + (ii_ - 1 + 0.5) * cs; cys = Y0 + (jj_ - 1 + 0.5) * cs; tps = top[jj_, ii_]
+    U_ = tris
+    nz_ = np.cross(U_[:, 1] - U_[:, 0], U_[:, 2] - U_[:, 0])
+    tmin_ = U_.min(1); tmax_ = U_.max(1)
+    sel_ = (tmax_[:, 2] > np.nanmin(tps) + 8) & (tmin_[:, 2] < np.nanmax(tps) + 600) & (tmax_[:, 0] >= cxs.min()) & (tmin_[:, 0] <= cxs.max())         & (tmax_[:, 1] >= cys.min()) & (tmin_[:, 1] <= cys.max()) & (np.abs(nz_[:, 2]) > 1e-6)
+    U_ = U_[sel_]; tmin_ = tmin_[sel_]; tmax_ = tmax_[sel_]
+    CELLW = 256.0
+    bx0 = np.floor(tmin_[:, 0] / CELLW).astype(np.int64); bx1 = np.floor(tmax_[:, 0] / CELLW).astype(np.int64)
+    by0 = np.floor(tmin_[:, 1] / CELLW).astype(np.int64); by1 = np.floor(tmax_[:, 1] / CELLW).astype(np.int64)
+    bk = {}
+    for t_ in np.flatnonzero((bx1 - bx0 + 1) * (by1 - by0 + 1) <= 256):
+        for gx_ in range(bx0[t_], bx1[t_] + 1):
+            for gy_ in range(by0[t_], by1[t_] + 1):
+                bk.setdefault((gx_, gy_), []).append(t_)
+    covered = np.zeros(len(cxs), bool)
+    kx_ = np.floor(cxs / CELLW).astype(np.int64); ky_ = np.floor(cys / CELLW).astype(np.int64)
+    for key in set(zip(kx_.tolist(), ky_.tolist())):
+        fi = bk.get(key)
+        if not fi:
+            continue
+        fi = np.array(fi); a = U_[fi, 0]; e1 = U_[fi, 1] - a; e2 = U_[fi, 2] - a
+        det = e1[:, 0] * e2[:, 1] - e1[:, 1] * e2[:, 0]
+        pi = np.flatnonzero((kx_ == key[0]) & (ky_ == key[1]))
+        dxw = cxs[pi][:, None] - a[None, :, 0]; dyw = cys[pi][:, None] - a[None, :, 1]
+        with np.errstate(divide="ignore", invalid="ignore"):
+            u = (dxw * e2[None, :, 1] - dyw * e2[None, :, 0]) / det[None, :]; v = (dyw * e1[None, :, 0] - dxw * e1[None, :, 1]) / det[None, :]
+        ins = (np.abs(det)[None, :] > 1e-6) & (u >= 0) & (v >= 0) & (u + v <= 1)
+        hz = a[None, :, 2] + u * e1[None, :, 2] + v * e2[None, :, 2] - tps[pi][:, None]
+        covered[pi] = (ins & (hz > 8) & (hz < 600)).any(1)
+    wet_open = np.zeros_like(wet); wet_open[jj_[~covered], ii_[~covered]] = True
+    print("water cells %d, open %d, under a floor or bridge %d" % (len(cxs), int((~covered).sum()), int(covered.sum())))
+    wet = wet_open
     th = float(_w.get("bot_wall_thickness", 8.0)); below = float(_w.get("bot_wall_below", 16.0)); above = float(_w.get("bot_wall_above", 128.0))
     out = []
     # edges facing -x / +x: walls along y, merged over consecutive rows of the same column

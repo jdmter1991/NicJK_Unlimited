@@ -418,6 +418,16 @@ if "collision" in steps:
             cache[me.name] = (c, f, "box", len(a["tri_verts"]), len(tv)); return cache[me.name]
         used = np.unique(tv); remap = np.full(len(a["pos"]), -1, np.int64); remap[used] = np.arange(len(used))
         P = a["pos"][used]; T = remap[tv].astype(np.int32)
+        # weld vertices split along texture seams and hard edges (same place within 5 mm): reducing a mesh made of
+        # loose pieces tears it apart and leaves gaps; a connected mesh keeps closed while it is reduced
+        if cc.get("weld_m", 0.005) > 0:
+            q_ = np.round(P / float(cc.get("weld_m", 0.005))).astype(np.int64)
+            uq_, inv_ = np.unique(q_, axis=0, return_inverse=True); inv_ = inv_.ravel()
+            first_ = np.zeros(len(uq_), np.int64); first_[inv_[::-1]] = np.arange(len(inv_))[::-1]
+            P = P[first_]; T = inv_[T].astype(np.int32)
+            T = T[(T[:, 0] != T[:, 1]) & (T[:, 1] != T[:, 2]) & (T[:, 0] != T[:, 2])]
+            if len(T) == 0:
+                cache[me.name] = (None, None, "none", len(a["tri_verts"]), 0); return cache[me.name]
         ext = P.max(0) - P.min(0)
         n_solid = len(T)
         if ext.max() < cc["box_below_extent_m"]:

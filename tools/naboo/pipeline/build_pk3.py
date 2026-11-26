@@ -18,7 +18,7 @@ small = [("maps/" + f) for f in maps] + [("shaders/" + f) for f in shaders if os
 for d in ("models/map_objects/" + mapname, "music/" + mapname, "textures/naboo/env"):
     for f in sorted(os.listdir(os.path.join(mod, d))) if os.path.isdir(os.path.join(mod, d)) else []:
         small.append(d + "/" + f)
-for f in ("scripts/%s.arena" % mapname, "levelshots/%s.jpg" % mapname, "levelshots_16_9/%s.jpg" % mapname):
+for f in ("%s_readme.txt" % mapname, "scripts/%s.arena" % mapname, "levelshots/%s.jpg" % mapname, "levelshots_16_9/%s.jpg" % mapname):
     if os.path.exists(os.path.join(mod, f)):
         small.append(f)
 # texture names: every "textures/naboo/<name>" in the shader files, the PBR side file and the door models
