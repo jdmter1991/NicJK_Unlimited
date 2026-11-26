@@ -68,3 +68,37 @@ Cooked world load: 2.6-3.0 s for an 83 MiB file (326 meshes).
 ## Not measured yet
 
 A properly timed client benchmark (longer segments, with bots), memory and VRAM, whole-map numbers, 32 bots.
+
+## 2026-11-26, about 03:30: bots, four resolutions, frame-time consistency
+
+Machine: Intel 16-thread CPU (see BUILD.md), 16 GB RAM, GeForce RTX 2070 8 GB, 2560 x 1440 screen. Idle otherwise.
+Engine `naboo-theed` after the culling / front-to-back / interior-visibility commit. `tools\run_bench.sh`:
+dedicated server with 31 bots from the user's list (skill 5), client spectating at five fixed viewpoints and then
+following a bot, about 4,000 frames each, uncapped; figures from the renderer's frame-time recorder
+(`r_tworldBench`). One run per resolution (not yet repeated). 4K is rendered at 3840 x 2160 into a 2560 x 1440 window.
+
+Average FPS / 1 % low FPS / worst frame ms:
+
+| Viewpoint | 1280 x 720 | 1920 x 1080 | 2560 x 1440 | 3840 x 2160 |
+|---|---|---|---|---|
+| Palace hall | 111 / 78 / 19 | 111 / 73 / 321 | 113 / 82 / 39 | 99 / 70 / 34 |
+| Avenue from the palace | 114 / 85 / 30 | 107 / 77 / 23 | 114 / 62 / 61 | 93 / 74 / 30 |
+| Market | 147 / 103 / 21 | 142 / 100 / 22 | 140 / 95 / 36 | 103 / 64 / 31 |
+| Lantern court | 158 / 114 / 22 | 155 / 118 / 19 | 146 / 78 / 401 | 100 / 87 / 75 |
+| Overview from above | 187 / 138 / 11 | 172 / 105 / 550 | 189 / 125 / 14 | 140 / 121 / 20 |
+| Following a bot | 185 / 114 / 26 | 195 / 133 / 13 | 185 / 100 / 26 | 125 / 64 / 30 |
+
+GPU memory in use 6.3-6.5 GB of 8 GB; GPU load 63 % at 720p, 77 % at 1080p, 90 % at 1440p, 100 % at 4K.
+
+**Target (125 FPS in the 1 % low) is not met at any resolution.** Reading:
+* 720p to 1440p have the same frame times: the limit is the processor, one thread. Only 4K is limited by the
+  graphics card.
+* Engine timers at 720p with 31 bots: client frame 9-10 ms, of which the renderer front end 0.7-1.7 ms and the
+  cooked-world pass 2.6-3.7 ms (cull 1.0-1.8, fill 0.5-0.7, draw 1.1). The same hall view without bots took 6.3 ms,
+  so the bots cost roughly 3 ms per frame on the client whether or not they are in view (the map has no
+  visibility data, so every player is always sent and processed). That part is not split further.
+* Single frames of 300-550 ms occurred three times in 24 sections; cause not found.
+
+Server alone, bots only (`run_bench.sh server`): 31 bots entered although 32 were requested (the reason was not
+found; no "bot not found" line). 4.7-5.0 ms per server frame on average (budget 25 ms at sv_fps 40), worst frame
+19 ms, none over budget, 2 hitch lines. So 32 bots were not measured.

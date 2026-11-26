@@ -233,6 +233,7 @@ static cvar_t	*r_tworldLamps;
 static cvar_t	*r_tworldIndoor;
 static cvar_t	*r_tworldAO;
 static cvar_t	*r_tworldPortal;
+static cvar_t	*r_tworldBench;
 
 
 static const int64_t		*s_cellKeys;
@@ -555,6 +556,7 @@ void R_LoadTWorld( const char *bspName )
 	r_tworldPBR = ri.Cvar_Get( "r_tworldPBR", "1", CVAR_ARCHIVE_ND, "Cooked world: 1 = physically based shading (normal maps, roughness, metallic), 0 = classic shading" );
 	r_tworldFoliageLight = ri.Cvar_Get( "r_tworldFoliageLight", "0.6", CVAR_ARCHIVE_ND, "Cooked world: share of the ambient light that reaches foliage (1 = lit like open surfaces)" );
 	r_tworldHaze = ri.Cvar_Get( "r_tworldHaze", "110000", CVAR_ARCHIVE_ND, "Cooked world: distance in world units at which haze has taken half of the view (0 = no haze)" );
+	r_tworldBench = ri.Cvar_Get( "r_tworldBench", "0", CVAR_TEMP, "Cooked world: benchmark section label; every change prints the frame-time figures of the section that ended (0 = off)" );
 	r_tworldPortal = ri.Cvar_Get( "r_tworldPortal", "1", CVAR_ARCHIVE_ND, "Cooked world: inside an interior, draw the outside only through its openings (0 = draw everything)" );
 	r_tworldAO = ri.Cvar_Get( "r_tworldAO", "0.6", CVAR_ARCHIVE_ND, "Cooked world: strength of the baked ambient occlusion of each mesh (0 = off)" );
 	r_tworldIndoor = ri.Cvar_Get( "r_tworldIndoor", "0.55", CVAR_ARCHIVE_ND, "Cooked world: share of the ambient light inside fully enclosed spaces (1 = no darkening)" );
@@ -1563,6 +1565,42 @@ void RB_SurfaceTWorld( void *surface )
 	RB_BeginSurface( savedShader, savedFog );
 
 stats:
+	// benchmark recorder: frame times between two changes of r_tworldBench (a label). Each change prints the
+	// finished section: frames, average, 1 % low (99th-percentile frame time) and the worst frame.
+	if ( pass == 0 && r_tworldBench && backEnd.viewParms.portalView == PV_NONE ) {
+		static double	lastT = 0.0, sumMs = 0.0, worstMs = 0.0;
+		static int		hist[800], frames = 0, lastMod = -1;		// 0.25 ms bins up to 200 ms
+		static char		label[64] = "";
+		const double	t = TW_Now();
+		if ( lastT > 0.0 && label[0] ) {
+			const double ms = t - lastT;
+			int b = (int)( ms * 4.0 );
+			hist[b < 0 ? 0 : ( b > 799 ? 799 : b )]++;
+			sumMs += ms; frames++;
+			if ( ms > worstMs ) worstMs = ms;
+		}
+		lastT = t;
+		if ( r_tworldBench->modificationCount != lastMod ) {
+			lastMod = r_tworldBench->modificationCount;
+			if ( label[0] && frames > 10 ) {
+				int acc = 0, b = 799;
+				const int cut = frames / 100;
+				for ( ; b > 0; b-- ) {
+					acc += hist[b];
+					if ( acc > cut )
+						break;
+				}
+				ri.Printf( PRINT_ALL, "TWBENCH %s: frames %i, avg %.1f fps (%.2f ms), 1%% low %.1f fps (%.2f ms), worst frame %.1f ms, %i x %i, %i placements, %i draws, %i tris\n",
+					label, frames, 1000.0 * frames / sumMs, sumMs / frames, 1000.0 / ( ( b + 1 ) * 0.25 ), ( b + 1 ) * 0.25, worstMs,
+					glConfig.vidWidth, glConfig.vidHeight, tw->c_instances, tw->c_draws, tw->c_indexes / 3 );
+			}
+			Q_strncpyz( label, r_tworldBench->string, sizeof( label ) );
+			if ( !Q_stricmp( label, "0" ) || !Q_stricmp( label, "off" ) )
+				label[0] = 0;
+			Com_Memset( hist, 0, sizeof( hist ) );
+			sumMs = worstMs = 0.0; frames = 0;
+		}
+	}
 	if ( pass == 0 && r_tworldStats && r_tworldStats->integer && backEnd.viewParms.portalView == PV_NONE ) {
 		const int now = ri.Milliseconds();
 		static int statFrames = 0;
