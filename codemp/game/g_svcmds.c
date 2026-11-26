@@ -25,6 +25,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 // this file holds commands that can be executed by the server console, but not remote clients
 
 #include "g_local.h"
+#include "bg_animremap.h"
 
 /*
 ==============================================================================
@@ -1645,6 +1646,19 @@ void Svcmd_ClanKick_f( void );
 void Svcmd_ClanCreate_f( void );
 void Svcmd_ClanDelete_f( void );
 
+// NicJK animremap.cfg (per-model animation remapping)
+static void Svcmd_AnimRemapList_f( void ) {
+	if ( !g_animRemap.integer )
+		Com_Printf( "AnimRemap: g_animRemap is 0, remaps are not used on this server\n" );
+	BG_AnimRemap_List();
+	G_AnimRemap_ListClients();
+}
+
+static void Svcmd_AnimRemapReload_f( void ) {
+	BG_AnimRemap_Reload();
+	BG_AnimRemap_List();
+}
+
 /* This array MUST be sorted correctly by alphabetical name field */
 svcmd_t svcmds[] = {
 	{ "accountInfo",				Svcmd_AccountInfo_f,				qfalse },
@@ -1664,6 +1678,9 @@ svcmd_t svcmds[] = {
 	{ "amban",						Svcmd_AmBan_f,						qfalse },
 	{ "amgrantadmin",				Svcmd_Amgrantadmin_f,				qfalse },
 	{ "amkick",						Svcmd_AmKick_f,						qfalse },
+
+	{ "animremap_list",				Svcmd_AnimRemapList_f,				qfalse },
+	{ "animremap_reload",			Svcmd_AnimRemapReload_f,			qfalse },
 
 	{ "botlist",					Svcmd_BotList_f,					qfalse },
 

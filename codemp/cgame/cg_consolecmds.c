@@ -26,6 +26,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 // executed by a key binding
 
 #include "cg_local.h"
+#include "game/bg_animremap.h"
 #include "game/bg_saga.h"
 #include "ui/ui_shared.h"
 
@@ -2444,6 +2445,24 @@ int cmdcmp( const void *a, const void *b ) {
 	return Q_stricmp( (const char *)a, ((consoleCommand_t*)b)->cmd );
 }
 
+// NicJK animremap.cfg (per-model animation remapping)
+static void CG_AnimRemapList_f( void ) {
+	if ( !cg_animRemap.integer )
+		trap->Print( "AnimRemap: cg_animRemap is 0, remapped animations are not shown\n" );
+	BG_AnimRemap_List();
+}
+
+static void CG_AnimRemapReload_f( void ) {
+	int i;
+	BG_AnimRemap_Reload();
+	BG_AnimRemap_List();
+	// restart everyone's current animation so the new frames show at once
+	for ( i = 0; i < MAX_CLIENTS; i++ ) {
+		cg_entities[i].pe.legs.animationNumber = -1;
+		cg_entities[i].pe.torso.animationNumber = -1;
+	}
+}
+
 static consoleCommand_t	commands[] = {
 	{ "+scores",					CG_ScoresDown_f },
 	{ "-scores",					CG_ScoresUp_f },
@@ -2518,6 +2537,8 @@ static consoleCommand_t	commands[] = {
 	{ "stylePlayer",				CG_StylePlayer_f },
 	{ "speedometer",				CG_SpeedometerSettings_f },
 	{ "cosmetics",					CG_Cosmetics_f },
+	{ "cg_animremap_list",			CG_AnimRemapList_f },
+	{ "cg_animremap_reload",		CG_AnimRemapReload_f },
 	{ "chatlog",					CG_ChatLogSettings_f },
 
 	{ "addSpeedsound",				CG_AddSpeedpoint_f },

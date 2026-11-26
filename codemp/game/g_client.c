@@ -25,6 +25,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "g_local.h"
 #include "ghoul2/G2.h"
 #include "bg_saga.h"
+#include "bg_animremap.h"
 
 // g_client.c -- client functions that don't happen every frame
 
@@ -2824,6 +2825,7 @@ qboolean ClientUserinfoChanged(int clientNum) { //I think anything treated as an
 	Q_strcat(buf, sizeof(buf), va("n\\%s\\", client->pers.netname));
 	Q_strcat(buf, sizeof(buf), va("t\\%i\\", client->sess.sessionTeam));
 	Q_strcat(buf, sizeof(buf), va("model\\%s\\", model));
+	G_AnimRemap_SetClientModel(clientNum, model);
 	if (gender == GENDER_FEMALE)	Q_strcat(buf, sizeof(buf), va("ds\\%c\\", 'f'));
 	else							Q_strcat(buf, sizeof(buf), va("ds\\%c\\", 'm'));
 	Q_strcat(buf, sizeof(buf), va("st\\%s\\", client->pers.saber1));
@@ -3453,6 +3455,55 @@ void G_BreakArm(gentity_t *ent, int arm)
 //Update the ghoul2 instance anims based on the playerstate values
 qboolean BG_SaberStanceAnim( int anim );
 qboolean PM_RunningAnim( int anim );
+// NicJK animremap.cfg: each client's "model/skin" as sent to the other clients
+static char g_animRemapModel[MAX_CLIENTS][MAX_QPATH];
+
+void G_AnimRemap_SetClientModel(int clientNum, const char *modelSkin)
+{
+	if (clientNum >= 0 && clientNum < MAX_CLIENTS)
+		Q_strncpyz(g_animRemapModel[clientNum], modelSkin ? modelSkin : "", sizeof(g_animRemapModel[clientNum]));
+}
+
+static qboolean G_AnimRemap_ClientModel(gentity_t *ent, char *model, char *skin, int size)
+{
+	if (!g_animRemap.integer || !ent->client || ent->s.number >= MAX_CLIENTS || ent->localAnimIndex != 0)
+		return qfalse;
+	BG_AnimRemap_SplitModel(g_animRemapModel[ent->s.number], model, size, skin, size);
+	return model[0] ? qtrue : qfalse;
+}
+
+void G_AnimRemap_ListClients(void)
+{
+	int i;
+	for (i = 0; i < level.maxclients; i++)
+	{
+		gentity_t *ent = &g_entities[i];
+		if (!ent->inuse || !ent->client || ent->client->pers.connected != CON_CONNECTED)
+			continue;
+		Com_Printf("  client %d: model %s, skeleton %d, %s\n", i, g_animRemapModel[i], ent->localAnimIndex,
+			G_AnimRemap_Visual(ent) != bgAllAnims[ent->localAnimIndex].anims ? "remapped" : "normal animations");
+	}
+}
+
+// Frames used to pose this client's server-side Ghoul2 model (what saber traces hit)
+const animation_t *G_AnimRemap_Visual(gentity_t *ent)
+{
+	char model[MAX_QPATH], skin[MAX_QPATH];
+	if (G_AnimRemap_ClientModel(ent, model, skin, sizeof(model)))
+		return BG_AnimRemap_Visual(ent->s.number, ent->localAnimIndex, model, skin);
+	return bgAllAnims[ent->localAnimIndex].anims;
+}
+
+// Table for this client's pmove: only differs for lines in "timing" mode
+animation_t *G_AnimRemap_Pmove(gentity_t *ent)
+{
+	char model[MAX_QPATH], skin[MAX_QPATH];
+	animation_t *t = NULL;
+	if (G_AnimRemap_ClientModel(ent, model, skin, sizeof(model)))
+		t = BG_AnimRemap_Pmove(ent->s.number, ent->localAnimIndex, model, skin);
+	return t ? t : bgAllAnims[ent->localAnimIndex].anims;
+}
+
 void G_UpdateClientAnims(gentity_t *self, float animSpeedScale)
 {
 	static int f;
@@ -3462,6 +3513,7 @@ void G_UpdateClientAnims(gentity_t *self, float animSpeedScale)
 	static int aFlags;
 	static float animSpeed, lAnimSpeedScale;
 	qboolean setTorso = qfalse;
+	const animation_t *remapAnims = G_AnimRemap_Visual(self);
 
 	torsoAnim = (self->client->ps.torsoAnim);
 	legsAnim = (self->client->ps.legsAnim);
@@ -3475,18 +3527,18 @@ void G_UpdateClientAnims(gentity_t *self, float animSpeedScale)
 	}
 
 	if (self->localAnimIndex > 1 &&
-		bgAllAnims[self->localAnimIndex].anims[legsAnim].firstFrame == 0 &&
-		bgAllAnims[self->localAnimIndex].anims[legsAnim].numFrames == 0)
+		remapAnims[legsAnim].firstFrame == 0 &&
+		remapAnims[legsAnim].numFrames == 0)
 	{ //We'll allow this for non-humanoids.
 		goto tryTorso;
 	}
 
 	if (self->client->legsAnimExecute != legsAnim || self->client->legsLastFlip != self->client->ps.legsFlip)
 	{
-		animSpeed = 50.0f / bgAllAnims[self->localAnimIndex].anims[legsAnim].frameLerp;
+		animSpeed = 50.0f / remapAnims[legsAnim].frameLerp;
 		lAnimSpeedScale = (animSpeed *= animSpeedScale);
 
-		if (bgAllAnims[self->localAnimIndex].anims[legsAnim].loopFrames != -1)
+		if (remapAnims[legsAnim].loopFrames != -1)
 		{
 			aFlags = BONE_ANIM_OVERRIDE_LOOP;
 		}
@@ -3497,13 +3549,13 @@ void G_UpdateClientAnims(gentity_t *self, float animSpeedScale)
 
 		if (animSpeed < 0)
 		{
-			lastFrame = bgAllAnims[self->localAnimIndex].anims[legsAnim].firstFrame;
-			firstFrame = bgAllAnims[self->localAnimIndex].anims[legsAnim].firstFrame + bgAllAnims[self->localAnimIndex].anims[legsAnim].numFrames;
+			lastFrame = remapAnims[legsAnim].firstFrame;
+			firstFrame = remapAnims[legsAnim].firstFrame + remapAnims[legsAnim].numFrames;
 		}
 		else
 		{
-			firstFrame = bgAllAnims[self->localAnimIndex].anims[legsAnim].firstFrame;
-			lastFrame = bgAllAnims[self->localAnimIndex].anims[legsAnim].firstFrame + bgAllAnims[self->localAnimIndex].anims[legsAnim].numFrames;
+			firstFrame = remapAnims[legsAnim].firstFrame;
+			lastFrame = remapAnims[legsAnim].firstFrame + remapAnims[legsAnim].numFrames;
 		}
 
 		aFlags |= BONE_ANIM_BLEND; //since client defaults to blend. Not sure if this will make much difference if any on server position, but it's here just for the sake of matching them.
@@ -3515,8 +3567,8 @@ void G_UpdateClientAnims(gentity_t *self, float animSpeedScale)
 
 tryTorso:
 	if (self->localAnimIndex > 1 &&
-		bgAllAnims[self->localAnimIndex].anims[torsoAnim].firstFrame == 0 &&
-		bgAllAnims[self->localAnimIndex].anims[torsoAnim].numFrames == 0)
+		remapAnims[torsoAnim].firstFrame == 0 &&
+		remapAnims[torsoAnim].numFrames == 0)
 
 	{ //If this fails as well just return.
 		return;
@@ -3537,10 +3589,10 @@ tryTorso:
 
 		BG_SaberStartTransAnim(self->s.number, self->client->ps.fd.saberAnimLevel, self->client->ps.weapon, f, &animSpeedScale, self->client->ps.brokenLimbs);
 
-		animSpeed = 50.0f / bgAllAnims[self->localAnimIndex].anims[f].frameLerp;
+		animSpeed = 50.0f / remapAnims[f].frameLerp;
 		lAnimSpeedScale = (animSpeed *= animSpeedScale);
 
-		if (bgAllAnims[self->localAnimIndex].anims[f].loopFrames != -1)
+		if (remapAnims[f].loopFrames != -1)
 		{
 			aFlags = BONE_ANIM_OVERRIDE_LOOP;
 		}
@@ -3553,13 +3605,13 @@ tryTorso:
 
 		if (animSpeed < 0)
 		{
-			lastFrame = bgAllAnims[self->localAnimIndex].anims[f].firstFrame;
-			firstFrame = bgAllAnims[self->localAnimIndex].anims[f].firstFrame + bgAllAnims[self->localAnimIndex].anims[f].numFrames;
+			lastFrame = remapAnims[f].firstFrame;
+			firstFrame = remapAnims[f].firstFrame + remapAnims[f].numFrames;
 		}
 		else
 		{
-			firstFrame = bgAllAnims[self->localAnimIndex].anims[f].firstFrame;
-			lastFrame = bgAllAnims[self->localAnimIndex].anims[f].firstFrame + bgAllAnims[self->localAnimIndex].anims[f].numFrames;
+			firstFrame = remapAnims[f].firstFrame;
+			lastFrame = remapAnims[f].firstFrame + remapAnims[f].numFrames;
 		}
 
 		trap->G2API_SetBoneAnim(self->ghoul2, 0, "lower_lumbar", firstFrame, lastFrame, aFlags, lAnimSpeedScale, level.time, /*firstFrame why was it this before?*/-1, 150);
@@ -3590,7 +3642,7 @@ tryTorso:
 			int armFlags = 0;
 			float armAnimSpeed;
 
-			armAnim = &bgAllAnims[self->localAnimIndex].anims[ BOTH_DEAD21 ];
+			armAnim = &remapAnims[ BOTH_DEAD21 ];
 			self->client->brokenLimbs = self->client->ps.brokenLimbs;
 
 			armFirstFrame = armAnim->firstFrame;
@@ -3626,7 +3678,7 @@ tryTorso:
 					self->client->ps.weapon == WP_SABER ||
 					self->client->ps.weapon == WP_BRYAR_PISTOL)
 				{ //don't affect this arm if holding a gun, just make the other arm support it
-					armAnim = &bgAllAnims[self->localAnimIndex].anims[ BOTH_ATTACK2 ];
+					armAnim = &remapAnims[ BOTH_ATTACK2 ];
 
 					//armFirstFrame = armAnim->firstFrame;
 					armFirstFrame = armAnim->firstFrame+armAnim->numFrames;
@@ -3646,7 +3698,7 @@ tryTorso:
 					(self->client->ps.torsoAnim == TORSO_WEAPONREADY2 || self->client->ps.torsoAnim == BOTH_ATTACK2 || self->client->ps.weapon < WP_BRYAR_PISTOL))
 				{
 					//Now set the left arm to "support" the right one
-					armAnim = &bgAllAnims[self->localAnimIndex].anims[ BOTH_STAND2 ];
+					armAnim = &remapAnims[ BOTH_STAND2 ];
 					armFirstFrame = armAnim->firstFrame;
 					armLastFrame = armAnim->firstFrame+armAnim->numFrames;
 					armAnimSpeed = 50.0f / armAnim->frameLerp;

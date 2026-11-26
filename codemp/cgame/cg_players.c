@@ -25,6 +25,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "cg_local.h"
 #include "ghoul2/G2.h"
 #include "game/bg_saga.h"
+#include "game/bg_animremap.h"
 #include "cJSON.h"
 #include "hud_tribes.h"
 
@@ -3165,6 +3166,38 @@ void CG_PlayerAnimEventDo( centity_t *cent, animevent_t *animEvent )
 }
 
 /*
+NicJK animremap.cfg: frames this client's model shows for each animation number.
+Animation numbers (what the server sends and the game code checks) never change.
+*/
+const animation_t *CG_AnimRemapVisual( int entNum, int animIndex, clientInfo_t *ci )
+{
+	if ( cg_animRemap.integer && animIndex == 0 && entNum >= 0 && entNum < MAX_CLIENTS )
+	{
+		if ( !ci )
+			ci = &cgs.clientinfo[entNum];
+		if ( ci->infoValid )
+			return BG_AnimRemap_Visual( entNum, animIndex, ci->modelName, ci->skinName );
+	}
+	return bgAllAnims[animIndex].anims;
+}
+
+// Table for predicting the local player: only differs for lines in "timing" mode,
+// and only when the server uses remaps too (g_animRemap in the serverinfo).
+animation_t *CG_AnimRemapPmove( int entNum, int animIndex )
+{
+	clientInfo_t *ci;
+
+	if ( animIndex != 0 || entNum < 0 || entNum >= MAX_CLIENTS )
+		return NULL;
+	if ( !atoi( Info_ValueForKey( CG_ConfigString( CS_SERVERINFO ), "g_animRemap" ) ) )
+		return NULL;
+	ci = &cgs.clientinfo[entNum];
+	if ( !ci->infoValid )
+		return NULL;
+	return BG_AnimRemap_Pmove( entNum, animIndex, ci->modelName, ci->skinName );
+}
+
+/*
 void CG_PlayerAnimEvents( int animFileIndex, int eventFileIndex, qboolean torso, int oldFrame, int frame, const vec3_t org, int entNum )
 
 play any keyframed sounds - only when start a new frame
@@ -3228,7 +3261,7 @@ void CG_PlayerAnimEvents( int animFileIndex, int eventFileIndex, qboolean torso,
 			animation_t *animation;
 
 			inSameAnim = qtrue;
-			animation = &bgAllAnims[animFileIndex].anims[anim];
+			animation = (animation_t *)&CG_AnimRemapVisual( entNum, animFileIndex, NULL )[anim];
 			animBackward = (animation->frameLerp<0);
 			if ( animation->loopFrames != -1 )
 			{//a looping anim!
@@ -3496,7 +3529,7 @@ static void CG_SetLerpFrameAnimation( centity_t *cent, clientInfo_t *ci, lerpFra
 		trap->Error( ERR_DROP, "Bad animation number: %i", newAnimation );
 	}
 
-	anim = &bgAllAnims[cent->localAnimIndex].anims[ newAnimation ];
+	anim = (animation_t *)&CG_AnimRemapVisual( cent->currentState.number, cent->localAnimIndex, ci )[ newAnimation ];
 
 	lf->animation = anim;
 	lf->animationTime = lf->frameTime + abs(anim->frameLerp);
@@ -12806,7 +12839,7 @@ void CG_ForceFPLSPlayerModel(centity_t *cent, clientInfo_t *ci)
 		CG_RegisterClientModelname(ci, ci->modelName, ci->skinName, ci->teamName, cent->currentState.number);
 	}
 
-	anim = &bgAllAnims[cent->localAnimIndex].anims[ cent->currentState.legsAnim ];
+	anim = (animation_t *)&CG_AnimRemapVisual( cent->currentState.number, cent->localAnimIndex, ci )[ cent->currentState.legsAnim ];
 
 	if (anim)
 	{
@@ -12830,7 +12863,7 @@ void CG_ForceFPLSPlayerModel(centity_t *cent, clientInfo_t *ci)
 		cent->currentState.legsAnim = 0;
 	}
 
-	anim = &bgAllAnims[cent->localAnimIndex].anims[ cent->currentState.torsoAnim ];
+	anim = (animation_t *)&CG_AnimRemapVisual( cent->currentState.number, cent->localAnimIndex, ci )[ cent->currentState.torsoAnim ];
 
 	if (anim)
 	{

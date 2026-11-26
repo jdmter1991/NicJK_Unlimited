@@ -28,6 +28,10 @@ Measured on the earlier Korriban map with 32 bots: about 8.6 ms of server time p
 
 Measured uncapped on the earlier Korriban map: 94 to 159 frames per second at the test positions, the same with 31 bots as with 26.
 
+## Per-model animations
+
+`animremap.cfg` lets the same move play a different animation per player model (for example a Sith model's stance, taunt or kata), off unless `g_animRemap` / `cg_animRemap` is set. Gameplay timing stays the same unless a line asks for it. See [NICJK_ANIMREMAP.md](NICJK_ANIMREMAP.md).
+
 ## Bots
 
 The bot AI is the largest part of the fork. It has its own page: [NICJK_BOTS.md](NICJK_BOTS.md).

@@ -36,6 +36,7 @@ set(MPGameGameFiles
 	"${MPDir}/game/ai_util.c"
 	"${MPDir}/game/ai_wpnav.c"
 	"${MPDir}/game/AnimalNPC.c"
+	"${MPDir}/game/bg_animremap.c"
 	"${MPDir}/game/bg_g2_utils.c"
 	"${MPDir}/game/bg_misc.c"
 	"${MPDir}/game/bg_panimate.c"
