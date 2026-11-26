@@ -567,11 +567,19 @@ void R_LoadTWorld( const char *bspName )
 	r_tworldLamps = ri.Cvar_Get( "r_tworldLamps", "1", CVAR_ARCHIVE_ND, "Cooked world: brightness of the local lights (lamps), 0 = off" );
 	r_tworldInstancing = ri.Cvar_Get( "r_tworldInstancing", "1", CVAR_ARCHIVE_ND, "Cooked world: 1 = one instanced draw per mesh level and material, 0 = one draw per placement through the model path" );
 
-	if ( !vk.vboMdvActive )
-		return;
-
 	COM_StripExtension( bspName, name, sizeof( name ) );
 	Q_strcat( name, sizeof( name ), ".tworld" );
+
+	if ( !vk.vboMdvActive ) {
+		// the cooked world is drawn through the model VBO path. Say so instead of showing an empty map, and turn the
+		// (latched, saved) settings on so that the next start of the game or vid_restart draws it
+		if ( ri.FS_ReadFile( name, NULL ) > 0 ) {
+			ri.Printf( PRINT_WARNING, "WARNING: %s is not drawn: it needs r_vbo 1 and r_vbo_models 1. Both are set now; restart the game or type vid_restart.\n", name );
+			ri.Cvar_Set( "r_vbo", "1" );
+			ri.Cvar_Set( "r_vbo_models", "1" );
+		}
+		return;
+	}
 
 	len = ri.FS_ReadFile( name, (void **)&buffer );
 	if ( len <= 0 || !buffer )
