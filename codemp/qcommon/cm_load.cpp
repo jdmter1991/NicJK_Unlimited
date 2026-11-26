@@ -68,6 +68,7 @@ cvar_t		*cm_noCurves;
 cvar_t		*cm_playerCurveClip;
 cvar_t		*cm_extraVerbose;
 cvar_t		*cm_accel;
+cvar_t		*cm_subBSPTree;
 cvar_t		*cm_accelVerify;
 #endif
 
@@ -171,6 +172,10 @@ static void CMod_LoadSubmodels( const lump_t *l, clipMap_t &cm ) {
 
 		// make a "leaf" just to hold the model's brushes and surfaces
 		out->firstNode = -1;
+		// the world model of a misc_bsp part has a node tree of its own (the part's clipMap): traces use it, see
+		// cm_subBSPTree. Its single leaf below is kept, CM_ModelContents reads the brushes from it.
+		if ( i == 0 && cm.numLeafs > 0 )
+			out->firstNode = 0;
 
 		// make a "leaf" just to hold the model's brushes and surfaces
 		out->leaf.numLeafBrushes = LittleLong( in->numBrushes );
@@ -639,6 +644,7 @@ static void CM_LoadMap_Actual( const char *name, qboolean clientload, int *check
 	cm_noCurves = Cvar_Get ("cm_noCurves", "0", CVAR_CHEAT);
 	cm_playerCurveClip = Cvar_Get ("cm_playerCurveClip", "1", CVAR_ARCHIVE_ND|CVAR_CHEAT );
 	cm_extraVerbose = Cvar_Get ("cm_extraVerbose", "0", CVAR_TEMP );
+	cm_subBSPTree = Cvar_Get ("cm_subBSPTree", "1", CVAR_TEMP, "Trace misc_bsp parts through their own BSP tree; 0 tests every brush of the part on each trace (the old behaviour)" );
 	cm_accel = Cvar_Get ("cm_accel", "1", CVAR_TEMP, "Use the per-leaf brush hierarchy for world traces (results are identical to the linear walk)" );
 	cm_accelVerify = Cvar_Get ("cm_accelVerify", "0", CVAR_TEMP, "Run every trace with and without cm_accel and report any difference (slow, debugging)" );
 #endif

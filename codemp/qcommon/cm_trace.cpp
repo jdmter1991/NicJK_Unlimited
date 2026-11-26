@@ -1463,13 +1463,17 @@ static void CM_TraceActual( trace_t *trace, const vec3_t start, const vec3_t end
 		cm_sweep.use = moves ? 1 : 0;
 	}
 
+	// a model without a node tree is one leaf of brushes. The world model of a misc_bsp part has a tree
+	// (firstNode 0 in its own clipMap); cm_subBSPTree 0 treats it as one leaf again
+	const bool modelIsLeaf = cmod->firstNode == -1 || ( model && local != &cmg && cm_subBSPTree && !cm_subBSPTree->integer );
+
 	//
 	// check for position test special case
 	//
 	if (start[0] == end[0] && start[1] == end[1] && start[2] == end[2] &&
 		tw.size[0][0] == 0 && tw.size[0][1] == 0 && tw.size[0][2] == 0)
 	{
-		if ( model && cmod->firstNode == -1)
+		if ( model && modelIsLeaf )
 		{
 #ifdef ALWAYS_BBOX_VS_BBOX // bk010201 - FIXME - compile time flag?
 			if ( model == BOX_MODEL_HANDLE || model == CAPSULE_MODEL_HANDLE)
@@ -1501,7 +1505,7 @@ static void CM_TraceActual( trace_t *trace, const vec3_t start, const vec3_t end
 				CM_TestInLeaf( &tw, *trace, &cmod->leaf, local );
 			}
 		}
-		else if (cmod->firstNode == -1)
+		else if ( modelIsLeaf )
 		{
 			CM_PositionTest( &tw, *trace );
 		}
@@ -1531,7 +1535,7 @@ static void CM_TraceActual( trace_t *trace, const vec3_t start, const vec3_t end
 		//
 		// general sweeping through world
 		//
-		if ( model && cmod->firstNode == -1)
+		if ( model && modelIsLeaf )
 		{
 #ifdef ALWAYS_BBOX_VS_BBOX
 			if ( model == BOX_MODEL_HANDLE || model == CAPSULE_MODEL_HANDLE)

@@ -138,12 +138,24 @@ void CG_BuildSolidList( void ) {
 	}
 
 	dsquared = /*RMG_distancecull.value*/5000+500;
-	dsquared *= dsquared;
 
 	for(i=0;i<cg_numpermanents;i++)
 	{
 		cent = cg_permanents[i];
 		VectorSubtract(cent->lerpOrigin, snap->ps.origin, difference);
+		dsquared = 5000+500;
+		if ( cent->currentState.solid == SOLID_BMODEL && cent->currentState.modelindex > 0 && cent->currentState.modelindex < MAX_MODELS
+			&& cgs.inlineDrawModel[cent->currentState.modelindex] ) {
+			// a brush model (a misc_bsp part) reaches as far as its bounds, not just its origin point: measured from
+			// the middle of the bounds, with their radius added, so a large part stays drawn and solid everywhere in it
+			vec3_t	bmins, bmaxs, mid, half;
+			trap->R_ModelBounds( cgs.inlineDrawModel[cent->currentState.modelindex], bmins, bmaxs );
+			VectorAdd( bmins, bmaxs, mid ); VectorScale( mid, 0.5f, mid );
+			VectorSubtract( bmaxs, bmins, half ); VectorScale( half, 0.5f, half );
+			// the part may be turned about its origin (yaw): the middle's distance from the origin bounds the error
+			dsquared += VectorLength( half ) + VectorLength( mid );
+		}
+		dsquared *= dsquared;
 		if (cent->currentState.eType == ET_TERRAIN ||
 			((difference[0]*difference[0]) + (difference[1]*difference[1]) + (difference[2]*difference[2])) <= dsquared)
 		{

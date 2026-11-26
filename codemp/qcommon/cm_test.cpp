@@ -221,7 +221,7 @@ int CM_PointContents( const vec3_t p, clipHandle_t model ) {
 	if ( model )
 	{
 		clipm = CM_ClipHandleToModel( model, &local );
-		if (clipm->firstNode != -1)
+		if (clipm->firstNode != -1 && !( local != &cmg && cm_subBSPTree && !cm_subBSPTree->integer ))
 		{
 			leafnum = CM_PointLeafnum_r (p, 0, local);
 			leaf = &local->leafs[leafnum];

@@ -185,6 +185,7 @@ extern	cvar_t		*cm_noCurves;
 extern	cvar_t		*cm_playerCurveClip;
 extern	cvar_t		*cm_extraVerbose;
 extern	cvar_t		*cm_accel;
+extern	cvar_t		*cm_subBSPTree;
 extern	cvar_t		*cm_accelVerify;
 
 // The moving trace volume as a segment plus half-extents, for swept culling against boxes.
