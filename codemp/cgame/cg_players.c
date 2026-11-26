@@ -13807,6 +13807,48 @@ static void CG_DrawCosmeticOnPlayer2(centity_t* cent, int time, qhandle_t* gameM
 
 extern qboolean BG_InSlopeAnim( int anim );
 extern void CG_CubeOutline(vec3_t mins, vec3_t maxs, int time, unsigned int color, float alpha);
+/*
+Players outside the view (cg_offscreenPlayers, default 1)
+
+A player the camera cannot have in frame gets none of the work that only matters for drawing:
+no bone angles, no shadow and splash traces, no model, saber blades, trails, lights or effects.
+What can be heard is kept: the animation still advances (footsteps and other animation sounds
+come from it) and the saber hum still plays from where the player is. Nothing is unloaded, so
+there is no hitch when the player comes into view; the first drawn frame does the full work.
+The test is a sphere of 160 units round the player against the view frustum, so a saber, a
+shadow or an effect reaching in from just outside the frame is still drawn. 0 turns this off.
+*/
+int cgPlayersSkipped;
+extern qboolean CG_CullPointAndRadius( const vec3_t pt, float radius );
+static qboolean CG_PlayerOutsideView( centity_t *cent ) {
+	static vmCvar_t cg_offscreenPlayers;
+	static qboolean registered;
+	vec3_t mid;
+
+	if ( !registered ) {
+		trap->Cvar_Register( &cg_offscreenPlayers, "cg_offscreenPlayers", "1", CVAR_ARCHIVE );
+		registered = qtrue;
+	}
+	trap->Cvar_Update( &cg_offscreenPlayers );
+	if ( !cg_offscreenPlayers.integer || !cg.snap ) {
+		return qfalse;
+	}
+	if ( cent->currentState.eType != ET_PLAYER || cent->currentState.number >= MAX_CLIENTS
+		|| cent->currentState.number == cg.snap->ps.clientNum || cent->currentState.number == cg.predictedPlayerState.clientNum
+		|| cent->currentState.m_iVehicleNum || cent->currentState.heldByClient || cg.predictedPlayerState.m_iVehicleNum ) {
+		return qfalse;	// the player being watched, and anyone riding or being carried, always gets the full work
+	}
+	VectorCopy( cent->lerpOrigin, mid );
+	mid[2] += 12;
+	return CG_CullPointAndRadius( mid, 160 );
+}
+
+double cgPlayerSect[8];
+int cgPlayerSectOn;
+static double cgpLast;
+extern double CG_ProfNowUs( void );
+#define CGP_MARK(i) do { if (cgPlayerSectOn) { const double n_ = CG_ProfNowUs(); cgPlayerSect[i] += n_ - cgpLast; cgpLast = n_; } } while (0)
+
 void CG_Player( centity_t *cent ) {
 	clientInfo_t	*ci;
 	refEntity_t		legs;
@@ -13827,6 +13869,8 @@ void CG_Player( centity_t *cent ) {
 	qboolean		g2HasWeapon = qfalse;
 	qboolean		drawPlayerSaber = qfalse;
 	qboolean		checkDroidShields = qfalse;
+
+	if (cgPlayerSectOn) cgpLast = CG_ProfNowUs();
 
 	if (cent->currentState.eFlags & EF_RADAROBJECT)
 	{
@@ -14533,6 +14577,39 @@ void CG_Player( centity_t *cent ) {
 	legs.radius = CG_RadiusForCent( cent );
 	VectorClear(legs.angles);
 
+	if ( CG_PlayerOutsideView( cent ) )
+	{ //out of frame: keep what can be heard, skip what could only be seen
+		int sb, bl;
+
+		CG_PlayerAnimation( cent, &legs.oldframe, &legs.frame, &legs.backlerp,
+			 &torso.oldframe, &torso.frame, &torso.backlerp );
+
+		if ( cent->currentState.weapon == WP_SABER && cent->currentState.saberHolstered < 2
+			&& !cent->currentState.saberInFlight && !(cent->currentState.eFlags & EF_DEAD) )
+		{ //the hum of a lit saber
+			if ( ci->saber[0].model[0] && ci->saber[0].soundLoop )
+			{
+				trap->S_AddLoopingSound( cent->currentState.number, cent->lerpOrigin, vec3_origin, ci->saber[0].soundLoop );
+			}
+			if ( ci->saber[1].model[0] && ci->saber[1].soundLoop && ci->saber[0].soundLoop != ci->saber[1].soundLoop
+				&& !cent->currentState.saberHolstered )
+			{
+				trap->S_AddLoopingSound( cent->currentState.number, cent->lerpOrigin, vec3_origin, ci->saber[1].soundLoop );
+			}
+		}
+		//a blade trail must not be stretched from where the blade was when it left the frame
+		for ( sb = 0; sb < MAX_SABERS; sb++ )
+		{
+			for ( bl = 0; bl < MAX_BLADES; bl++ )
+			{
+				ci->saber[sb].blade[bl].trail.lastTime = 0;
+				ci->saber[sb].blade[bl].trail.inAction = 0;
+			}
+		}
+		cgPlayersSkipped++;
+		return;
+	}
+
 	if (ci->colorOverride[0] != 0.0f ||
 		ci->colorOverride[1] != 0.0f ||
 		ci->colorOverride[2] != 0.0f)
@@ -14839,8 +14916,11 @@ void CG_Player( centity_t *cent ) {
 	}
 
 
+	CGP_MARK(0);
 	CG_G2PlayerAngles( cent, legs.axis, rootAngles );
+	CGP_MARK(1);
 	CG_G2PlayerHeadAnims( cent );
+	CGP_MARK(2);
 
 	if ( (cent->currentState.eFlags2&EF2_HELD_BY_MONSTER)
 		&& cent->currentState.hasLookTarget )//NOTE: lookTarget is an entity number, so this presumes that client 0 is NOT a Rancor...
@@ -15195,8 +15275,10 @@ skipTrail:
 	CG_TriggerAnimSounds(cent);
 
 	// get the animation state (after rotation, to allow feet shuffle)
+	CGP_MARK(3);
 	CG_PlayerAnimation( cent, &legs.oldframe, &legs.frame, &legs.backlerp,
 		 &torso.oldframe, &torso.frame, &torso.backlerp );
+	CGP_MARK(4);
 
 	// add the talk baloon or disconnect icon
 	CG_PlayerSprites( cent );

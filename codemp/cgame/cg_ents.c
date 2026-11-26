@@ -30,6 +30,84 @@ Ghoul2 Insert Start
 */
 #include "qcommon/q_shared.h"
 #include "ghoul2/G2.h"
+
+/*
+Player cost profile (cg_playerProf <frames>)
+
+How much client time the other players cost per frame, and how much of that is spent on players
+who are outside the view. Prints an average every <frames> frames.
+*/
+#ifdef _WIN32
+#include <windows.h>
+double CG_ProfNowUs( void ) {
+	static LARGE_INTEGER freq;
+	LARGE_INTEGER t;
+	if ( !freq.QuadPart ) QueryPerformanceFrequency( &freq );
+	QueryPerformanceCounter( &t );
+	return (double)t.QuadPart * 1000000.0 / (double)freq.QuadPart;
+}
+#else
+double CG_ProfNowUs( void ) { return (double)trap->Milliseconds() * 1000.0; }
+#endif
+static vmCvar_t cg_playerProf;
+static struct {
+	int		frames, lastFrame;
+	double	usAll, usOff;
+	int		nAll, nOff;
+} cgPlayerProf;
+extern qboolean CG_CullPointAndRadius( const vec3_t pt, float radius );
+extern int cgPlayersSkipped;
+
+static void CG_PlayerProfiled( centity_t *cent ) {
+	static qboolean registered;
+	double t0;
+	qboolean off;
+	vec3_t mid;
+
+	if ( !registered ) {
+		trap->Cvar_Register( &cg_playerProf, "cg_playerProf", "0", 0 );
+		registered = qtrue;
+	}
+	trap->Cvar_Update( &cg_playerProf );
+	if ( cg_playerProf.integer <= 0 ) {
+		CG_Player( cent );
+		return;
+	}
+	VectorCopy( cent->lerpOrigin, mid );
+	mid[2] += 12;
+	off = ( cent->currentState.number != cg.snap->ps.clientNum && CG_CullPointAndRadius( mid, 110 ) ) ? qtrue : qfalse;
+	{
+		extern int cgPlayerSectOn;
+		cgPlayerSectOn = 1;
+	}
+	t0 = CG_ProfNowUs();
+	CG_Player( cent );
+	t0 = CG_ProfNowUs() - t0;
+	cgPlayerProf.usAll += t0;
+	cgPlayerProf.nAll++;
+	if ( off ) {
+		cgPlayerProf.usOff += t0;
+		cgPlayerProf.nOff++;
+	}
+	if ( cgPlayerProf.lastFrame != cg.clientFrame ) {
+		cgPlayerProf.lastFrame = cg.clientFrame;
+		if ( ++cgPlayerProf.frames >= cg_playerProf.integer ) {
+			const double f = cgPlayerProf.frames;
+			trap->Print( "PLAYERPROF %d frames: players per frame %.1f costing %.3f ms; of those outside the view %.1f costing %.3f ms; given the short treatment %.1f\n",
+				cgPlayerProf.frames, cgPlayerProf.nAll / f, cgPlayerProf.usAll / f / 1000.0, cgPlayerProf.nOff / f, cgPlayerProf.usOff / f / 1000.0, cgPlayersSkipped / f );
+			cgPlayersSkipped = 0;
+			{
+				extern double cgPlayerSect[8];
+				trap->Print( "PLAYERPROF   parts, ms per frame: setup %.3f, bone angles %.3f, head anims %.3f, between %.3f, animation %.3f, everything after (model, saber, effects) %.3f\n",
+					cgPlayerSect[0] / f / 1000.0, cgPlayerSect[1] / f / 1000.0, cgPlayerSect[2] / f / 1000.0, cgPlayerSect[3] / f / 1000.0, cgPlayerSect[4] / f / 1000.0,
+					( cgPlayerProf.usAll - cgPlayerSect[0] - cgPlayerSect[1] - cgPlayerSect[2] - cgPlayerSect[3] - cgPlayerSect[4] ) / f / 1000.0 );
+				memset( cgPlayerSect, 0, sizeof( cgPlayerSect ) );
+			}
+			memset( &cgPlayerProf, 0, sizeof( cgPlayerProf ) );
+			cgPlayerProf.lastFrame = cg.clientFrame;
+		}
+	}
+}
 /*
 Ghoul2 Insert end
 */
@@ -3828,7 +3906,7 @@ Ghoul2 Insert End
 		CG_General( cent );
 		break;
 	case ET_PLAYER:
-		CG_Player( cent );
+		CG_PlayerProfiled( cent );
 		break;
 	case ET_ITEM:
 		CG_Item( cent );
