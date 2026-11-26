@@ -143,7 +143,14 @@ within 63 units of the surface at every point with visible water. Not checked: t
 * **Windows.** Outward panes imitate daylight for a viewer indoors; panes between rooms and windows that stand
   open are clear glass. The interior-visibility file may list up to 256 openings (doors always, the 24 nearest
   windows within 3000 units).
-* **Music and name.** Worldspawn: `"music" "music/naboo_theed/naboo_theed_music.mp3"`, `"message" "Naboo: Theed
+* **Music and name.** Worldspawn: `"music" "music/naboo_theed/naboo_theed_music.mp3"`, `"message" "Naboo Theed (BF2017) port
   by Nic Angel"`; `scripts\naboo_theed.arena` and `levelshots\naboo_theed.jpg` added. The log shows the track
   found and started; nobody listened to it.
 * **Other map on this build:** `mp/ffa3` loads and draws correctly (`shots_v34\stock_ffa3.jpg`), no errors in the log.
+* **Beta pk3** (`tools\build_pk3.py` -> `release\beta1\`): `zz_naboo_theed_beta1_1_map.pk3` (535 MB, 25 files) and
+  `zz_naboo_theed_beta1_2_textures.pk3` (1,330 MB, 1,965 of the 2,112 DDS on disk: those named in the shader
+  files, the PBR side file and the door models; PNG sources left out). Each stays under the engine's 2 GB zip
+  limit. Loaded from these two files alone in an empty home folder (`devgame_naboo\pk3home`): world, sky, music
+  and map name come up, no missing texture in the developer log (`release\beta1\pk3_loadtest.jpg`). Not tested
+  from the pk3: bots, dedicated server.
+* **Main branch:** `NicJK_Unlimited` fast-forwarded locally to `naboo-theed`; not pushed to the public remote.
