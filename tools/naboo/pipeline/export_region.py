@@ -381,9 +381,10 @@ if "collision" in steps:
     CB = reg.get("collision_bounds_m")          # [x0, y0, x1, y1] in metres, or None
     cd = os.path.join(outdir, "collision"); os.makedirs(cd, exist_ok=True)
     excl = [s.lower() for s in cc["exclude_name_substrings"]]
-    stats = {"objects_in": len(sel), "skipped_outside": 0, "skipped_name": 0, "skipped_small": 0, "skipped_no_solid_tris": 0, "boxed": 0, "decimated": 0, "kept_full": 0,
+    stats = {"objects_in": len(sel), "skipped_outside": 0, "skipped_name": 0, "skipped_small": 0, "skipped_no_solid_tris": 0, "boxed": 0, "decimated": 0, "kept_full": 0, "kept_planar": 0,
              "source_tris_instanced": 0, "solid_source_tris_instanced": 0}
     cache = {}
+    FOLIAGE_BUILDERS = {"vegetation", "foliage_card", "canopy"}
     scratch = bpy.data.collections.new("_naboo_scratch"); bpy.context.scene.collection.children.link(scratch)
 
     def solid_local(me):
@@ -392,11 +393,29 @@ if "collision" in steps:
             return cache[me.name]
         a = mesh_arrays(me, full=False)
         names = [m.name if m else None for m in me.materials] or [None]
-        solid_slot = np.array([(MAT.get(n, {}).get("cls", "opaque") == "opaque") for n in names] + [True] * 64)
+        builders = {MAT.get(n, {}).get("builder") for n in names}
+
+        def solid_mat(n):
+            # opaque materials, and cut-out ones that are not foliage: many solid props (containers, chairs, the
+            # parked speeder, metal fences) use a cut-out material in the source without being see-through
+            m_ = MAT.get(n, {}); c_ = m_.get("cls", "opaque")
+            return c_ == "opaque" or (c_ == "cutout" and m_.get("builder") not in FOLIAGE_BUILDERS)
+        solid_slot = np.array([solid_mat(n) for n in names] + [True] * 64)
         keep = solid_slot[a["tri_mat"].clip(0, len(solid_slot) - 1)]
+        if "tilingbush" in builders:
+            # clipped hedges: the source marks the bushes meant to be passable with "nocollision" in their name
+            # (excluded above); the others block, as one box around the whole bush
+            keep = np.ones(len(a["tri_verts"]), bool)
         tv = a["tri_verts"][keep]
         if len(tv) == 0:
             cache[me.name] = (None, None, "none", len(a["tri_verts"]), 0); return cache[me.name]
+        if "tilingbush" in builders:
+            used = np.unique(tv); P = a["pos"][used]; mn, mx = P.min(0), P.max(0)
+            shrink = (mx - mn) * 0.08; mn = mn + shrink * np.array([1, 1, 0]); mx = mx - shrink   # leaves stick out
+            c = np.array([[mn[0], mn[1], mn[2]], [mx[0], mn[1], mn[2]], [mx[0], mx[1], mn[2]], [mn[0], mx[1], mn[2]],
+                          [mn[0], mn[1], mx[2]], [mx[0], mn[1], mx[2]], [mx[0], mx[1], mx[2]], [mn[0], mx[1], mx[2]]], np.float32)
+            f = np.array([[0, 2, 1], [0, 3, 2], [4, 5, 6], [4, 6, 7], [0, 1, 5], [0, 5, 4], [1, 2, 6], [1, 6, 5], [2, 3, 7], [2, 7, 6], [3, 0, 4], [3, 4, 7]], np.int32)
+            cache[me.name] = (c, f, "box", len(a["tri_verts"]), len(tv)); return cache[me.name]
         used = np.unique(tv); remap = np.full(len(a["pos"]), -1, np.int64); remap[used] = np.arange(len(used))
         P = a["pos"][used]; T = remap[tv].astype(np.int32)
         ext = P.max(0) - P.min(0)
@@ -412,13 +431,28 @@ if "collision" in steps:
             cache[me.name] = (P, T, "full", len(a["tri_verts"]), n_solid); return cache[me.name]
         tm = bpy.data.meshes.new("_tmp"); tm.from_pydata(P.tolist(), [], T.tolist()); tm.update()
         to = bpy.data.objects.new("_tmp", tm); scratch.objects.link(to)
-        mod = to.modifiers.new("d", 'DECIMATE'); mod.ratio = float(target) / n_solid
+        # first merge flat areas (exact: the shape does not change), then reduce only if still above the target.
+        # Reducing straight away thinned large buildings, quays and stairs into gappy shells.
+        if cc.get("planar_first", True):
+            pl = to.modifiers.new("p", 'DECIMATE'); pl.decimate_type = 'DISSOLVE'
+            pl.angle_limit = float(np.radians(cc.get("planar_angle_deg", 1.0))); pl.use_dissolve_boundaries = False
+            dg = bpy.context.evaluated_depsgraph_get(); ev = to.evaluated_get(dg); em = ev.to_mesh()
+            b = mesh_arrays(em, full=False); n_pl = len(b["tri_verts"])
+            if n_pl <= target:
+                P2 = b["pos"].copy(); T2 = b["tri_verts"].copy()
+                ev.to_mesh_clear(); bpy.data.objects.remove(to); bpy.data.meshes.remove(tm)
+                cache[me.name] = (P2, T2, "planar", len(a["tri_verts"]), n_solid); return cache[me.name]
+            ev.to_mesh_clear()
+            ratio = float(target) / max(n_pl, 1)
+        else:
+            ratio = float(target) / n_solid
+        mod = to.modifiers.new("d", 'DECIMATE'); mod.ratio = ratio
         dg = bpy.context.evaluated_depsgraph_get(); ev = to.evaluated_get(dg); em = ev.to_mesh()
         b = mesh_arrays(em, full=False); P2 = b["pos"].copy(); T2 = b["tri_verts"].copy()
         ev.to_mesh_clear(); bpy.data.objects.remove(to); bpy.data.meshes.remove(tm)
         cache[me.name] = (P2, T2, "decimated", len(a["tri_verts"]), n_solid); return cache[me.name]
 
-    chunks = []; per_kind_tris = {"box": 0, "decimated": 0, "full": 0}
+    chunks = []; per_kind_tris = {"box": 0, "decimated": 0, "full": 0, "planar": 0}
     for o in sel:
         nm = o.name.lower(); mn_ = o.data.name.lower()
         if any(s in nm or s in mn_ for s in excl):
@@ -440,7 +474,7 @@ if "collision" in steps:
         if np.linalg.det(M[:3, :3]) < 0:
             tri = tri[:, ::-1]
         chunks.append(tri)
-        stats[{"box": "boxed", "decimated": "decimated", "full": "kept_full"}[kind]] += 1
+        stats[{"box": "boxed", "decimated": "decimated", "full": "kept_full", "planar": "kept_planar"}[kind]] += 1
         per_kind_tris[kind] += len(T)
     n_obj_tris = sum(len(c) for c in chunks)
     if terrain:

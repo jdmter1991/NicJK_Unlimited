@@ -3563,6 +3563,23 @@ void G_RunFrame( int levelTime ) {
 
 	static int lastMsgTime = 0;//OSP: pause
 
+	// map testing: every g_logPlayerPos milliseconds, the position of every live player (bots too), so that places
+	// where players end up below the drawn ground (holes in a map's collision) can be found from the log
+	if ( g_logPlayerPos.integer > 0 ) {
+		static int lastPosLog = 0;
+		if ( levelTime - lastPosLog >= g_logPlayerPos.integer || levelTime < lastPosLog ) {
+			lastPosLog = levelTime;
+			for ( i = 0; i < level.maxclients; i++ ) {
+				gentity_t *pe = &g_entities[i];
+				if ( !pe->inuse || !pe->client || pe->client->pers.connected != CON_CONNECTED
+					|| pe->client->sess.sessionTeam == TEAM_SPECTATOR || pe->health <= 0 )
+					continue;
+				G_LogPrintf( "PlayerPos: %i %.0f %.0f %.0f %i\n", i, pe->client->ps.origin[0], pe->client->ps.origin[1],
+					pe->client->ps.origin[2], pe->client->ps.groundEntityNum != ENTITYNUM_NONE ? 1 : 0 );
+			}
+		}
+	}
+
 	if (!level.numVotingClients && g_autoQuit.integer) {
 		if (levelTime > g_autoQuit.integer * 24 * 60 * 60 * 1000) {//X days
 			//Where to do this other than runframe.. something thats called like every 1 second?

@@ -292,6 +292,53 @@ if os.path.exists(_wb) and bool(_w.get("water", True)):
         NWATER = len(WB)
         bmin = np.concatenate([bmin, WB[:, 0]]); bmax = np.concatenate([bmax, WB[:, 1]])
         nonax_count = np.concatenate([nonax_count, np.zeros(NWATER, np.int64)])
+
+
+def water_edge_walls(wb):
+    """thin boxes on every edge of the water volumes that borders dry ground. The volumes are rows of water
+    raster cells, so they are put back on that raster; an edge is walled where the neighbouring cell is not water"""
+    if not len(wb):
+        return np.zeros((0, 2, 3))
+    cs = float(np.median(wb[:, 1, 1] - wb[:, 0, 1]))
+    X0 = float(wb[:, 0, 0].min()); Y0 = float(wb[:, 0, 1].min())
+    i0 = np.rint((wb[:, 0, 0] - X0) / cs).astype(np.int64); i1 = np.rint((wb[:, 1, 0] - X0) / cs).astype(np.int64)
+    jy = np.rint((wb[:, 0, 1] - Y0) / cs).astype(np.int64)
+    nx = int(i1.max()) + 2; ny = int(jy.max()) + 2
+    wet = np.zeros((ny + 2, nx + 2), bool); top = np.full((ny + 2, nx + 2), np.nan)
+    for k in range(len(wb)):
+        wet[jy[k] + 1, i0[k] + 1:i1[k] + 1] = True; top[jy[k] + 1, i0[k] + 1:i1[k] + 1] = wb[k, 1, 2]
+    th = float(_w.get("bot_wall_thickness", 8.0)); below = float(_w.get("bot_wall_below", 16.0)); above = float(_w.get("bot_wall_above", 128.0))
+    out = []
+    # edges facing -x / +x: walls along y, merged over consecutive rows of the same column
+    for dxs in (-1, 1):
+        edge = wet & ~np.roll(wet, -dxs, axis=1)
+        for i in np.flatnonzero(edge.any(0)):
+            rows = np.flatnonzero(edge[:, i])
+            for run in np.split(rows, np.flatnonzero(np.diff(rows) > 1) + 1):
+                x = X0 + (i - 1 + (1 if dxs > 0 else 0)) * cs
+                y0 = Y0 + (run[0] - 1) * cs; y1 = Y0 + (run[-1]) * cs
+                t = np.nanmax(top[run, i])
+                out.append([(x - th / 2, y0, t - below), (x + th / 2, y1, t + above)])
+    for dys in (-1, 1):
+        edge = wet & ~np.roll(wet, -dys, axis=0)
+        for j in np.flatnonzero(edge.any(1)):
+            cols = np.flatnonzero(edge[j])
+            for run in np.split(cols, np.flatnonzero(np.diff(cols) > 1) + 1):
+                y = Y0 + (j - 1 + (1 if dys > 0 else 0)) * cs
+                x0 = X0 + (run[0] - 1) * cs; x1 = X0 + (run[-1]) * cs
+                t = np.nanmax(top[j, run])
+                out.append([(x0, y - th / 2, t - below), (x1, y + th / 2, t + above)])
+    return np.array(out, np.float64).reshape(-1, 2, 3)
+
+
+NMCLIP = 0
+if len(WB) and bool(_w.get("bot_water_walls", True)):
+    MW = water_edge_walls(WB)
+    if len(MW):
+        NMCLIP = len(MW)
+        bmin = np.concatenate([bmin, MW[:, 0]]); bmax = np.concatenate([bmax, MW[:, 1]])
+        nonax_count = np.concatenate([nonax_count, np.zeros(NMCLIP, np.int64)])
+        print("bot walls along water edges: %d brushes" % NMCLIP)
 NPOLY = len(bmin)
 print("polygons by corner count %s; bevel planes %d (%.2f per brush)   %.1fs" % (poly_hist, n_bevel, n_bevel / NPOLY, time.time() - t0))
 
@@ -323,8 +370,10 @@ plane_lump = np.concatenate([ax_tab, nonax])
 NP = len(plane_lump)
 
 # ---- brush sides and brushes
-SH_COL, SH_SKY, SH_WATER = 0, 1, 2
+SH_COL, SH_SKY, SH_WATER, SH_MCLIP, SH_TRIG = 0, 1, 2, 3, 4
 CONT_WATER = 0x00000004
+CONT_MONSTERCLIP = 0x00000020
+CONT_TRIGGER = 0x00000400
 cnt = np.concatenate([6 + nonax_count, np.full(6, 6, np.int64)])
 first = np.concatenate([[0], np.cumsum(cnt)[:-1]])
 side_lump = np.zeros(int(cnt.sum()), dtype=[("plane", "<i4"), ("shader", "<i4"), ("surf", "<i4")])
@@ -335,12 +384,16 @@ pos_na = np.repeat(first[:NPOLY] + 6, nonax_count) + (np.arange(tot_na) - np.rep
 side_lump["plane"][pos_na] = n_ax + np.arange(tot_na)
 side_lump["shader"] = SH_COL; side_lump["shader"][first[NPOLY]:] = SH_SKY
 if NWATER:
-    side_lump["shader"][first[NPOLY - NWATER]:first[NPOLY]] = SH_WATER
+    side_lump["shader"][first[NPOLY - NMCLIP - NWATER]:first[NPOLY - NMCLIP]] = SH_WATER
+if NMCLIP:
+    side_lump["shader"][first[NPOLY - NMCLIP]:first[NPOLY]] = SH_MCLIP
 side_lump["surf"] = -1
 brush_lump = np.zeros(NB, dtype=[("first", "<i4"), ("num", "<i4"), ("shader", "<i4")])
 brush_lump["first"] = first; brush_lump["num"] = cnt; brush_lump["shader"] = SH_COL; brush_lump["shader"][NPOLY:] = SH_SKY
 if NWATER:
-    brush_lump["shader"][NPOLY - NWATER:NPOLY] = SH_WATER
+    brush_lump["shader"][NPOLY - NMCLIP - NWATER:NPOLY - NMCLIP] = SH_WATER
+if NMCLIP:
+    brush_lump["shader"][NPOLY - NMCLIP:NPOLY] = SH_MCLIP
 print("brushes %d, sides %d (%.2f per brush), planes %d (%d axial shared)   %.1fs" % (NB, len(side_lump), len(side_lump) / NB, NP, n_ax, time.time() - t0))
 
 # ---- kd-tree over brush bounds
@@ -439,7 +492,9 @@ dv["lm"] = 0
 index_lump = np.tile(np.array([0, 1, 2, 0, 2, 3], "<i4"), 6)
 
 # ---- shaders, model, entities
-shader_lump = np.zeros(3, dtype=[("name", "S64"), ("surf", "<i4"), ("cont", "<i4")])
+shader_lump = np.zeros(5, dtype=[("name", "S64"), ("surf", "<i4"), ("cont", "<i4")])
+shader_lump[3] = (b"textures/naboo_sys/botclip", SURF_NODRAW_COL, CONT_MONSTERCLIP)
+shader_lump[4] = (b"textures/naboo_sys/trigger", SURF_NODRAW_COL, CONT_TRIGGER)
 shader_lump[0] = (b"textures/naboo_sys/col", SURF_NODRAW_COL, CONT_SOLID)
 shader_lump[1] = (b"textures/naboo_sys/sky", SURF_SKY, CONT_SOLID)
 shader_lump[2] = (b"textures/naboo_sys/water", 0, CONT_WATER)
@@ -510,6 +565,20 @@ if DOORS:
     for k_, (mn_, mx_, fb_) in enumerate(md_new):
         md2["mins"][k_] = mn_; md2["maxs"][k_] = mx_; md2["firstBrush"][k_] = fb_; md2["numBrush"][k_] = 1
     model_lump = np.concatenate([model_lump, md2])
+if bool(_w.get("kill_volume", True)):
+    # whoever falls out of the world lands in this and dies: a trigger_hurt over the whole map, from the hull
+    # floor up KILL_H units (the lowest collision surface is at least 64 units above the hull floor)
+    KILL_H = float(_w.get("kill_volume_height", 56.0))
+    kmn = np.array([lo[0], lo[1], lo[2]]); kmx = np.array([hi[0], hi[1], lo[2] + KILL_H])
+    f_ = len(side_lump); pl0 = len(plane_lump)
+    kpl = [((-1, 0, 0), -kmn[0]), ((1, 0, 0), kmx[0]), ((0, -1, 0), -kmn[1]), ((0, 1, 0), kmx[1]), ((0, 0, -1), -kmn[2]), ((0, 0, 1), kmx[2])]
+    plane_lump = np.concatenate([plane_lump, np.array([(n_[0], n_[1], n_[2], d_) for n_, d_ in kpl], np.float32)])
+    side_lump = np.concatenate([side_lump, np.array([(pl0 + k_, SH_TRIG, -1) for k_ in range(6)], dtype=side_lump.dtype)])
+    brush_lump = np.concatenate([brush_lump, np.array([(f_, 6, SH_TRIG)], dtype=brush_lump.dtype)])
+    mk = np.zeros(1, dtype=model_lump.dtype); mk["mins"][0] = kmn; mk["maxs"][0] = kmx; mk["firstBrush"][0] = len(brush_lump) - 1; mk["numBrush"][0] = 1
+    model_lump = np.concatenate([model_lump, mk])
+    ent_text += '{\n"classname" "trigger_hurt"\n"dmg" "1000"\n"model" "*%d"\n}\n' % (len(model_lump) - 1)
+    print("kill volume: z %.0f to %.0f over the whole map (model *%d)" % (kmn[2], kmx[2], len(model_lump) - 1))
 if not ent_text:
     ent_text = '{\n"classname" "worldspawn"\n}\n'
 ent_lump = ent_text.encode("ascii") + b"\0"

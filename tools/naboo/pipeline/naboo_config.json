@@ -32,11 +32,13 @@
    "spawn_grid_m": 14.0,
    "spawn_max_above_terrain_m": 2.5,
    "collision": {
-    "box_below_extent_m": 3.0,
-    "skip_below_extent_m": 0.6,
-    "decimate_fraction": 0.04,
-    "decimate_min_tris": 60,
-    "decimate_max_tris": 800,
+    "box_below_extent_m": 1.0,
+    "skip_below_extent_m": 0.3,
+    "decimate_fraction": 0.25,
+    "decimate_min_tris": 150,
+    "decimate_max_tris": 6000,
+    "planar_first": true,
+    "planar_angle_deg": 1.0,
     "terrain_stride": 2
    }
   }
@@ -160,5 +162,9 @@
   "points": 6,
   "ray_length": 3200.0,
   "cell": 160.0
- }
+ },
+ "carve_terrain_under_water": false,
+ "water_gap_m": 0.0,
+ "far_water_gap_m": 0.0,
+ "_note_exact_geometry": "2026-11-26, user: the whole map's geometry should match the source file exactly. Terrain lowering under water and generated gap-fill water are off; only invisible gameplay helpers (deep-water floor, kill volume, bot walls) are added."
 }

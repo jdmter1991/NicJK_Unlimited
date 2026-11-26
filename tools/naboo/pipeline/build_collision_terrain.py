@@ -29,7 +29,10 @@ cc = cfg.get("collision_terrain", {})
 TOL = float(cc.get("tolerance_m", 0.05)); WDEPTH = float(cc.get("water_depth_m", 12.0))
 cdir = os.path.join(ed, "collision")
 src = os.path.join(cdir, "collision_tris_v1.npy")
-if not os.path.exists(src):
+# the export (export_region.py) writes collision_tris.npy together with collision_stats.json; this step overwrites
+# collision_tris.npy with its result. A stats file newer than the kept copy means a new export: take it as the source
+_stats = os.path.join(cdir, "collision_stats.json")
+if not os.path.exists(src) or (os.path.exists(_stats) and os.path.getmtime(_stats) > os.path.getmtime(src)):
     os.replace(os.path.join(cdir, "collision_tris.npy"), src)
 tris = np.load(src)
 g0 = np.load(os.path.join(ed, "dump", "meshes", "terrain_grid.npz"))["grid"].astype(np.float64)
@@ -152,7 +155,52 @@ skirts = ((np.concatenate([q1, q2]) - ORG) * UPM).astype(np.float32)
 skirt_info = {"wall_edges": int(sk.sum()), "of_which_over_carved_ground": n_first, "gaps_over_1m": int((gap[sk] > 1.0).sum()), "gaps_over_1_6m_player_height": int((gap[sk] > 1.6).sum()), "triangles": int(len(skirts)), "edge_length_m": round(float(edge_len[sk].sum()), 1), "mean_gap_m": round(float(gap[sk].mean()), 2) if sk.any() else 0.0,
               "max_gap_m": round(float(gap[sk].max()), 2) if sk.any() else 0.0}
 print("skirts under walls over carved ground:", skirt_info)
-out = np.concatenate([objects.astype(np.float32), terr, skirts.reshape(-1, *objects.shape[1:])])
+# ---- no terrain collision under the city's floors (see the module notes)
+under_info = {"terrain_tris_in": int(len(terr))}
+if cc.get("drop_terrain_under_floors", True) and len(terr):
+    GAP = float(cc.get("floor_above_terrain_units", 64.0)); REACH = float(cc.get("floor_search_units", 6000.0))
+    O_ = objects.reshape(-1, 3, 3).astype(np.float64)
+    nz_ = np.cross(O_[:, 1] - O_[:, 0], O_[:, 2] - O_[:, 0]); ln_ = np.linalg.norm(nz_, axis=1)
+    up_ = (ln_ > 1e-6) & (nz_[:, 2] > 0.5 * np.maximum(ln_, 1e-9))
+    F = O_[up_]
+    CELL_ = 128.0
+    fmin = F.min(1); fmax = F.max(1)
+    gx0 = np.floor(fmin[:, 0] / CELL_).astype(np.int64); gx1 = np.floor(fmax[:, 0] / CELL_).astype(np.int64)
+    gy0 = np.floor(fmin[:, 1] / CELL_).astype(np.int64); gy1 = np.floor(fmax[:, 1] / CELL_).astype(np.int64)
+    TT = terr.reshape(-1, 3, 3).astype(np.float64); C_ = TT.mean(1)
+    cx_ = np.floor(C_[:, 0] / CELL_).astype(np.int64); cy_ = np.floor(C_[:, 1] / CELL_).astype(np.int64)
+    key_t = cx_ * 1000003 + cy_
+    order = np.argsort(key_t); key_s = key_t[order]
+    starts = np.flatnonzero(np.r_[True, key_s[1:] != key_s[:-1]])
+    want = {int(key_s[a]): order[a:b] for a, b in zip(starts, np.r_[starts[1:], len(key_s)])}
+    bucket = {}
+    for i in range(len(F)):
+        if (gx1[i] - gx0[i] + 1) * (gy1[i] - gy0[i] + 1) > 4096:
+            continue                                     # huge slabs: they are the terrain-level ground itself
+        for gx in range(gx0[i], gx1[i] + 1):
+            for gy in range(gy0[i], gy1[i] + 1):
+                k = gx * 1000003 + gy
+                if k in want:
+                    bucket.setdefault(k, []).append(i)
+    drop = np.zeros(len(TT), bool)
+    for k, ti in want.items():
+        fi = bucket.get(k)
+        if not fi:
+            continue
+        fi = np.array(fi); a = F[fi, 0]; e1 = F[fi, 1] - a; e2 = F[fi, 2] - a
+        det = e1[:, 0] * e2[:, 1] - e1[:, 1] * e2[:, 0]; ok_ = np.abs(det) > 1e-9
+        P_ = C_[ti]
+        dxp = P_[:, None, 0] - a[None, :, 0]; dyp = P_[:, None, 1] - a[None, :, 1]
+        with np.errstate(divide="ignore", invalid="ignore"):
+            u = (dxp * e2[None, :, 1] - dyp * e2[None, :, 0]) / det[None, :]; v = (dyp * e1[None, :, 0] - dxp * e1[None, :, 1]) / det[None, :]
+        inside = ok_[None, :] & (u >= 0) & (v >= 0) & (u + v <= 1)
+        z = a[None, :, 2] + u * e1[None, :, 2] + v * e2[None, :, 2]
+        hz = (z - P_[:, None, 2])
+        drop[ti] = (inside & (hz > GAP) & (hz < REACH)).any(1)
+    terr = terr.reshape(-1, 3, 3)[~drop].reshape(-1, *terr.shape[1:]) if terr.ndim == 3 else terr[~drop]
+    under_info.update({"terrain_tris_dropped_under_floors": int(drop.sum()), "terrain_tris_kept": int(len(terr))})
+print("terrain under floors:", under_info)
+out = np.concatenate([objects.astype(np.float32), terr, skirts.reshape(-1, *objects.shape[1:])])
 np.save(os.path.join(cdir, "collision_tris.npy"), out)
 
 # ---- water volumes
@@ -182,6 +230,6 @@ np.save(os.path.join(cdir, "water_boxes.npy"), boxes)
 rep = {"seconds": round(time.time() - t0, 1), "old_terrain_tris": int(is_terr.sum()), "object_tris": int(len(objects)), "blocks_2m": int((~fine).sum()),
        "blocks_1m": int(fine.sum()), "new_terrain_tris": int(len(terr)), "total_tris": int(len(out)), "tolerance_m": TOL,
        "carved_below_source_vertices": int((g[j0:j1 + 1, i0:i1 + 1, 2] < g0[j0:j1 + 1, i0:i1 + 1, 2] - 0.01).sum()),
-       "water_cells": n_cells, "water_boxes": int(len(boxes)), "water_depth_m": WDEPTH, "skirts": skirt_info, "deep_water_floor": floor_info}
+       "water_cells": n_cells, "water_boxes": int(len(boxes)), "water_depth_m": WDEPTH, "skirts": skirt_info, "deep_water_floor": floor_info, "terrain_under_floors": under_info}
 json.dump(rep, open(os.path.join(cdir, "terrain_rebuild.json"), "w"), indent=1)
 print(json.dumps(rep, indent=1))
