@@ -163,6 +163,7 @@ typedef struct tworld_s {
 	int				numVisAll;
 	uint32_t		*visKey;		// distance bucket of each tested placement, then scratch for the sort
 	int				*sortInst;
+	int				*visAllMesh, *sortMesh;	// mesh of each tested placement
 	byte			*sortLod;
 	int				*drawList;		// submeshes with something to draw in this pass, nearest first
 	struct twCullRec_s	*cullRecs;	// one compact record per placement, in cell order
@@ -256,8 +257,10 @@ typedef struct twCullRec_s {
 	vec3_t	center;
 	float	radius;
 	int		inst;
-	int		numLods;
-} twCullRec_t;				// 24 bytes
+	short	numLods;
+	short	pad;
+	int		mesh;
+} twCullRec_t;				// 28 bytes
 
 static void TW_BuildCells( tworld_t *tw )
 {
@@ -313,7 +316,8 @@ static void TW_BuildCells( tworld_t *tw )
 		VectorCopy( in->center, tw->cullRecs[i].center );
 		tw->cullRecs[i].radius = in->radius;
 		tw->cullRecs[i].inst = tw->cellOrder[i];
-		tw->cullRecs[i].numLods = tw->meshes[in->mesh].numLods;
+		tw->cullRecs[i].numLods = (short)tw->meshes[in->mesh].numLods;
+		tw->cullRecs[i].mesh = in->mesh;
 	}
 	ri.Printf( PRINT_ALL, "R_LoadTWorld: %i placements in %i culling cells\n", n, numCells );
 }
@@ -544,9 +548,9 @@ void R_LoadTWorld( const char *bspName )
 	r_tworld = ri.Cvar_Get( "r_tworld", "1", CVAR_ARCHIVE_ND, "Draw the cooked static world (maps/<name>.tworld) when a map has one" );
 	r_tworldStats = ri.Cvar_Get( "r_tworldStats", "0", CVAR_TEMP, "Print cooked-world draw statistics once per second" );
 	// sizes are bounding-sphere radius divided by distance (roughly 1/1000 per pixel of radius at 1080p)
-	r_tworldCullSize = ri.Cvar_Get( "r_tworldCullSize", "0.0055", CVAR_ARCHIVE_ND, "Cooked world: skip placements smaller than this (radius / distance)" );
-	r_tworldLodSize1 = ri.Cvar_Get( "r_tworldLodSize1", "0.15", CVAR_ARCHIVE_ND, "Cooked world: use detail level 1 below this size (radius / distance)" );
-	r_tworldLodSize2 = ri.Cvar_Get( "r_tworldLodSize2", "0.045", CVAR_ARCHIVE_ND, "Cooked world: use detail level 2 below this size (radius / distance)" );
+	r_tworldCullSize = ri.Cvar_Get( "r_tworldCullSize", "0.004", CVAR_ARCHIVE_ND, "Cooked world: skip placements smaller than this (radius / distance)" );
+	r_tworldLodSize1 = ri.Cvar_Get( "r_tworldLodSize1", "0.12", CVAR_ARCHIVE_ND, "Cooked world: use detail level 1 below this size (radius / distance)" );
+	r_tworldLodSize2 = ri.Cvar_Get( "r_tworldLodSize2", "0.035", CVAR_ARCHIVE_ND, "Cooked world: use detail level 2 below this size (radius / distance)" );
 	r_tworldLight = ri.Cvar_Get( "r_tworldLight", "1", CVAR_ARCHIVE_ND, "Cooked world: brightness scale of the sun and ambient light" );
 
 	r_tworldShadows = ri.Cvar_Get( "r_tworldShadows", "1", CVAR_ARCHIVE_ND, "Cooked world: baked sun shadows, 0 = off, up to 1 = sun fully removed in shadow" );
@@ -693,6 +697,8 @@ void R_LoadTWorld( const char *bspName )
 	tw->visAllLod = (byte *)ri.Hunk_Alloc( h->numInstances + 1, h_low );
 	tw->visKey = (uint32_t *)ri.Hunk_Alloc( sizeof( uint32_t ) * ( h->numInstances + 1 ), h_low );
 	tw->sortInst = (int *)ri.Hunk_Alloc( sizeof( int ) * ( h->numInstances + 1 ), h_low );
+	tw->visAllMesh = (int *)ri.Hunk_Alloc( sizeof( int ) * ( h->numInstances + 1 ), h_low );
+	tw->sortMesh = (int *)ri.Hunk_Alloc( sizeof( int ) * ( h->numInstances + 1 ), h_low );
 	tw->sortLod = (byte *)ri.Hunk_Alloc( h->numInstances + 1, h_low );
 	tw->drawList = (int *)ri.Hunk_Alloc( sizeof( int ) * ( h->numSubmeshes + 1 ), h_low );
 	tw->batchCount = (int *)ri.Hunk_Alloc( sizeof( int ) * ( h->numSubmeshes + 1 ) * 3, h_low );
@@ -1023,15 +1029,22 @@ static qboolean RB_TWorldInstanced( tworld_t *tw, const int pass )
 		for ( ci = 0; ci < tw->numCells; ci++ ) {
 			const twCell_t *cell = &tw->cells[ci];
 			const twCullRec_t *rec = &tw->cullRecs[cell->first];
+			qboolean testEach = cull;			// qfalse when the whole cell lies inside the view
 			if ( cull ) {
 				vec3_t cd;
 				float cdist;
+				float minSide = 1e30f;
 				for ( p = 0; p < 4; p++ ) {
-					if ( DotProduct( cell->center, frustum[p].normal ) - frustum[p].dist < -cell->radius )
+					const float side = DotProduct( cell->center, frustum[p].normal ) - frustum[p].dist;
+					if ( side < -cell->radius )
 						break;
+					if ( side < minSide )
+						minSide = side;
 				}
 				if ( p < 4 )
 					continue;
+				if ( minSide > cell->radius )
+					testEach = qfalse;
 				// too far for even the largest placement of the cell to pass the size test
 				VectorSubtract( cell->center, viewOrg, cd );
 				cdist = VectorLength( cd ) - cell->radius;
@@ -1074,7 +1087,7 @@ static qboolean RB_TWorldInstanced( tworld_t *tw, const int pass )
 				float	d2, t;
 				int		lod = 0;
 
-				if ( cull ) {
+				if ( testEach ) {
 					for ( p = 0; p < 4; p++ ) {
 						if ( DotProduct( rec->center, frustum[p].normal ) - frustum[p].dist < -rec->radius )
 							break;
@@ -1132,6 +1145,7 @@ static qboolean RB_TWorldInstanced( tworld_t *tw, const int pass )
 					}
 				}
 				tw->sortInst[nAll] = rec->inst;
+				tw->sortMesh[nAll] = rec->mesh;
 				tw->sortLod[nAll] = (byte)lod;
 				{
 					// bucket = exponent of the squared distance to the placement's near side, two buckets per doubling
@@ -1157,6 +1171,7 @@ static qboolean RB_TWorldInstanced( tworld_t *tw, const int pass )
 			for ( k = 0; k < nAll; k++ ) {
 				const int at = cnt[tw->visKey[k]]++;
 				tw->visAllInst[at] = tw->sortInst[k];
+				tw->visAllMesh[at] = tw->sortMesh[k];
 				tw->visAllLod[at] = tw->sortLod[k];
 			}
 		}
@@ -1167,7 +1182,7 @@ static qboolean RB_TWorldInstanced( tworld_t *tw, const int pass )
 	for ( k = 0; k < tw->numVisAll; k++ ) {
 		const int i = tw->visAllInst[k];
 		const int lod = tw->visAllLod[k];
-		const tworldMesh_t *mesh = &tw->meshes[tw->instances[i].mesh];
+		const tworldMesh_t *mesh = &tw->meshes[tw->visAllMesh[k]];
 
 		if ( !( mesh->lodPassMask[lod] & ( 1 << pass ) ) )
 			continue;
