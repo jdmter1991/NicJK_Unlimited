@@ -1678,7 +1678,8 @@ static	void R_LoadFogs( lump_t *l, lump_t *brushesLump, lump_t *sidesLump, world
 
 	// create fog strucutres for them
 	worldData.numfogs = count + 1;
-	worldData.fogs = (fog_t *)Hunk_Alloc ( worldData.numfogs*sizeof(*out), h_low);
+	// one more entry than numfogs: a misc_bsp part (index != 0) appends a copy of the main map's global fog below
+	worldData.fogs = (fog_t *)Hunk_Alloc ( (worldData.numfogs + 1)*sizeof(*out), h_low);
 	worldData.globalFog = -1;
 	out = worldData.fogs + 1;
 

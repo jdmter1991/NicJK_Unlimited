@@ -1969,7 +1969,8 @@ static	void R_LoadFogs( const lump_t *l, const lump_t *brushesLump, lump_t *side
 
 	// create fog strucutres for them
 	worldData.numfogs = count + 1;
-	worldData.fogs = (fog_t *)Hunk_Alloc ( worldData.numfogs*sizeof(*out), h_low);
+	// one more entry than numfogs: a misc_bsp part (index != 0) appends a copy of the main map's global fog below
+	worldData.fogs = (fog_t *)Hunk_Alloc ( (worldData.numfogs + 1)*sizeof(*out), h_low);
 	worldData.globalFog = -1;
 	out = worldData.fogs + 1;
 
@@ -2395,7 +2396,10 @@ void RE_LoadWorldMap_Actual( const char *name, world_t &worldData, int index )
 	R_LoadVisibility( &header->lumps[LUMP_VISIBILITY], worldData );
 
 #ifdef USE_VBO
-	R_BuildWorldVBO(s_worldData.surfaces, s_worldData.numsurfaces);
+	// there is a single world VBO: built for the main world only. A misc_bsp part (index != 0) used to rebuild
+	// the main world's buffers here a second time; its own surfaces are drawn without a VBO.
+	if ( !index )
+		R_BuildWorldVBO(worldData.surfaces, worldData.numsurfaces);
 #endif
 
 	worldData.dataSize = (byte *)Hunk_Alloc(0, h_low) - startMarker;
