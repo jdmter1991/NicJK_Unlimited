@@ -72,3 +72,35 @@ fixed shade instead of the world's lighting.
 * The sun shadow map predates the billboard trees (they cast as flat lines in a rebake).
 * A crash was introduced and fixed on the way: the occlusion loader read the file header after its buffer had
   been released.
+
+## 6. Frame-rate correction and optimisation (2026-11-26, about 02:30)
+
+**Every frame rate in these notes up to this point is twice the true value.** They were derived from counting
+console `wait` commands as frames, but the client runs the command buffer twice per frame (`Com_Frame`), so
+`wait N` lasts about N/2 frames. "312-333 FPS at 1080p" was about 155-165. The in-game counter was right.
+Frame rates now come from the renderer itself: `r_tworldStats 1` prints frames per second and the CPU time of the
+cooked-world pass once a second (`tools\run_stat.sh`, `run_stat_bots.sh`, `stat_from_log.py`).
+
+2400 x 1350 window, RTX 2070, dedicated server with 31 bots, playing in third person, medians:
+
+| Spot | Before | After |
+|---|---:|---:|
+| Palace hall | 103 | 110 |
+| Palace steps | 218 | 195 |
+| Market | 120 | 138 |
+| Lantern court | 111 | 137 |
+
+What changed (engine):
+* placements are culled once per view instead of once per pass, from a compact record, without square roots:
+  4.0 -> 0.85-1.8 ms per frame in the hall;
+* the "is the viewer indoors" estimate runs every eighth frame (0.8 -> 0.05 ms);
+* the opaque pass is drawn front to back (counting sort on distance): hidden fragments are rejected before shading;
+* surfaces facing away from the sun skip the 16 shadow-map lookups;
+* interior visibility (`maps\naboo_theed.tportal`, `r_tworldPortal`, `tools\write_portals.py`): inside the palace box
+  the city is drawn only through the three front doorways; 23,900 -> 3,900 placements in the hall view. Checked on
+  35 interior views with the test off and on: 33 identical, 2 differ in under 0.3 % of the pixels;
+* default detail thresholds slightly tighter: `r_tworldCullSize` 0.0055, `r_tworldLodSize1` 0.15, `r_tworldLodSize2` 0.045.
+
+**Not reached:** 125 FPS in the palace hall with 31 bots (110 median, minimum about 100), and minima elsewhere dip
+to about 128. Screenshots taken at the moment of capture read lower still (82-131). Not measured: 1440p
+fullscreen, 4K, 32 bots, the visual effect of the tighter detail thresholds.

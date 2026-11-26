@@ -134,6 +134,23 @@ for n_done, ii in enumerate(sel):
     occ[ii] = int(round(255.0 * tot / len(P)))
     if n_done % 4000 == 0:
         print("  %d of %d   %.0f s" % (n_done, len(sel), time.time() - t0), flush=True)
+# small placements (furniture, candles, rugs, ground scatter) are not baked; they take the value of the nearest
+# baked placement within 400 units, otherwise they would stay fully lit inside dark rooms
+small = np.flatnonzero((insts["r"] < RMIN) & (insts["c"][:, 0] > blo[0]) & (insts["c"][:, 0] < bhi[0]) & (insts["c"][:, 1] > blo[1]) & (insts["c"][:, 1] < bhi[1]))
+if len(small) and len(sel):
+    G_ = 400.0
+    bc = insts["c"][sel].astype(np.float64); bkey = {}
+    for j_, c_ in enumerate(bc):
+        bkey.setdefault((int(c_[0] // G_), int(c_[1] // G_), int(c_[2] // G_)), []).append(j_)
+    n_inh = 0
+    for ii in small:
+        c_ = insts["c"][ii].astype(np.float64); k_ = (int(c_[0] // G_), int(c_[1] // G_), int(c_[2] // G_))
+        cand = [j_ for dx in (-1, 0, 1) for dy in (-1, 0, 1) for dz in (-1, 0, 1) for j_ in bkey.get((k_[0] + dx, k_[1] + dy, k_[2] + dz), ())]
+        if cand:
+            d_ = np.linalg.norm(bc[cand] - c_, axis=1); j_ = int(np.argmin(d_))
+            if d_[j_] < G_:
+                occ[ii] = occ[sel[cand[j_]]]; n_inh += 1
+    print("small placements that inherit a neighbour's value: %d of %d" % (n_inh, len(small)), flush=True)
 with open(os.path.join(game, "maps", mapname + ".tsky"), "wb") as f:
     f.write(struct.pack("<4sII", b"TSKY", 1, ninst)); f.write(occ.tobytes())
 h = np.histogram(occ[sel], bins=[0, 26, 77, 128, 179, 230, 256])[0]

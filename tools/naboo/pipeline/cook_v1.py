@@ -54,6 +54,7 @@ GLOW_GAIN = cfg.get("glow_gain_range", [0.45, 0.8])       # the glow is added to
 GLOW_COLOR = cfg.get("glow_color", [1.0, 0.74, 0.42])
 # light fixtures whose emission the source's daylight scene sets to nearly zero; they glow where the sky is occluded
 GLOW_INDOOR = tuple(cfg.get("glow_indoor_materials", ["LightWall_06", "LightWall_01", "lightwall_01", "LightCeiling_01", "Desklibrary_Emissive"]))
+GLOW_SOLID = tuple(cfg.get("glow_solid_materials", ["candle_mat"]))
 GLOW_INDOOR_STRENGTH = float(cfg.get("glow_indoor_strength", 2.6))
 # Water classes, matched to the source materials (docs/UPDATE_water_pbr.md):
 #   water  river and pond surface: opaque, dark, mirror-like, two scrolling ripple layers (anim 1)
@@ -281,6 +282,13 @@ for name, m in mats.items():
             cls = "glass"
         elif b == "emissive_additive":
             cls = "add"
+    if any(name.startswith(w_) for w_ in GLOW_SOLID):
+        # candle flames and similar: the source gives them no usable material; drawn as a plain warm glow
+        gname = "textures/naboo/glow_solid"
+        shader_text[gname] = "%s\n{\n\tcull none\n\t{\n\t\tmap $whiteimage\n\t\tblendFunc GL_ONE GL_ONE\n\t\trgbGen identity\n\t}\n}\n" % gname
+        mat_of[name] = material_index(gname, tuple(round(c_ * GLOW_GAIN[1], 3) for c_ in GLOW_COLOR), 1 | (ANIM_GLOW << 1))
+        cls_count["glow_solid"] = cls_count.get("glow_solid", 0) + 1
+        continue
     cls_count[cls] = cls_count.get(cls, 0) + 1
     if cls == "invisible":
         mat_of[name] = -1; continue
@@ -331,12 +339,28 @@ for name, m in mats.items():
     if img and cls not in ("water", "glass"):
         tname = san(os.path.splitext(img)[0])[:44]
         tex_used[tname] = os.path.splitext(img)[0] + ".png"
+    dirt_ = None
+    if cls == "blend" and not img and b == "dirt_decal" and m.get("alpha_source"):
+        # dirt decals: the source draws a dark colour through the alpha of a packed map. Without a colour
+        # texture they came out as white patches; build one with the dirt colour and that alpha.
+        from PIL import Image as _Im
+        _src = os.path.join(PBR_TEX_DIR, os.path.splitext(m["alpha_source"][0])[0] + ".png")
+        if os.path.exists(_src):
+            dirt_ = "dd_" + san(os.path.splitext(m["alpha_source"][0])[0])[:40]
+            _dst = os.path.join(dump, "extras", dirt_ + ".png")
+            if not os.path.exists(_dst):
+                _a = np.asarray(_Im.open(_src).convert("RGBA")).copy()
+                _a[..., 0] = 46; _a[..., 1] = 38; _a[..., 2] = 31; _a[..., 3] = (_a[..., 3].astype(np.float32) * 0.85).astype(np.uint8)
+                _Im.fromarray(_a, "RGBA").save(_dst)
+            tname = dirt_; tex_used[dirt_] = os.path.join("..", "extras", dirt_ + ".png")
     if cls == "glass":
         tint = GLASS_TINT
     elif cls == "add":
         tint = tuple(round(x * GLOW_SCALE, 3) for x in srgb_tint(m.get("tint", [1, 1, 1])))
     else:
         tint = srgb_tint(m.get("tint", [1, 1, 1] if img else [0.6, 0.6, 0.6]))
+    if dirt_:
+        tint = (1.0, 1.0, 1.0)
     bk = BAKED.get(name) if cls == "opaque" else None
     if bk:
         tname = bk["tex"]; tex_used[tname] = os.path.join("..", "baked", bk["tex"] + ".png")

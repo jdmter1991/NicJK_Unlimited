@@ -97,8 +97,9 @@ void main() {
 		float phase = dot( vec2( in_row0.w, in_row1.w ), vec2( 0.0031, 0.0047 ) );	// per placement
 		float sway = sin( time * 1.1 + phase ) * 0.6 + sin( time * 2.3 + phase * 1.7 ) * 0.4;
 		float flutter = sin( time * 5.0 + dot( in_position, vec3( 0.11, 0.13, 0.17 ) ) );
-		world.xy += vec2( 0.8, 0.6 ) * ( sway * h * 0.012 );
-		world += n * ( flutter * min( h, 60.0 ) * 0.004 );
+		float wind = 1.0 - smoothstep( 0.35, 0.7, occ );				// plants indoors stand still too
+		world.xy += vec2( 0.8, 0.6 ) * ( sway * h * 0.012 * wind );
+		world += n * ( flutter * min( h, 60.0 ) * 0.004 * wind );
 	} else if ( anim == 6 ) {
 		vec2 tc = u_tw.eye.xy - world.xy;
 		tc *= inversesqrt( max( dot( tc, tc ), 1e-6 ) );
@@ -110,7 +111,7 @@ void main() {
 		float h = max( in_params.w - in_position.z, 0.0 );
 		float wave = sin( time * 1.7 + dot( world.xy, vec2( 0.020, 0.027 ) ) + in_position.z * 0.05 )
 				   + 0.5 * sin( time * 3.1 + in_position.z * 0.11 );
-		world += n * ( wave * min( h, 120.0 ) * 0.025 );
+		world += n * ( wave * min( h, 120.0 ) * 0.025 * ( 1.0 - smoothstep( 0.35, 0.7, occ ) ) );		// no wind indoors
 	}
 
 	float ndl = dot( n, u_entity.localLightOrigin.xyz );

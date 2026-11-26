@@ -29,6 +29,11 @@ not apply to placements.
 */
 
 #include "tr_local.h"
+#include <chrono>
+
+// CPU time of the cooked-world pass per section, summed between two statistics lines (r_tworldStats)
+static double s_twTime[4];
+static inline double TW_Now( void ) { return std::chrono::duration<double, std::milli>( std::chrono::steady_clock::now().time_since_epoch() ).count(); }
 
 #ifdef USE_VBO_MDV
 
@@ -153,6 +158,19 @@ typedef struct tworld_s {
 
 	// instanced path, per-frame scratch
 	int				*visInst;		// visible placement indexes
+	int				*visAllInst;	// placements that passed the view tests this view (both passes), and their detail levels
+	byte			*visAllLod;
+	int				numVisAll;
+	uint32_t		*visKey;		// distance bucket of each tested placement, then scratch for the sort
+	int				*sortInst;
+	byte			*sortLod;
+	int				*drawList;		// submeshes with something to draw in this pass, nearest first
+	struct twCullRec_s	*cullRecs;	// one compact record per placement, in cell order
+	// interior visibility (maps/<name>.tportal): an axis-aligned interior box and the openings out of it
+	qboolean		hasPortal;
+	vec3_t			portalMins, portalMaxs;
+	int				numPortals;
+	float			portals[8][6];	// axis (0 = plane x, 1 = plane y), plane position, centre along the other axis, centre z, half width, half height
 
 	// placements grouped into cells of a grid, small ones and large ones separately, so that whole cells can be
 	// rejected by the view frustum and, for small placements, by distance
@@ -214,6 +232,7 @@ static cvar_t	*r_tworldHaze;
 static cvar_t	*r_tworldLamps;
 static cvar_t	*r_tworldIndoor;
 static cvar_t	*r_tworldAO;
+static cvar_t	*r_tworldPortal;
 
 
 static const int64_t		*s_cellKeys;
@@ -232,6 +251,13 @@ TW_BuildCells
 Sorts the placements by (size class, grid cell) and records each cell's bounding sphere.
 =================
 */
+typedef struct twCullRec_s {
+	vec3_t	center;
+	float	radius;
+	int		inst;
+	int		numLods;
+} twCullRec_t;				// 24 bytes
+
 static void TW_BuildCells( tworld_t *tw )
 {
 	const int n = tw->numInstances;
@@ -280,6 +306,14 @@ static void TW_BuildCells( tworld_t *tw )
 		cell->radius = Distance( maxs, cell->center ) + cell->maxInstRadius;
 	}
 	Z_Free( keys );
+	tw->cullRecs = (twCullRec_t *)ri.Hunk_Alloc( sizeof( twCullRec_t ) * ( n + 1 ), h_low );
+	for ( i = 0; i < n; i++ ) {
+		const tworldInst_t *in = &tw->instances[tw->cellOrder[i]];
+		VectorCopy( in->center, tw->cullRecs[i].center );
+		tw->cullRecs[i].radius = in->radius;
+		tw->cullRecs[i].inst = tw->cellOrder[i];
+		tw->cullRecs[i].numLods = tw->meshes[in->mesh].numLods;
+	}
 	ri.Printf( PRINT_ALL, "R_LoadTWorld: %i placements in %i culling cells\n", n, numCells );
 }
 
@@ -509,9 +543,9 @@ void R_LoadTWorld( const char *bspName )
 	r_tworld = ri.Cvar_Get( "r_tworld", "1", CVAR_ARCHIVE_ND, "Draw the cooked static world (maps/<name>.tworld) when a map has one" );
 	r_tworldStats = ri.Cvar_Get( "r_tworldStats", "0", CVAR_TEMP, "Print cooked-world draw statistics once per second" );
 	// sizes are bounding-sphere radius divided by distance (roughly 1/1000 per pixel of radius at 1080p)
-	r_tworldCullSize = ri.Cvar_Get( "r_tworldCullSize", "0.004", CVAR_ARCHIVE_ND, "Cooked world: skip placements smaller than this (radius / distance)" );
-	r_tworldLodSize1 = ri.Cvar_Get( "r_tworldLodSize1", "0.12", CVAR_ARCHIVE_ND, "Cooked world: use detail level 1 below this size (radius / distance)" );
-	r_tworldLodSize2 = ri.Cvar_Get( "r_tworldLodSize2", "0.035", CVAR_ARCHIVE_ND, "Cooked world: use detail level 2 below this size (radius / distance)" );
+	r_tworldCullSize = ri.Cvar_Get( "r_tworldCullSize", "0.0055", CVAR_ARCHIVE_ND, "Cooked world: skip placements smaller than this (radius / distance)" );
+	r_tworldLodSize1 = ri.Cvar_Get( "r_tworldLodSize1", "0.15", CVAR_ARCHIVE_ND, "Cooked world: use detail level 1 below this size (radius / distance)" );
+	r_tworldLodSize2 = ri.Cvar_Get( "r_tworldLodSize2", "0.045", CVAR_ARCHIVE_ND, "Cooked world: use detail level 2 below this size (radius / distance)" );
 	r_tworldLight = ri.Cvar_Get( "r_tworldLight", "1", CVAR_ARCHIVE_ND, "Cooked world: brightness scale of the sun and ambient light" );
 
 	r_tworldShadows = ri.Cvar_Get( "r_tworldShadows", "1", CVAR_ARCHIVE_ND, "Cooked world: baked sun shadows, 0 = off, up to 1 = sun fully removed in shadow" );
@@ -521,6 +555,7 @@ void R_LoadTWorld( const char *bspName )
 	r_tworldPBR = ri.Cvar_Get( "r_tworldPBR", "1", CVAR_ARCHIVE_ND, "Cooked world: 1 = physically based shading (normal maps, roughness, metallic), 0 = classic shading" );
 	r_tworldFoliageLight = ri.Cvar_Get( "r_tworldFoliageLight", "0.6", CVAR_ARCHIVE_ND, "Cooked world: share of the ambient light that reaches foliage (1 = lit like open surfaces)" );
 	r_tworldHaze = ri.Cvar_Get( "r_tworldHaze", "110000", CVAR_ARCHIVE_ND, "Cooked world: distance in world units at which haze has taken half of the view (0 = no haze)" );
+	r_tworldPortal = ri.Cvar_Get( "r_tworldPortal", "1", CVAR_ARCHIVE_ND, "Cooked world: inside an interior, draw the outside only through its openings (0 = draw everything)" );
 	r_tworldAO = ri.Cvar_Get( "r_tworldAO", "0.6", CVAR_ARCHIVE_ND, "Cooked world: strength of the baked ambient occlusion of each mesh (0 = off)" );
 	r_tworldIndoor = ri.Cvar_Get( "r_tworldIndoor", "0.55", CVAR_ARCHIVE_ND, "Cooked world: share of the ambient light inside fully enclosed spaces (1 = no darkening)" );
 	r_tworldLamps = ri.Cvar_Get( "r_tworldLamps", "1", CVAR_ARCHIVE_ND, "Cooked world: brightness of the local lights (lamps), 0 = off" );
@@ -652,6 +687,12 @@ void R_LoadTWorld( const char *bspName )
 	}
 	tw->visInst = (int *)ri.Hunk_Alloc( sizeof( int ) * ( h->numInstances + 1 ), h_low );
 	tw->visLod = (byte *)ri.Hunk_Alloc( h->numInstances + 1, h_low );
+	tw->visAllInst = (int *)ri.Hunk_Alloc( sizeof( int ) * ( h->numInstances + 1 ), h_low );
+	tw->visAllLod = (byte *)ri.Hunk_Alloc( h->numInstances + 1, h_low );
+	tw->visKey = (uint32_t *)ri.Hunk_Alloc( sizeof( uint32_t ) * ( h->numInstances + 1 ), h_low );
+	tw->sortInst = (int *)ri.Hunk_Alloc( sizeof( int ) * ( h->numInstances + 1 ), h_low );
+	tw->sortLod = (byte *)ri.Hunk_Alloc( h->numInstances + 1, h_low );
+	tw->drawList = (int *)ri.Hunk_Alloc( sizeof( int ) * ( h->numSubmeshes + 1 ), h_low );
 	tw->batchCount = (int *)ri.Hunk_Alloc( sizeof( int ) * ( h->numSubmeshes + 1 ) * 3, h_low );
 	tw->batchStart = tw->batchCount + h->numSubmeshes + 1;
 	tw->batchCursor = tw->batchStart + h->numSubmeshes + 1;
@@ -819,6 +860,28 @@ void R_LoadTWorld( const char *bspName )
 	}
 	TW_BuildCells( tw );
 	{
+		// optional interior visibility: "TPRT", version 1, count, six floats (box), then six floats per opening
+		char pname[MAX_QPATH];
+		byte *pbuf = NULL;
+		long plen;
+		COM_StripExtension( bspName, pname, sizeof( pname ) );
+		Q_strcat( pname, sizeof( pname ), ".tportal" );
+		plen = ri.FS_ReadFile( pname, (void **)&pbuf );
+		if ( plen >= 36 && pbuf && !memcmp( pbuf, "TPRT", 4 ) && ( (const uint32_t *)pbuf )[1] == 1 ) {
+			const uint32_t n = ( (const uint32_t *)pbuf )[2];
+			if ( n <= 8 && (size_t)plen == 36 + (size_t)n * 24 ) {
+				Com_Memcpy( tw->portalMins, pbuf + 12, 12 );
+				Com_Memcpy( tw->portalMaxs, pbuf + 24, 12 );
+				Com_Memcpy( tw->portals, pbuf + 36, n * 24 );
+				tw->numPortals = (int)n;
+				tw->hasPortal = qtrue;
+				ri.Printf( PRINT_ALL, "R_LoadTWorld: %s: interior box with %i openings\n", pname, tw->numPortals );
+			}
+		}
+		if ( pbuf )
+			ri.FS_FreeFile( pbuf );
+	}
+	{
 		// optional local lights: "TLGT", version 1, count, then 8 floats per light
 		char lname[MAX_QPATH];
 		byte *lbuf = NULL;
@@ -928,7 +991,7 @@ static qboolean RB_TWorldInstanced( tworld_t *tw, const int pass )
 	const float		light = r_tworldLight->value;
 	const float		*viewOrg = backEnd.viewParms.ori.origin;
 	const int		mirror = ( backEnd.viewParms.portalView == PV_MIRROR ) ? 1 : 0;
-	int				i, j, p, ci, k, numVis = 0, total = 0, run = 0, draws = 0, indexes = 0;
+	int				i, j, p, ci, k, numVis = 0, total = 0, run = 0, draws = 0, indexes = 0, numDrawList = 0;
 	uint32_t		bufOffset, uboOffset, mainOffset = ~0U;
 	const qboolean	usePbr = (qboolean)( r_tworldPBR->integer != 0 );
 	twInstData_t	*data;
@@ -942,59 +1005,167 @@ static qboolean RB_TWorldInstanced( tworld_t *tw, const int pass )
 		tw->c_lod[0] = tw->c_lod[1] = tw->c_lod[2] = 0;
 	}
 
+	const double tA = TW_Now();
 	Com_Memset( tw->batchCount, 0, sizeof( int ) * tw->numSubs );
 
-	for ( ci = 0; ci < tw->numCells; ci++ ) {
-	const twCell_t *cell = &tw->cells[ci];
-	if ( cull ) {
-		vec3_t cd;
-		float cdist;
-		for ( p = 0; p < 4; p++ ) {
-			if ( DotProduct( cell->center, frustum[p].normal ) - frustum[p].dist < -cell->radius )
-				break;
+	if ( pass == 0 ) {
+		// view tests, once per view. size = radius / ( distance - radius ) < limit  <=>  distance > radius * ( 1 + limit ) / limit
+		const float kCull = ( cullSize > 0.0f ) ? ( 1.0f + cullSize ) / cullSize : 0.0f;
+		const float kLod1 = ( lodSize1 > 0.0f ) ? ( 1.0f + lodSize1 ) / lodSize1 : 1e30f;
+		const float kLod2 = ( lodSize2 > 0.0f ) ? ( 1.0f + lodSize2 ) / lodSize2 : 1e30f;
+		int nAll = 0;
+		// camera inside the interior box (not for mirror or portal views)
+		const qboolean inside = (qboolean)( tw->hasPortal && r_tworldPortal->integer && backEnd.viewParms.portalView == PV_NONE
+			&& viewOrg[0] > tw->portalMins[0] && viewOrg[0] < tw->portalMaxs[0] && viewOrg[1] > tw->portalMins[1] && viewOrg[1] < tw->portalMaxs[1]
+			&& viewOrg[2] > tw->portalMins[2] && viewOrg[2] < tw->portalMaxs[2] );
+		for ( ci = 0; ci < tw->numCells; ci++ ) {
+			const twCell_t *cell = &tw->cells[ci];
+			const twCullRec_t *rec = &tw->cullRecs[cell->first];
+			if ( cull ) {
+				vec3_t cd;
+				float cdist;
+				for ( p = 0; p < 4; p++ ) {
+					if ( DotProduct( cell->center, frustum[p].normal ) - frustum[p].dist < -cell->radius )
+						break;
+				}
+				if ( p < 4 )
+					continue;
+				// too far for even the largest placement of the cell to pass the size test
+				VectorSubtract( cell->center, viewOrg, cd );
+				cdist = VectorLength( cd ) - cell->radius;
+				if ( cdist > 1.0f && cell->maxInstRadius < cullSize * cdist ) {
+					tw->c_small += cell->count;
+					continue;
+				}
+			}
+			if ( inside && cell->maxInstRadius < 1500.0f ) {
+				// a whole cell outside the interior that cannot be seen through any opening
+				const float m = cell->radius + 150.0f;
+				if ( cell->center[0] < tw->portalMins[0] - m || cell->center[0] > tw->portalMaxs[0] + m
+					|| cell->center[1] < tw->portalMins[1] - m || cell->center[1] > tw->portalMaxs[1] + m ) {
+					vec3_t cd2;
+					int pi;
+					VectorSubtract( cell->center, viewOrg, cd2 );
+					for ( pi = 0; pi < tw->numPortals; pi++ ) {
+						const float *po = tw->portals[pi];
+						const int ax = ( po[0] > 0.5f ) ? 1 : 0, ox = 1 - ax;
+						float tt, grow;
+						if ( fabsf( cd2[ax] ) < 1e-3f )
+							break;				// cannot tell: keep the cell
+						tt = ( po[1] - viewOrg[ax] ) / cd2[ax];
+						if ( tt <= 0.0f )
+							continue;
+						if ( tt > 1.0f )
+							tt = 1.0f;
+						grow = cell->radius * tt + 16.0f;
+						if ( fabsf( viewOrg[ox] + cd2[ox] * tt - po[2] ) < po[4] + grow )
+							break;
+					}
+					if ( pi == tw->numPortals ) {
+						tw->c_small += cell->count;
+						continue;
+					}
+				}
+			}
+			for ( k = 0; k < cell->count; k++, rec++ ) {
+				vec3_t	d;
+				float	d2, t;
+				int		lod = 0;
+
+				if ( cull ) {
+					for ( p = 0; p < 4; p++ ) {
+						if ( DotProduct( rec->center, frustum[p].normal ) - frustum[p].dist < -rec->radius )
+							break;
+					}
+					if ( p < 4 )
+						continue;
+				}
+				VectorSubtract( rec->center, viewOrg, d );
+				// (placements that are themselves enclosed belong to the interior wherever they stand)
+				if ( inside && rec->radius < 1500.0f && !( tw->skyOcc && tw->skyOcc[rec->inst] >= 120 ) ) {
+					const float m = rec->radius + 150.0f;
+					if ( rec->center[0] < tw->portalMins[0] - m || rec->center[0] > tw->portalMaxs[0] + m
+						|| rec->center[1] < tw->portalMins[1] - m || rec->center[1] > tw->portalMaxs[1] + m
+						|| rec->center[2] < tw->portalMins[2] - m || rec->center[2] > tw->portalMaxs[2] + m ) {
+						// outside the interior: visible only through an opening. The line from the eye to the placement
+						// must cross the opening's plane inside its rectangle, grown by the placement's radius.
+						int pi;
+						for ( pi = 0; pi < tw->numPortals; pi++ ) {
+							const float *po = tw->portals[pi];
+							const int ax = ( po[0] > 0.5f ) ? 1 : 0, ox = 1 - ax;
+							const float den = d[ax];
+							float tt, hx, hz, grow;
+							if ( fabsf( den ) < 1e-3f )
+								continue;
+							tt = ( po[1] - viewOrg[ax] ) / den;
+							if ( tt <= 0.0f || tt > 1.0f )
+								continue;
+							grow = rec->radius * tt + 16.0f;
+							hx = viewOrg[ox] + d[ox] * tt - po[2];
+							hz = viewOrg[2] + d[2] * tt - po[3];
+							if ( fabsf( hx ) < po[4] + grow && fabsf( hz ) < po[5] + grow )
+								break;
+						}
+						if ( pi == tw->numPortals ) {
+							tw->c_small++;
+							continue;
+						}
+					}
+				}
+				d2 = DotProduct( d, d );
+				t = rec->radius + 1.0f;
+				if ( d2 > t * t ) {
+					t = rec->radius * kCull;
+					if ( kCull > 0.0f && d2 > t * t ) {
+						tw->c_small++;
+						continue;
+					}
+					t = rec->radius * kLod2;
+					if ( rec->numLods > 2 && d2 > t * t )
+						lod = 2;
+					else {
+						t = rec->radius * kLod1;
+						if ( rec->numLods > 1 && d2 > t * t )
+							lod = 1;
+					}
+				}
+				tw->sortInst[nAll] = rec->inst;
+				tw->sortLod[nAll] = (byte)lod;
+				{
+					// bucket = exponent of the squared distance to the placement's near side, two buckets per doubling
+					float nearD = sqrtf( d2 ) - rec->radius;
+					uint32_t bits;
+					int b;
+					if ( nearD < 1.0f ) nearD = 1.0f;
+					Com_Memcpy( &bits, &nearD, 4 );
+					b = (int)( bits >> 22 ) - ( 127 << 1 );
+					tw->visKey[nAll] = (uint32_t)( b < 0 ? 0 : ( b > 63 ? 63 : b ) );
+				}
+				nAll++;
+			}
 		}
-		if ( p < 4 )
-			continue;
-		// too far for even the largest placement of the cell to pass the size test
-		VectorSubtract( cell->center, viewOrg, cd );
-		cdist = VectorLength( cd ) - cell->radius;
-		if ( cdist > 1.0f && cell->maxInstRadius < cullSize * cdist ) {
-			if ( pass == 0 )
-				tw->c_small += cell->count;
-			continue;
+		{
+			// counting sort, nearest first
+			int cnt[65], b;
+			Com_Memset( cnt, 0, sizeof( cnt ) );
+			for ( k = 0; k < nAll; k++ )
+				cnt[tw->visKey[k] + 1]++;
+			for ( b = 1; b < 65; b++ )
+				cnt[b] += cnt[b - 1];
+			for ( k = 0; k < nAll; k++ ) {
+				const int at = cnt[tw->visKey[k]]++;
+				tw->visAllInst[at] = tw->sortInst[k];
+				tw->visAllLod[at] = tw->sortLod[k];
+			}
 		}
+		tw->numVisAll = nAll;
 	}
-	for ( k = 0; k < cell->count; k++ ) {
-		const int i = tw->cellOrder[cell->first + k];
-		const tworldInst_t *inst = &tw->instances[i];
-		const tworldMesh_t *mesh = &tw->meshes[inst->mesh];
-		vec3_t	d;
-		float	dist;
-		int		lod = 0;
 
-		if ( cull ) {
-			for ( p = 0; p < 4; p++ ) {
-				if ( DotProduct( inst->center, frustum[p].normal ) - frustum[p].dist < -inst->radius )
-					break;
-			}
-			if ( p < 4 )
-				continue;
-		}
-
-		VectorSubtract( inst->center, viewOrg, d );
-		dist = VectorLength( d ) - inst->radius;
-		if ( dist > 1.0f ) {
-			const float size = inst->radius / dist;
-			if ( size < cullSize ) {
-				if ( pass == 0 )
-					tw->c_small++;
-				continue;
-			}
-			if ( mesh->numLods > 2 && size < lodSize2 )
-				lod = 2;
-			else if ( mesh->numLods > 1 && size < lodSize1 )
-				lod = 1;
-		}
+	// this pass: the placements whose mesh has something to draw in it
+	for ( k = 0; k < tw->numVisAll; k++ ) {
+		const int i = tw->visAllInst[k];
+		const int lod = tw->visAllLod[k];
+		const tworldMesh_t *mesh = &tw->meshes[tw->instances[i].mesh];
 
 		if ( !( mesh->lodPassMask[lod] & ( 1 << pass ) ) )
 			continue;
@@ -1006,7 +1177,8 @@ static qboolean RB_TWorldInstanced( tworld_t *tw, const int pass )
 		for ( j = 0; j < mesh->lodNumSubs[lod]; j++ ) {
 			const int s = mesh->lodFirstSub[lod] + j;
 			if ( tw->subs[s].pass == pass && tw->subs[s].surf.numIndexes ) {
-				tw->batchCount[s]++;
+				if ( tw->batchCount[s]++ == 0 )
+					tw->drawList[numDrawList++] = s;		// first seen = nearest
 				total++;
 			}
 		}
@@ -1016,8 +1188,9 @@ static qboolean RB_TWorldInstanced( tworld_t *tw, const int pass )
 			tw->c_lod[lod]++;
 		}
 	}
-	}
 
+	const double tB = TW_Now();
+	s_twTime[0] += tB - tA;
 	if ( !total )
 		return qtrue;
 
@@ -1058,34 +1231,36 @@ static qboolean RB_TWorldInstanced( tworld_t *tw, const int pass )
 			// how enclosed the viewer is: the sky occlusion of the small placements within 500 units, nearer ones
 			// counting more, eased over a few frames (window panes show daylight only to a viewer indoors)
 			static float viewerIndoor = 0.0f;
+			static int indoorTick = 0;
 			float sum = 0.0f, wsum = 0.0f, target = 0.0f;
-			if ( tw->skyOcc ) {
+			if ( tw->skyOcc && pass == 0 && ( indoorTick++ & 7 ) == 0 ) {
 				int ii;
+				float sum = 0.0f, wsum = 0.0f, target = 0.0f;
 				for ( ii = 0; ii < tw->numInstances; ii++ ) {
-					const tworldInst_t *in = &tw->instances[ii];
+					const twCullRec_t *rec = &tw->cullRecs[ii];
 					vec3_t dd;
 					float d2;
-					if ( in->radius < 40.0f || in->radius > 900.0f )
+					if ( rec->radius < 40.0f || rec->radius > 900.0f )
 						continue;
-					VectorSubtract( in->center, viewOrg, dd );
+					VectorSubtract( rec->center, viewOrg, dd );
 					d2 = DotProduct( dd, dd );
 					if ( d2 < 500.0f * 500.0f ) {
 						const float wgt = 1.0f / ( 100.0f + sqrtf( d2 ) );
-						sum += wgt * tw->skyOcc[ii]; wsum += wgt;
+						sum += wgt * tw->skyOcc[rec->inst]; wsum += wgt;
 					}
 				}
 				if ( wsum > 0.0f )
 					target = Com_Clamp( 0.0f, 1.0f, ( sum / wsum / 255.0f - 0.35f ) / 0.3f );
+				viewerIndoor += ( target - viewerIndoor ) * 0.6f;
 			}
-			viewerIndoor += ( target - viewerIndoor ) * 0.15f;
 			f[39] = viewerIndoor;
 		}
 		f[11] = tw->originM[0];
 		f[15] = tw->originM[1];
 		if ( tw->numLights && r_tworldLamps->value > 0.0f ) {
 			// the four lights nearest the camera (distance beyond their radius)
-			int best[4] = { -1, -1, -1, -1 };
-			float bestD[4] = { 1e30f, 1e30f, 1e30f, 1e30f };
+			int best[5] = { -1, -1, -1, -1, -1 };
+			float bestD[5] = { 1e30f, 1e30f, 1e30f, 1e30f, 1e30f };
 			int li, lj, lk;
 			for ( li = 0; li < tw->numLights; li++ ) {
 				const float *L = tw->lights + li * 8;
@@ -1093,9 +1268,9 @@ static qboolean RB_TWorldInstanced( tworld_t *tw, const int pass )
 				float dist;
 				VectorSubtract( L, viewOrg, dd );
 				dist = VectorLength( dd ) - L[3];
-				for ( lj = 0; lj < 4; lj++ ) {
+				for ( lj = 0; lj < 5; lj++ ) {
 					if ( dist < bestD[lj] ) {
-						for ( lk = 3; lk > lj; lk-- ) { best[lk] = best[lk - 1]; bestD[lk] = bestD[lk - 1]; }
+						for ( lk = 4; lk > lj; lk-- ) { best[lk] = best[lk - 1]; bestD[lk] = bestD[lk - 1]; }
 						best[lj] = li; bestD[lj] = dist;
 						break;
 					}
@@ -1106,7 +1281,14 @@ static qboolean RB_TWorldInstanced( tworld_t *tw, const int pass )
 					const float *L = tw->lights + best[lj] * 8;
 					VectorCopy( L, f + 16 + lj * 4 );
 					f[16 + lj * 4 + 3] = 1.0f / ( L[3] * L[3] );
-					VectorScale( L + 4, r_tworldLamps->value, f + 32 + lj * 4 );
+					// fade each lamp out as it approaches the distance of the fifth nearest: it reaches zero just
+					// before another lamp takes its place, so lamps never switch on or off visibly
+					float fadeL = 1.0f;
+					if ( best[4] >= 0 ) {
+						const float span = ( bestD[4] > 0.0f ? bestD[4] : 0.0f ) * 0.3f + 60.0f;
+						fadeL = Com_Clamp( 0.0f, 1.0f, ( bestD[4] - bestD[lj] ) / span );
+					}
+					VectorScale( L + 4, r_tworldLamps->value * fadeL, f + 32 + lj * 4 );
 				}
 			}
 		}
@@ -1121,6 +1303,8 @@ static qboolean RB_TWorldInstanced( tworld_t *tw, const int pass )
 		return qtrue;
 	}
 
+	const double tC = TW_Now();
+	s_twTime[1] += tC - tB;
 	for ( i = 0; i < tw->numSubs; i++ ) {
 		tw->batchStart[i] = tw->batchCursor[i] = run;
 		run += tw->batchCount[i];
@@ -1163,6 +1347,8 @@ static qboolean RB_TWorldInstanced( tworld_t *tw, const int pass )
 		}
 	}
 
+	const double tD = TW_Now();
+	s_twTime[2] += tD - tC;
 	// world matrix in the push constants, dynamic state, our lighting uniform
 	Com_Memcpy( vk_world.modelview_transform, backEnd.viewParms.world.modelViewMatrix, 64 );
 	vk_update_mvp( NULL );
@@ -1172,8 +1358,9 @@ static qboolean RB_TWorldInstanced( tworld_t *tw, const int pass )
 	vk_update_descriptor_offset( VK_DESC_UNIFORM_ENTITY_BINDING, uboOffset );
 	vk_update_descriptor_offset( VK_DESC_UNIFORM_MAIN_BINDING, mainOffset );
 
-	for ( i = 0; i < tw->numSubs; i++ ) {
-		const int s = tw->subOrder[i];
+	// opaque pass: nearest batch first; blended pass: the fixed order
+	for ( i = 0; i < ( pass == 0 ? numDrawList : tw->numSubs ); i++ ) {
+		const int s = ( pass == 0 ) ? tw->drawList[i] : tw->subOrder[i];
 		const int count = tw->batchCount[s];
 		tworldSub_t *sub = &tw->subs[s];
 		const shaderStage_t *stage;
@@ -1230,6 +1417,7 @@ static qboolean RB_TWorldInstanced( tworld_t *tw, const int pass )
 	}
 
 	vk_tworld_reset_descriptors();
+	s_twTime[3] += TW_Now() - tD;
 
 	if ( pass == 0 ) {
 		tw->c_draws = draws;
@@ -1377,10 +1565,18 @@ void RB_SurfaceTWorld( void *surface )
 stats:
 	if ( pass == 0 && r_tworldStats && r_tworldStats->integer && backEnd.viewParms.portalView == PV_NONE ) {
 		const int now = ri.Milliseconds();
+		static int statFrames = 0;
+		statFrames++;
 		if ( now - tw->lastStatsTime >= 1000 ) {
+			const float fps = statFrames * 1000.0f / (float)( now - tw->lastStatsTime );
+			const double statN = statFrames > 0 ? statFrames : 1;
+			statFrames = 0;
 			tw->lastStatsTime = now;
-			ri.Printf( PRINT_ALL, "TWORLD view: %i of %i instances (lod %i/%i/%i, %i too small), %i draws, %i tris%s\n",
-				tw->c_instances, tw->numInstances, tw->c_lod[0], tw->c_lod[1], tw->c_lod[2], tw->c_small,
+			ri.Printf( PRINT_ALL, "TWORLD cpu ms per frame: cull %.2f, uniforms %.2f, fill %.2f, draw %.2f (frame %.2f)\n",
+				s_twTime[0] / statN, s_twTime[1] / statN, s_twTime[2] / statN, s_twTime[3] / statN, 1000.0f / fps );
+			s_twTime[0] = s_twTime[1] = s_twTime[2] = s_twTime[3] = 0.0;
+			ri.Printf( PRINT_ALL, "TWORLD view: %.0f fps, %i of %i instances (lod %i/%i/%i, %i too small), %i draws, %i tris%s\n",
+				fps, tw->c_instances, tw->numInstances, tw->c_lod[0], tw->c_lod[1], tw->c_lod[2], tw->c_small,
 				tw->c_draws, tw->c_indexes / 3, tw->c_uboFail ? " UNIFORM BUFFER FULL" : "" );
 		}
 	}

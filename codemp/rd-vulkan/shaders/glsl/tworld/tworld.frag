@@ -157,7 +157,8 @@ void main() {
 
 	bool pbr = u_tw.spare.x > 0.5 && ( frag_anim.x < 0.5 || frag_anim.x > 5.5 );		// 6 = billboard: shaded like a static surface
 
-	float vis = sun_visibility();
+	// a surface that faces away from the sun is in its own shadow: no need to look the shadow map up
+	float vis = ( dot( frag_normal, u_entity.localLightOrigin.xyz ) > 0.0 || frag_anim.x > 0.5 ) ? sun_visibility() : 0.0;
 	vec3 lamps = local_lights( normalize( frag_normal ) );
 	vec3 lit = frag_color.rgb + frag_sun * vis + frag_tint * lamps;
 	vec4 color = vec4( base.rgb * lit, base.a * frag_color.a );
@@ -230,8 +231,16 @@ void main() {
 		vec3 R = reflect( -V, N );
 		vec3 skyc = ( R.z > 0.0 ) ? mix( u_tw.skyHorizon.rgb, u_tw.skyZenith.rgb, pow( R.z, 0.5 ) ) : u_tw.skyHorizon.rgb * mix( 1.0, 0.35, clamp( -R.z * 4.0, 0.0, 1.0 ) );
 		vec3 env = pow( skyc * ( 0.7 * ambShare ), vec3( 2.2 ) );		// enclosed placements do not mirror the sky
+		// ... they mirror a room instead: warm walls with a broad band of window light on two opposite sides, which
+		// gives polished columns and floors the streaks of light the source's interiors show
+		if ( frag_amb > 0.01 ) {
+			float az = atan( R.y, R.x );
+			float win = smoothstep( 0.45 - 0.35 * rough, 0.98, cos( az * 2.0 + 0.6 ) ) * smoothstep( -0.15, 0.1, R.z ) * ( 1.0 - smoothstep( 0.55, 0.85, R.z ) );
+			vec3 room = vec3( 0.20, 0.15, 0.11 ) + vec3( 0.95, 0.86, 0.72 ) * win;
+			env = mix( env, pow( room, vec3( 2.2 ) ) * ( 0.35 + u_tw.lightColor[0].a ), frag_amb * frag_amb );
+		}
 		vec3 Fr = F0 + ( max( vec3( 1.0 - rough ), F0 ) - F0 ) * pow( 1.0 - ndv, 5.0 );
-		vec3 specAmb = env * Fr * ( ( 1.0 - rough ) * ( 1.0 - rough ) );		// rough surfaces show no sky reflection
+		vec3 specAmb = env * Fr * mix( ( 1.0 - rough ) * ( 1.0 - rough ), ( 1.0 - rough ) * 0.7, frag_amb * frag_amb );		// rough surfaces show no sky reflection
 
 		// a mirror-smooth metal shows only reflections; a rough one scatters the light around it, which here is the
 		// same light a non-metal receives, tinted by the metal's colour (without this, rough metals came out black)
