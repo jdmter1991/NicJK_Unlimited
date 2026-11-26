@@ -115,7 +115,7 @@
   "line_tolerance": 0.05,
   "merge_max_corners": 12,
   "merge_max_extent": 1024.0,
-  "bot_wall_above": 320.0
+  "bot_wall_above": 1200.0
  },
  "shadow": {
   "size": 6912,
@@ -170,6 +170,20 @@
  "far_water_gap_m": 0.0,
  "_note_exact_geometry": "2026-11-26, user: the whole map's geometry should match the source file exactly. Terrain lowering under water and generated gap-fill water are off; only invisible gameplay helpers (deep-water floor, kill volume, bot walls) are added.",
  "collision_terrain": {
-  "floor_cover_radius_units": 300.0
- }
+  "floor_cover_radius_units": 300.0,
+  "drop_terrain_under_floors": false
+ },
+ "avoid_zones": [
+  {
+   "name": "west garden lawn (plain grass and blob bushes, user 2026-11-27)",
+   "box": [
+    -8400,
+    4300,
+    -4300,
+    8000
+   ],
+   "lawn_only": true,
+   "min_grass": 0.5
+  }
+ ]
 }

@@ -44,6 +44,11 @@ SURF_NODRAW_COL = 0x00200000; CONT_SOLID = 0x00008001      # as written by q3map
 SURF_SKY = 0x00082000
 
 tris = np.load(os.path.join(export_dir, "collision", "collision_tris.npy")).astype(np.float64)
+_sk = os.path.join(export_dir, "collision", "skirts.npy")
+if os.path.exists(_sk) and cfg.get("backdrop_skirts", {}).get("use", True):
+    # invisible walls closing the hidden space under the backdrop canal walkways (tools/backdrop_skirts.py)
+    _s = np.load(_sk).astype(np.float64).reshape(-1, *tris.shape[1:])
+    tris = np.concatenate([tris, _s]); print("backdrop skirts: %d triangles" % len(_s))
 N_IN = len(tris)
 # opening doors (tools/build_doors.py): their static collision goes, each leaf comes back as a brush model
 DOORS = None
@@ -324,7 +329,7 @@ def water_edge_walls(wb):
         for gx_ in range(bx0[t_], bx1[t_] + 1):
             for gy_ in range(by0[t_], by1[t_] + 1):
                 bk.setdefault((gx_, gy_), []).append(t_)
-    covered = np.zeros(len(cxs), bool)
+    covered = np.zeros(len(cxs), bool); cover_h = np.full(len(cxs), np.inf)
     kx_ = np.floor(cxs / CELLW).astype(np.int64); ky_ = np.floor(cys / CELLW).astype(np.int64)
     for key in set(zip(kx_.tolist(), ky_.tolist())):
         fi = bk.get(key)
@@ -338,9 +343,13 @@ def water_edge_walls(wb):
             u = (dxw * e2[None, :, 1] - dyw * e2[None, :, 0]) / det[None, :]; v = (dyw * e1[None, :, 0] - dxw * e1[None, :, 1]) / det[None, :]
         ins = (np.abs(det)[None, :] > 1e-6) & (u >= 0) & (v >= 0) & (u + v <= 1)
         hz = a[None, :, 2] + u * e1[None, :, 2] + v * e2[None, :, 2] - tps[pi][:, None]
-        covered[pi] = (ins & (hz > 8) & (hz < 600)).any(1)
+        okh = ins & (hz > 8) & (hz < 600)
+        covered[pi] = okh.any(1)
+        cover_h[pi] = np.where(okh, hz, np.inf).min(1)
     wet_open = np.zeros_like(wet); wet_open[jj_[~covered], ii_[~covered]] = True
     print("water cells %d, open %d, under a floor or bridge %d" % (len(cxs), int((~covered).sum()), int(covered.sum())))
+    wet_all = wet.copy()
+    capr = np.full(wet.shape, np.inf); capr[jj_, ii_] = cover_h
     wet = wet_open
     th = float(_w.get("bot_wall_thickness", 8.0)); below = float(_w.get("bot_wall_below", 16.0)); above = float(_w.get("bot_wall_above", 128.0))
     out = []
@@ -363,17 +372,59 @@ def water_edge_walls(wb):
                 x0 = X0 + (run[0] - 1) * cs; x1 = X0 + (run[-1]) * cs
                 t = np.nanmax(top[j, run])
                 out.append([(x0, y - th / 2, t - below), (x1, y + th / 2, t + above)])
-    return np.array(out, np.float64).reshape(-1, 2, 3)
+    # water under quay paving and bridges: walls along its dry banks too, ending 8 units under the floor above
+    cov = wet_all & ~wet
+    n_cov = 0
+    for axis_, d_ in ((1, -1), (1, 1), (0, -1), (0, 1)):
+        edge = cov & ~np.roll(wet_all, -d_, axis=axis_)
+        for j, i in zip(*np.nonzero(edge)):
+            t = top[j, i]; cap = capr[j, i]
+            if not np.isfinite(cap) or cap < 48:
+                continue
+            n_cov += 1
+            if axis_ == 1:
+                x = X0 + (i - 1 + (1 if d_ > 0 else 0)) * cs
+                out.append([(x - th / 2, Y0 + (j - 1) * cs, t - below), (x + th / 2, Y0 + j * cs, t + cap - 8)])
+            else:
+                y = Y0 + (j - 1 + (1 if d_ > 0 else 0)) * cs
+                out.append([(X0 + (i - 1) * cs, y - th / 2, t - below), (X0 + i * cs, y + th / 2, t + cap - 8)])
+    print("bot walls under floors and bridges: %d" % n_cov)
+    # water that runs on under a low floor (quay paving, backdrop canal tops): the source closes these spaces only to
+    # the eye. A solid invisible wall for everyone where open water meets them, from deep under the water up to the
+    # floor, so nobody swims into the hidden space under the quay
+    low = float(_w.get("closed_cover_below", 200.0)); deep = float(_w.get("closed_cover_depth", 1200.0))
+    solid = []
+    for axis_, d_ in ((1, -1), (1, 1), (0, -1), (0, 1)):
+        edge = cov & np.roll(wet, -d_, axis=axis_)
+        for j, i in zip(*np.nonzero(edge)):
+            t = top[j, i]; cap = capr[j, i]
+            if not np.isfinite(cap) or cap > low:
+                continue
+            if axis_ == 1:
+                x = X0 + (i - 1 + (1 if d_ > 0 else 0)) * cs - d_ * th / 2
+                solid.append([(x - th / 2, Y0 + (j - 1) * cs, t - deep), (x + th / 2, Y0 + j * cs, t + cap)])
+            else:
+                y = Y0 + (j - 1 + (1 if d_ > 0 else 0)) * cs - d_ * th / 2
+                solid.append([(X0 + (i - 1) * cs, y - th / 2, t - deep), (X0 + i * cs, y + th / 2, t + cap)])
+    print("solid walls closing water under low floors: %d (cell %.0f units)" % (len(solid), cs))
+    return np.array(out, np.float64).reshape(-1, 2, 3), np.array(solid, np.float64).reshape(-1, 2, 3)
 
 
-NMCLIP = 0
+NMCLIP = 0; NSOLIDW = 0
 if len(WB) and bool(_w.get("bot_water_walls", True)):
-    MW = water_edge_walls(WB)
+    MW, SW = water_edge_walls(WB)
     if len(MW):
         NMCLIP = len(MW)
         bmin = np.concatenate([bmin, MW[:, 0]]); bmax = np.concatenate([bmax, MW[:, 1]])
         nonax_count = np.concatenate([nonax_count, np.zeros(NMCLIP, np.int64)])
         print("bot walls along water edges: %d brushes" % NMCLIP)
+        np.save(os.path.join(export_dir, "collision", "bot_walls.npy"), MW.astype(np.float32))
+    if len(SW):
+        # solid for everyone: appended last, so the shader ranges below keep them as plain collision
+        NSOLIDW = len(SW)
+        bmin = np.concatenate([bmin, SW[:, 0]]); bmax = np.concatenate([bmax, SW[:, 1]])
+        nonax_count = np.concatenate([nonax_count, np.zeros(NSOLIDW, np.int64)])
+        np.save(os.path.join(export_dir, "collision", "closing_walls.npy"), SW.astype(np.float32))
 NPOLY = len(bmin)
 print("polygons by corner count %s; bevel planes %d (%.2f per brush)   %.1fs" % (poly_hist, n_bevel, n_bevel / NPOLY, time.time() - t0))
 
@@ -418,17 +469,18 @@ na_before = np.concatenate([[0], np.cumsum(nonax_count)[:-1]])
 pos_na = np.repeat(first[:NPOLY] + 6, nonax_count) + (np.arange(tot_na) - np.repeat(na_before, nonax_count))
 side_lump["plane"][pos_na] = n_ax + np.arange(tot_na)
 side_lump["shader"] = SH_COL; side_lump["shader"][first[NPOLY]:] = SH_SKY
+_E = NPOLY - NSOLIDW          # the closing walls after the bot walls stay plain collision
 if NWATER:
-    side_lump["shader"][first[NPOLY - NMCLIP - NWATER]:first[NPOLY - NMCLIP]] = SH_WATER
+    side_lump["shader"][first[_E - NMCLIP - NWATER]:first[_E - NMCLIP]] = SH_WATER
 if NMCLIP:
-    side_lump["shader"][first[NPOLY - NMCLIP]:first[NPOLY]] = SH_MCLIP
+    side_lump["shader"][first[_E - NMCLIP]:first[_E]] = SH_MCLIP
 side_lump["surf"] = -1
 brush_lump = np.zeros(NB, dtype=[("first", "<i4"), ("num", "<i4"), ("shader", "<i4")])
 brush_lump["first"] = first; brush_lump["num"] = cnt; brush_lump["shader"] = SH_COL; brush_lump["shader"][NPOLY:] = SH_SKY
 if NWATER:
-    brush_lump["shader"][NPOLY - NMCLIP - NWATER:NPOLY - NMCLIP] = SH_WATER
+    brush_lump["shader"][_E - NMCLIP - NWATER:_E - NMCLIP] = SH_WATER
 if NMCLIP:
-    brush_lump["shader"][NPOLY - NMCLIP:NPOLY] = SH_MCLIP
+    brush_lump["shader"][_E - NMCLIP:_E] = SH_MCLIP
 print("brushes %d, sides %d (%.2f per brush), planes %d (%d axial shared)   %.1fs" % (NB, len(side_lump), len(side_lump) / NB, NP, n_ax, time.time() - t0))
 
 # ---- kd-tree over brush bounds

@@ -32,7 +32,9 @@ src = os.path.join(cdir, "collision_tris_v1.npy")
 # the export (export_region.py) writes collision_tris.npy together with collision_stats.json; this step overwrites
 # collision_tris.npy with its result. A stats file newer than the kept copy means a new export: take it as the source
 _stats = os.path.join(cdir, "collision_stats.json")
-if not os.path.exists(src) or (os.path.exists(_stats) and os.path.getmtime(_stats) > os.path.getmtime(src)):
+_cur = os.path.join(cdir, "collision_tris.npy")
+_last = os.path.join(cdir, "terrain_rebuild.json")
+if os.path.exists(_cur) and (not os.path.exists(src) or (os.path.exists(_stats) and (not os.path.exists(_last) or os.path.getmtime(_stats) > os.path.getmtime(_last)))):
     os.replace(os.path.join(cdir, "collision_tris.npy"), src)
 tris = np.load(src)
 g0 = np.load(os.path.join(ed, "dump", "meshes", "terrain_grid.npz"))["grid"].astype(np.float64)

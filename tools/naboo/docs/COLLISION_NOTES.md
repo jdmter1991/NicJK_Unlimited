@@ -188,3 +188,43 @@ Worst spots (all runs, `run3\analysis_all_runs.json`): falling out near `setview
 falls); stuck at `setviewpos -3379 -14475 -52 0` (16 times); water entered mostly from low banks and steps around
 x -5016 y -10104 and x 5126 y -8050 (bots step in from about 40 units above the surface, where the bot walls do not
 stand). Beta 2 pk3s built from this state and installed in the Steam install (beta 1 kept in backups).
+
+## Round 3 (2026-11-26/27): spots from the bot runs, bot routes, spawns; beta 3
+
+Terrain: checked against the source. `Terrain_Near` is a 1537 x 1537 grid at 1 m and the cooked terrain matches all
+2,362,369 vertices exactly (0.0000 m); terrain tiles are 64 m and the coarse detail levels start about 420 m away.
+The jagged bank seen under the canal walkway (x -9350 y 4444) is the source's own terrain: the backdrop canal pieces
+(`NabooBackdropCanal_01..04`) are shells, and under their walkway tops lies an older copy of the river (water plane at
+-128, rough terrain at -169) that the source only hides from the eye.
+
+Fixes (all invisible, visible geometry unchanged):
+* `backdrop_skirts.py`: walls from every outer edge of the backdrop canal walkway tops down 1600 units (2,692
+  triangles), so nobody gets into the hidden space under them.
+* `write_collision_bsp.py`: bot walls 1200 units high (were 320; bots force-jumped over), bot walls along the dry banks
+  of water under floors and bridges (546), solid walls where open water meets water under a low floor (< 200 units,
+  1,265, for everyone).
+* `drop_water_spawns.py`: 13 spawns stood 40 units over open water (z -88, water -128) and sent bots straight into
+  the river; removed.
+* `make_bot_routes.py`: `botroutes/naboo_theed.wnt` generated from the collision (400-unit grid, dry floors only,
+  every link traced through the collision, bot walls and closing walls; 3,993 entries, 23 groups, 287 KB). Bots
+  follow it about 75 % of their thinking time.
+* `centre_spawns.py`: 25 spawns in the plain outskirts (few detailed objects, backdrop pieces near, far from the
+  centre) moved to route points in the detailed city, open to the sky (farthest spawn 12,900 units from the centre,
+  was 18,500).
+* `avoid_zones.py` + config `avoid_zones`: the west garden lawn (grass and blob bushes, the same in the source) has no
+  spawns and no route points.
+
+Spots checked against the source renders (`tools/render_ref.py`): the balustrade terrace at x 1359 y -3496 (dark boxes
+by the stairs are in the source), the paved dry canal at x -4684 y -11107 (paved in the source, water to be added
+later as agreed), the west garden (same layout in the source).
+
+| | run 4 | run 5 | run 6 | run 7 |
+|---|---|---|---|---|
+| changes | tall walls | + skirts | + routes, water spawns | + centre spawns |
+| positions below the ground | 1 | 0 | 2 | 2 |
+| fell out of the world | 1 | 0 | 0 | 0 |
+| stuck 30 s or more | 18 | 18 | 8 | 3 |
+| time in water | 17.8 % | 18.1 % | 0.0 % | 0.05 % |
+
+Beta 3 pk3s (`naboo\release\beta3`) installed in the Steam install (beta 2 kept in `backups\steam_naboo_beta2`);
+the Steam build's server loaded the map and the routes, the client loaded the world.
