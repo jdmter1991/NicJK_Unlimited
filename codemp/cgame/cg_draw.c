@@ -11923,8 +11923,71 @@ static void CG_Draw2D( void ) {
 }
 
 qboolean CG_CullPointAndRadius( const vec3_t pt, float radius);
+
+/*
+Static models are grouped by the map cell (1024 x 1024 units, seen from above) their origin is in.
+Each cell gets a sphere that holds all its models, so a cell that is out of view or too far away
+skips all of them with one test. Built the first time the models are drawn, and again if the
+number of models changes (client models can be added while the map runs).
+*/
+#define SM_CELL_SIZE 1024.0f
+typedef struct { vec3_t center; float radius; int first, count; } smCell_t;
+static smCell_t smCells[MAX_STATIC_MODELS];
+static int smOrder[MAX_STATIC_MODELS];
+static int smKeyOf[MAX_STATIC_MODELS];
+static int smNumCells, smBuiltFor = -1;
+
+static int QDECL CG_StaticModelKeyCompare( const void *a, const void *b ) {
+	const int ka = smKeyOf[*(const int *)a], kb = smKeyOf[*(const int *)b];
+	return ( ka > kb ) - ( ka < kb );
+}
+
+static void CG_StaticModelCellsBuild( void ) {
+	int i, k, n = cgs.numMiscStaticModels;
+
+	if ( smBuiltFor == n ) {
+		return;
+	}
+	smBuiltFor = n;
+	smNumCells = 0;
+	for ( i = 0; i < n; i++ ) {
+		const int cx = (int)floorf( cgs.miscStaticModels[i].org[0] / SM_CELL_SIZE ) & 0x7fff;
+		const int cy = (int)floorf( cgs.miscStaticModels[i].org[1] / SM_CELL_SIZE ) & 0x7fff;
+		smKeyOf[i] = ( cx << 15 ) | cy;
+		smOrder[i] = i;
+	}
+	qsort( smOrder, n, sizeof( int ), CG_StaticModelKeyCompare );
+	for ( k = 0; k < n; ) {
+		const int key = smKeyOf[smOrder[k]];
+		vec3_t mins, maxs;
+		smCell_t *cell = &smCells[smNumCells++];
+		int m;
+
+		cell->first = k;
+		VectorSet( mins, 999999, 999999, 999999 );
+		VectorSet( maxs, -999999, -999999, -999999 );
+		for ( m = k; m < n && smKeyOf[smOrder[m]] == key; m++ ) {
+			const cg_staticmodel_t *sm = &cgs.miscStaticModels[smOrder[m]];
+			// the same reach the per-model test uses: radius, plus the zoffset shift
+			const float r = sm->radius + fabsf( sm->zoffset ) + 2.0f;
+			int a;
+			for ( a = 0; a < 3; a++ ) {
+				const float lo = sm->org[a] - r + ( a == 2 ? sm->zoffset : 0.0f );
+				const float hi = sm->org[a] + r + ( a == 2 ? sm->zoffset : 0.0f );
+				if ( lo < mins[a] ) mins[a] = lo;
+				if ( hi > maxs[a] ) maxs[a] = hi;
+			}
+		}
+		cell->count = m - k;
+		VectorAdd( mins, maxs, cell->center );
+		VectorScale( cell->center, 0.5f, cell->center );
+		cell->radius = 0.5f * Distance( mins, maxs ) + 1.0f;
+		k = m;
+	}
+}
+
 void CG_DrawMiscStaticModels( void ) {
-	int i, j;
+	int i, j, c, k;
 	refEntity_t ent;
 	vec3_t cullorg;
 	vec3_t diff;
@@ -11938,7 +12001,18 @@ void CG_DrawMiscStaticModels( void ) {
 	// static models don't project shadows
 	ent.renderfx = RF_NOSHADOW;
 
-	for( i = 0; i < cgs.numMiscStaticModels; i++ ) {
+	CG_StaticModelCellsBuild();
+	for( c = 0; c < smNumCells; c++ ) {
+	  // the whole cell is outside the view or beyond the draw distance: none of its models is drawn
+	  if ( CG_CullPointAndRadius( smCells[c].center, smCells[c].radius ) ) {
+		continue;
+	  }
+	  VectorSubtract( smCells[c].center, cg.refdef.vieworg, diff );
+	  if ( !( VectorLength( diff ) - smCells[c].radius <= cg.distanceCull ) ) {
+		continue;
+	  }
+	  for( k = smCells[c].first; k < smCells[c].first + smCells[c].count; k++ ) {
+		i = smOrder[k];
 		VectorCopy(cgs.miscStaticModels[i].org, cullorg);
 		cullorg[2] += 1.0f;
 
@@ -11984,6 +12058,7 @@ void CG_DrawMiscStaticModels( void ) {
 		ent.hModel = cgs.miscStaticModels[i].model;
 
 		trap->R_AddRefEntityToScene( &ent );
+	  }
 	}
 }
 

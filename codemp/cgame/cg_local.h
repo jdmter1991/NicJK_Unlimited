@@ -2289,7 +2289,9 @@ typedef struct cgEffects_s {
 	fxHandle_t mortarProjectile;
 } cgEffects_t;
 
-#define MAX_STATIC_MODELS 4000
+// misc_model_static / client models placed by the map. Raised from 4000 for large maps; the draw
+// loop groups them into map cells so the per-frame cost follows what is near the view, not the total.
+#define MAX_STATIC_MODELS 32768
 
 typedef struct cg_staticmodel_s {
 	qhandle_t		model;
