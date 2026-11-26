@@ -123,3 +123,27 @@ within 63 units of the surface at every point with visible water. Not checked: t
 * Forecourt and the streets around the palace: 24 new ones on open, flat ground.
 * Cafes: 10, one beside each group of outdoor chairs and tables.
 * The 64 older city spawns are unchanged; none has a drawn or collidable surface above it.
+
+## 8. Courtyard inlay, chandeliers, vines, music (2026-11-26, about 11:30)
+
+* **Courtyard "chessboard".** The black meander on the palace landing is 17 colour-decal planes
+  (`o_nab_decalplane_01`, material `SS_Naboo_DecalColor_01`). The source mixes them over the paving at 15 %
+  (Mix Shader factor, read with the new `tools\inspect_material.py`); the export does not carry that factor, so
+  they were drawn solid. `cook_v1.py` now gives such decals 15 % opacity (`decal_color_opacity`). Compared with
+  `ref\ref_gnd_court_a.png` in `ref\cmp_ground_v33.jpg`: the inlay is a faint tint, as in the source.
+* **Chandeliers.** Read from `NabooPalace_05_packed.blend`: the crystals are glass, the candles a plain warm
+  emission (1.0, 0.888, 0.6). The port drew the crystals as opaque white shapes. Now: crystals translucent glass
+  (`crystal_glass_materials`, 30 % opacity), candles solid and self-lit in the source's colour. Seen from below in
+  `shots_v34\final_check.jpg`. Not compared pixel for pixel with a render of the palace file.
+* **Lamp glass** of the indoor wall and ceiling fixtures is opaque and self-lit (it was a see-through additive glow).
+* **Vines and other growth on walls** no longer sway: 77 materials used only by meshes with "vine" in the name
+  (`no_sway_meshes`). The sway bends a plant about its base, which pulled them off their walls.
+* **Paving** of plazas, landings and quays is projected from world position like in the source (12 materials),
+  instead of stretched over each mesh's UVs. Fill water no longer leaves an open trench in the garden.
+* **Windows.** Outward panes imitate daylight for a viewer indoors; panes between rooms and windows that stand
+  open are clear glass. The interior-visibility file may list up to 256 openings (doors always, the 24 nearest
+  windows within 3000 units).
+* **Music and name.** Worldspawn: `"music" "music/naboo_theed/naboo_theed_music.mp3"`, `"message" "Naboo: Theed
+  by Nic Angel"`; `scripts\naboo_theed.arena` and `levelshots\naboo_theed.jpg` added. The log shows the track
+  found and started; nobody listened to it.
+* **Other map on this build:** `mp/ffa3` loads and draws correctly (`shots_v34\stock_ffa3.jpg`), no errors in the log.

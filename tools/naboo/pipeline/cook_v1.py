@@ -55,6 +55,7 @@ GLOW_COLOR = cfg.get("glow_color", [1.0, 0.74, 0.42])
 # light fixtures whose emission the source's daylight scene sets to nearly zero; they glow where the sky is occluded
 GLOW_INDOOR = tuple(cfg.get("glow_indoor_materials", ["LightWall_06", "LightWall_01", "lightwall_01", "LightCeiling_01", "Desklibrary_Emissive"]))
 GLOW_SOLID = tuple(cfg.get("glow_solid_materials", ["candle_mat"]))
+CRYSTAL = tuple(cfg.get("crystal_glass_materials", ["lambert17|SS_O_NAB_Palace_Chan"]))
 GLOW_INDOOR_STRENGTH = float(cfg.get("glow_indoor_strength", 2.6))
 # Water classes, matched to the source materials (docs/UPDATE_water_pbr.md):
 #   water  river and pond surface: opaque, dark, mirror-like, two scrolling ripple layers (anim 1)
@@ -192,6 +193,23 @@ for _k, _b in BAKED.items():
         BASE_SCALE[_k] = (1.0 / _b["uv_period"], 1.0 / _b["uv_period"])
         BASE_OFFSET[_k] = tuple(_b.get("uv_offset", [0.0, 0.0]))
 mat_tile = {}           # engine material index -> (tile texture name, repeats u, repeats v)
+# materials whose whole colour is one texture projected from world position: material -> (image, repeats per metre)
+WORLD_PROJ = {}
+_cgf = os.path.join(export_dir, "color_graphs.json")
+if os.path.exists(_cgf) and cfg.get("world_projected_paving", True):
+    for _k, _g in json.load(open(_cgf))["materials"].items():
+        _e = _g.get("color")
+        try:
+            if _e and _e[0] == "tex" and _e[2] == "Color" and _e[3][0] == "combine" and _e[3][1][0] == "math" and _e[3][1][1] == "MULTIPLY_ADD" and _e[3][1][3][0] == "sep" and _e[3][1][3][2] == ["geo", "Position"] and not _k.startswith("Terrain_"):
+                WORLD_PROJ[_k] = (_e[1], abs(float(_e[3][1][4][1])))
+        except (IndexError, TypeError, KeyError):
+            pass
+    if WORLD_PROJ:
+        from PIL import Image as _ImF
+        _gf = os.path.join(dump, "extras", "gnd_flat.png")
+        if not os.path.exists(_gf):
+            _ImF.new("RGBA", (16, 16), (128, 128, 128, 255)).save(_gf)
+
 
 
 def pbr_of(name, m, cls):
@@ -264,6 +282,13 @@ if os.path.exists(_cg) and cfg.get("solid_canopy", True):
         _a = _g.get("alpha")
         if _a and _a[0] == "const" and isinstance(_a[1], (int, float)) and _a[1] >= 0.999:
             SOLID_CUTOUT.add(_k)
+# growth fixed to walls (vines, creepers): the wind sway bends a plant about its base, which tears these off the
+# wall they hang on. Materials used only by such meshes get no sway animation.
+STILL_MESHES = tuple(cfg.get("no_sway_meshes", ["vine"]))
+_still, _moving = set(), set()
+for _mk, _mi in scene["meshes"].items():
+    (_still if any(w_ in _mk.lower() for w_ in STILL_MESHES) else _moving).update(x for x in (_mi.get("materials") or []) if x)
+STILL_MATS = _still - _moving
 for name, m in mats.items():
     cls = m.get("cls", "opaque")
     was_cutout = cls == "cutout"
@@ -287,11 +312,16 @@ for name, m in mats.items():
             cls = "glass"
         elif b == "emissive_additive":
             cls = "add"
+    if any(name.startswith(w_) for w_ in CRYSTAL):
+        # chandelier crystals: glass in the palace file, so translucent here (they were opaque white shapes)
+        mat_of[name] = material_index(shader_for(None, "glass"), tuple(cfg.get("crystal_color", [1.0, 0.96, 0.88])), 1 | (int(round(float(cfg.get("crystal_opacity", 0.30)) * 255)) << 8))
+        cls_count["crystal_glass"] = cls_count.get("crystal_glass", 0) + 1
+        continue
     if any(name.startswith(w_) for w_ in GLOW_SOLID):
         # candle flames and similar: the source gives them no usable material; drawn as a plain warm glow
         gname = "textures/naboo/glow_solid"
-        shader_text[gname] = "%s\n{\n\tcull none\n\t{\n\t\tmap $whiteimage\n\t\tblendFunc GL_ONE GL_ONE\n\t\trgbGen identity\n\t}\n}\n" % gname
-        mat_of[name] = material_index(gname, tuple(round(c_ * GLOW_GAIN[1], 3) for c_ in GLOW_COLOR), 1 | (ANIM_GLOW << 1))
+        shader_text[gname] = "%s\n{\n\tcull none\n\t{\n\t\tmap $whiteimage\n\t\trgbGen identity\n\t}\n}\n" % gname
+        mat_of[name] = material_index(gname, tuple(cfg.get("candle_color", [1.0, 0.888, 0.6])), (ANIM_GLOW << 1) | (200 << 8))      # opaque, self-lit
         cls_count["glow_solid"] = cls_count.get("glow_solid", 0) + 1
         continue
     cls_count[cls] = cls_count.get(cls, 0) + 1
@@ -305,6 +335,8 @@ for name, m in mats.items():
             flags |= ANIM_FOAM << 1
         elif cls == "glass":
             flags |= ANIM_WINDOW << 1          # panes show daylight to a viewer indoors
+        elif b in SWAY_BUILDERS and name in STILL_MATS:
+            cls_count["still_plants"] = cls_count.get("still_plants", 0) + 1
         elif b in SWAY_BUILDERS:
             flags |= ANIM_SWAY << 1
         elif any(w_ in name.lower() for w_ in CLOTH_WORDS):
@@ -331,8 +363,15 @@ for name, m in mats.items():
             gname = "textures/naboo/glow_%s" % gt
             if gname not in shader_text:
                 shader_text[gname] = "%s\n{\n\tcull none\n\t{\n\t\tmap textures/naboo/%s\n\t\tblendFunc GL_ONE GL_ONE\n\t\trgbGen identity\n\t}\n}\n" % (gname, gt)
+            if indoor_:
+                # lamp glass of the indoor fixtures: opaque and self-lit, so nothing shows through it
+                gname = "textures/naboo/lampglass_%s" % gt
+                shader_text[gname] = "%s\n{\n\tcull none\n\t{\n\t\tmap textures/naboo/%s\n\t\trgbGen identity\n\t}\n}\n" % (gname, gt)
             gain_ = min(max(st_ * 0.35, GLOW_GAIN[0]), GLOW_GAIN[1])
-            mat_of[name] = material_index(gname, tuple(round(c * gain_, 3) for c in GLOW_COLOR), 1 | (ANIM_GLOW << 1) | ((128 << 8) if indoor_ else 0))
+            if indoor_:
+                mat_of[name] = material_index(gname, tuple(cfg.get("lamp_glass_color", [1.0, 0.86, 0.62])), (ANIM_GLOW << 1) | (200 << 8))
+            else:
+                mat_of[name] = material_index(gname, tuple(round(c * gain_, 3) for c in GLOW_COLOR), 1 | (ANIM_GLOW << 1))
             cls_count["glow_indoor" if indoor_ else "glow"] = cls_count.get("glow_indoor" if indoor_ else "glow", 0) + 1
             continue
     if cls in ("water", "basin", "foam"):
@@ -355,7 +394,7 @@ for name, m in mats.items():
             _dst = os.path.join(dump, "extras", dirt_ + ".png")
             if not os.path.exists(_dst):
                 _a = np.asarray(_Im.open(_src).convert("RGBA")).copy()
-                _a[..., 0] = 46; _a[..., 1] = 38; _a[..., 2] = 31; _a[..., 3] = (_a[..., 3].astype(np.float32) * 0.85).astype(np.uint8)
+                _a[..., 0] = 46; _a[..., 1] = 38; _a[..., 2] = 31; _a[..., 3] = (_a[..., 3].astype(np.float32) * float(cfg.get("dirt_decal_opacity", 0.45))).astype(np.uint8)
                 _Im.fromarray(_a, "RGBA").save(_dst)
             tname = dirt_; tex_used[dirt_] = os.path.join("..", "extras", dirt_ + ".png")
     if cls == "glass":
@@ -366,6 +405,19 @@ for name, m in mats.items():
         tint = srgb_tint(m.get("tint", [1, 1, 1] if img else [0.6, 0.6, 0.6]))
     if dirt_:
         tint = (1.0, 1.0, 1.0)
+    if cls == "blend" and b == "decal_color" and not img:
+        # flat colour decals (the paving inlays): the source mixes them 15 % over the ground (Mix Shader factor of
+        # SS_Naboo_DecalColor_01, read with inspect_material.py); the export does not carry that factor
+        flags |= int(round(float(cfg.get("decal_color_opacity", 0.15)) * 255)) << 8
+    wp_ = WORLD_PROJ.get(name) if cls == "opaque" else None
+    if wp_:
+        # paving that the source projects from world position (plazas, landings, quays): drawn like the terrain's
+        # tiling layer, at the source's repeats per metre, instead of stretched over the mesh's own UVs
+        tt = san(os.path.splitext(wp_[0])[0])[:44]; tex_used[tt] = os.path.splitext(wp_[0])[0] + ".png"
+        tex_used["gnd_flat"] = os.path.join("..", "extras", "gnd_flat.png")
+        mat_of[name] = material_index(shader_for("gnd_flat", "opaque"), (1.0, 1.0, 1.0), flags, (None, 1.0, 0.85, 0.0, 0), (tt, int(round(wp_[1] * 256.0)), 255))
+        cls_count["world_projected"] = cls_count.get("world_projected", 0) + 1
+        continue
     bk = BAKED.get(name) if cls == "opaque" else None
     if bk:
         tname = bk["tex"]; tex_used[tname] = os.path.join("..", "baked", bk["tex"] + ".png")
@@ -629,6 +681,33 @@ for _on, _ov in OBJ_OVERRIDE.items():
         _variants[_key] = _vn if _vn in mesh_id else None
     if _variants[_key]:
         VARIANT_OF[_on] = _variants[_key]
+# palace windows (export/palace_windows.json, classified from the collision: is there a roof on both sides of the
+# pane?). Panes that look outside imitate daylight indoors (the glass material's window animation). Panes between
+# two rooms, the windows that stand open and the chandeliers' glass are ordinary clear glass instead.
+_pw = os.path.join(export_dir, "palace_windows.json")
+if os.path.exists(_pw) and cfg.get("palace_clear_windows", True):
+    CLEAR_MESHES = tuple(cfg.get("clear_glass_meshes", ["o_nab_palacewindow_open", "o_nab_palace_chandelier"]))
+    for _w in json.load(open(_pw)):
+        _mk = _w["mesh"]
+        if not (_w["inner"] or _mk.startswith(CLEAR_MESHES)) or _mk not in scene["meshes"]:
+            continue
+        _names = list(scene["meshes"][_mk]["materials"] or [None])
+        _new = []
+        for _mn in _names:
+            if _mn and mats.get(_mn, {}).get("builder") == "glass" and mat_of.get(_mn, -1) >= 0:
+                _cn = _mn + "#clear"
+                if _cn not in mat_of:
+                    mat_of[_cn] = material_index(shader_for(None, "glass"), (0.80, 0.86, 0.86), 1 | (int(round(0.14 * 255)) << 8))
+                _new.append(_cn)
+            else:
+                _new.append(_mn)
+        _key = (_mk, tuple(_new))
+        if _key not in _variants:
+            _vn = "%s#%d" % (_mk, len(_variants))
+            build_scene_mesh(_mk, scene["meshes"][_mk], _new, _vn)
+            _variants[_key] = _vn if _vn in mesh_id else None
+        if _variants[_key]:
+            VARIANT_OF[_w["name"]] = _variants[_key]
 
 # ---- instances
 inst = []
@@ -868,7 +947,9 @@ def carve_under_water(g, reach_m, label, exclude=None, tol=None):
         inside &= ~((X > exclude[0]) & (X < exclude[2]) & (Y > exclude[1]) & (Y < exclude[3]))
     vis = inside & (wz - tz > -tol)
     if WATER_FILL is not None:
-        vis |= inside & WATER_FILL[0][jj, ii]          # generated water is always meant to be seen
+        # generated water (gap fill) used to be forced visible, which dug trenches through roads and gardens
+        # where the source's water runs under the ground; it now follows the same rule as the source's water
+        pass
     n_in = int(inside.sum()); hidden_before = int((inside & (wz - tz <= 0)).sum()); shallow = int((vis & (wz - tz < depth)).sum())
     vr = np.full(wr.shape, np.nan); vr[jj[vis], ii[vis]] = wz[vis]          # visible water surface height
     reach = int(round(reach_m / wc))

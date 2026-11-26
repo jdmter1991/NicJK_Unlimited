@@ -42,7 +42,7 @@ set b2 "setviewpos -1800 1380 80 24; wait 400; r_tworldBench market; wait 8000; 
 set b3 "setviewpos 2620 3640 200 150; wait 400; r_tworldBench court; wait 8000; vstr b4"
 set b4 "setviewpos 669 3583 1400 42; wait 400; r_tworldBench overview; wait 8000; vstr b5"
 set b5 "r_tworldBench 0; noclip; follownext; wait 400; r_tworldBench follow; wait 8000; r_tworldBench 0; wait 20; quit"
-set bgo "com_maxfps 125; wait 9000; team s; wait 600; noclip; cg_draw2D 0; com_maxfps 0; wait 300; vstr b0"
+set bgo "com_maxfps 125; wait 9000; team s; wait 600; noclip; cg_draw2D 1; cg_drawFPS 1; com_maxfps 0; wait 300; vstr b0"
 vstr bgo
 EOF
 EXTRA="+set r_renderScale 0"

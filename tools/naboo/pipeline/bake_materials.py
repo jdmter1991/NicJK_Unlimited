@@ -97,6 +97,9 @@ if "--merge" in sys.argv:
     for f in sorted(os.listdir(out_dir)):
         if f.startswith("baked_part") and f.endswith(".json"):
             meta.update(json.load(open(os.path.join(out_dir, f))))
+    if not PART and os.path.exists(os.path.join(out_dir, "baked.json")) and "--changed" in sys.argv:
+        _old = json.load(open(os.path.join(out_dir, "baked.json")))          # a partial rebake never drops materials
+        _old.update(meta); meta = _old
     json.dump(meta, open(os.path.join(out_dir, "baked_part%d.json" % PART[0] if PART else "baked.json"), "w"), indent=1)
     print("merged", len(meta), "materials,", len({m["tex"] for m in meta.values()}), "textures, tile mode", len({m["tex"] for m in meta.values() if m["tile"]}))
     sys.exit(0)
@@ -126,7 +129,7 @@ for name in names[:limit]:
         U, V = grid(64)
         probe = Evaluator(ims, U, V, primary_uv=puv)
         PER = choose_period(probe, ce)
-        if name in OLD and int(OLD[name].get("uv_period", 1)) == PER and not FORCE:
+        if name in OLD and int(OLD[name].get("uv_period", 1)) == PER and not FORCE and not any("atlas" in str(x_).lower() for x_ in OLD[name].get("approximated", [])):
             meta[name] = OLD[name]; done[key] = OLD[name]; stats["kept"] = stats.get("kept", 0) + 1; continue
         U, V = U * PER, V * PER
 
@@ -151,6 +154,10 @@ for name in names[:limit]:
         if not tile:
             sizes = [G["images"].get(tn[1], {}).get("size", [1024])[0] for tn in images_in(ce) if tn[2] == "Color"]
             res = int(min(MAX_RES, max([256] + sizes)))
+            # a detail atlas sampled through computed coordinates repeats several times over the UV square: the map
+            # needs the resolution to hold it even when the material's own colour texture is small
+            if any(tn[3][0] == "combine" for tn in images_in(ce)):
+                res = int(min(MAX_RES, max(res, int(cfg.get("atlas_detail_size", 1024)))))
         U, V = grid(res)
         # the renderer samples the tiling layer at (scaled UV) x repeats, without the mapping's offset: shift the
         # baked map's origin so that the layer's phase is zero there (the cooker shifts the mesh UVs the same way)

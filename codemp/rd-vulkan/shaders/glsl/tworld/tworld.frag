@@ -242,7 +242,7 @@ void main() {
 			env = mix( env, pow( room, vec3( 2.2 ) ) * ( 0.35 + u_tw.lightColor[0].a ), frag_amb * frag_amb );
 		}
 		vec3 Fr = F0 + ( max( vec3( 1.0 - rough ), F0 ) - F0 ) * pow( 1.0 - ndv, 5.0 );
-		vec3 specAmb = env * Fr * mix( ( 1.0 - rough ) * ( 1.0 - rough ), ( 1.0 - rough ) * 0.7, frag_amb * frag_amb );		// rough surfaces show no sky reflection
+		vec3 specAmb = env * Fr * mix( ( 1.0 - rough ) * ( 1.0 - rough ), ( 1.0 - rough ) * 0.4, frag_amb * frag_amb );		// rough surfaces show no sky reflection
 
 		// a mirror-smooth metal shows only reflections; a rough one scatters the light around it, which here is the
 		// same light a non-metal receives, tinted by the metal's colour (without this, rough metals came out black)
@@ -270,6 +270,10 @@ void main() {
 		// fixtures the source leaves switched off in daylight (opacity value 0.5): lit only where the sky is occluded
 		if ( frag_color.a < 0.75 )
 			color.rgb *= smoothstep( 0.35, 0.65, frag_amb );
+		// solid lamp glass and candles (opacity value 0.78): an opaque surface with its own light, brighter where
+		// the emission mask is and where the sky is occluded; never darker than a dim, unlit lamp
+		if ( frag_color.a > 0.75 && frag_color.a < 0.82 )
+			color.rgb = frag_tint * mix( 0.42, 1.0, base.a ) * mix( 0.55, 1.0, smoothstep( 0.35, 0.65, frag_amb ) );
 	} else if ( frag_anim.x > 3.5 && frag_anim.x < 4.5 ) {
 		float t = frag_anim.y;
 		vec2 uv = vec2( frag_tex_coord.x, 1.0 - frag_tex_coord.y );		// the source's UV space (V up)

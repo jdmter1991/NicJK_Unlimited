@@ -115,9 +115,11 @@ class Evaluator:
                 return self._affine(b, 1.0 / scale[0], -lx / scale[0], 1.0 / scale[1], -ly / scale[1])
             return self._affine(b, scale[0], lx, scale[1], ly)
         if k == "combine":
-            if self.mode != "world":
-                return None
-            x = self.ev(c[1]); y = self.ev(c[2])
+            # coordinates computed per pixel (an atlas column chosen by a mask, for instance): sampled as a grid
+            try:
+                x = self.ev(c[1]); y = self.ev(c[2])
+            except Unsupported:
+                return None                 # cannot be computed here (world position in a UV bake): the caller uses the image's mean
             return ("grid", np.broadcast_to(x, self.U.shape), np.broadcast_to(y, self.U.shape))
         if k == "vmath":
             op = c[1]
@@ -259,6 +261,7 @@ class Evaluator:
             elif op == "DIVIDE": r = a[0] / np.where(np.abs(a[1]) < 1e-9, 1e-9, a[1])
             elif op == "MULTIPLY_ADD": r = a[0] * a[1] + a[2]
             elif op == "POWER": r = np.power(np.maximum(a[0], 0), a[1])
+            elif op == "ROUND": r = np.floor(a[0] + 0.5)
             elif op == "MINIMUM": r = np.minimum(a[0], a[1])
             elif op == "MAXIMUM": r = np.maximum(a[0], a[1])
             elif op == "ABSOLUTE": r = np.abs(a[0])
@@ -297,6 +300,14 @@ class Evaluator:
                 if inner[1] == "Position" and self.mode == "world":
                     return (self.U, self.V, np.float32(0.0))[CH[ch]]
                 raise Unsupported("geometry " + inner[1])
+            if inner[0] in ("mapping", "uv", "texcoord", "default"):
+                # a component of a texture coordinate used as a number
+                co = self.coord(inner)
+                if co is None:
+                    raise Unsupported("coordinate as value")
+                if co[0] == "affine":
+                    return (self.U * co[1] + co[2], self.V * co[3] + co[4], np.float32(0.0))[CH[ch]]
+                return (co[1], co[2], np.float32(0.0))[CH[ch]]
             v = np.asarray(self.ev(inner), np.float32)
             return v[..., CH[ch]] if (v.ndim and v.shape[-1] == 3) else v
         if k == "geo":

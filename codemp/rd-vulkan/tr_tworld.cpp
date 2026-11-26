@@ -171,7 +171,7 @@ typedef struct tworld_s {
 	qboolean		hasPortal;
 	vec3_t			portalMins, portalMaxs;
 	int				numPortals;
-	float			portals[8][6];	// axis (0 = plane x, 1 = plane y), plane position, centre along the other axis, centre z, half width, half height
+	float			portals[256][6];	// axis (0 = plane x, 1 = plane y), plane position, centre along the other axis, centre z, half width, half height
 
 	// placements grouped into cells of a grid, small ones and large ones separately, so that whole cells can be
 	// rejected by the view frustum and, for small placements, by distance
@@ -877,7 +877,7 @@ void R_LoadTWorld( const char *bspName )
 		plen = ri.FS_ReadFile( pname, (void **)&pbuf );
 		if ( plen >= 36 && pbuf && !memcmp( pbuf, "TPRT", 4 ) && ( (const uint32_t *)pbuf )[1] == 1 ) {
 			const uint32_t n = ( (const uint32_t *)pbuf )[2];
-			if ( n <= 8 && (size_t)plen == 36 + (size_t)n * 24 ) {
+			if ( n <= 256 && (size_t)plen == 36 + (size_t)n * 24 ) {
 				Com_Memcpy( tw->portalMins, pbuf + 12, 12 );
 				Com_Memcpy( tw->portalMaxs, pbuf + 24, 12 );
 				Com_Memcpy( tw->portals, pbuf + 36, n * 24 );
@@ -1022,10 +1022,41 @@ static qboolean RB_TWorldInstanced( tworld_t *tw, const int pass )
 		const float kLod1 = ( lodSize1 > 0.0f ) ? ( 1.0f + lodSize1 ) / lodSize1 : 1e30f;
 		const float kLod2 = ( lodSize2 > 0.0f ) ? ( 1.0f + lodSize2 ) / lodSize2 : 1e30f;
 		int nAll = 0;
+		// openings that count for this view: doors always, windows while they are near (the nearest 24)
+		const float	*act[40];
+		int		numAct = 0;
 		// camera inside the interior box (not for mirror or portal views)
 		const qboolean inside = (qboolean)( tw->hasPortal && r_tworldPortal->integer && backEnd.viewParms.portalView == PV_NONE
 			&& viewOrg[0] > tw->portalMins[0] && viewOrg[0] < tw->portalMaxs[0] && viewOrg[1] > tw->portalMins[1] && viewOrg[1] < tw->portalMaxs[1]
 			&& viewOrg[2] > tw->portalMins[2] && viewOrg[2] < tw->portalMaxs[2] );
+		if ( inside ) {
+			float	wd[24];
+			int		wi[24], nw = 0, q, q2;
+			for ( q = 0; q < tw->numPortals; q++ ) {
+				const float *po = tw->portals[q];
+				const int ax = ( po[0] > 0.5f ) ? 1 : 0, ox = 1 - ax;
+				float dx, dy, dz, dd;
+				if ( po[5] > 150.0f ) {
+					if ( numAct < 16 )
+						act[numAct++] = po;
+					continue;
+				}
+				dx = po[1] - viewOrg[ax]; dy = po[2] - viewOrg[ox]; dz = po[3] - viewOrg[2];
+				dd = dx * dx + dy * dy + dz * dz;
+				if ( dd > 3000.0f * 3000.0f )
+					continue;
+				// keep the 24 nearest
+				for ( q2 = nw; q2 > 0 && wd[q2 - 1] > dd; q2-- ) {
+					if ( q2 < 24 ) { wd[q2] = wd[q2 - 1]; wi[q2] = wi[q2 - 1]; }
+				}
+				if ( q2 < 24 ) {
+					wd[q2] = dd; wi[q2] = q;
+					if ( nw < 24 ) nw++;
+				}
+			}
+			for ( q = 0; q < nw; q++ )
+				act[numAct++] = tw->portals[wi[q]];
+		}
 		for ( ci = 0; ci < tw->numCells; ci++ ) {
 			const twCell_t *cell = &tw->cells[ci];
 			const twCullRec_t *rec = &tw->cullRecs[cell->first];
@@ -1061,8 +1092,8 @@ static qboolean RB_TWorldInstanced( tworld_t *tw, const int pass )
 					vec3_t cd2;
 					int pi;
 					VectorSubtract( cell->center, viewOrg, cd2 );
-					for ( pi = 0; pi < tw->numPortals; pi++ ) {
-						const float *po = tw->portals[pi];
+					for ( pi = 0; pi < numAct; pi++ ) {
+						const float *po = act[pi];
 						const int ax = ( po[0] > 0.5f ) ? 1 : 0, ox = 1 - ax;
 						float tt, grow;
 						if ( fabsf( cd2[ax] ) < 1e-3f )
@@ -1076,7 +1107,7 @@ static qboolean RB_TWorldInstanced( tworld_t *tw, const int pass )
 						if ( fabsf( viewOrg[ox] + cd2[ox] * tt - po[2] ) < po[4] + grow )
 							break;
 					}
-					if ( pi == tw->numPortals ) {
+					if ( pi == numAct ) {
 						tw->c_small += cell->count;
 						continue;
 					}
@@ -1105,8 +1136,8 @@ static qboolean RB_TWorldInstanced( tworld_t *tw, const int pass )
 						// outside the interior: visible only through an opening. The line from the eye to the placement
 						// must cross the opening's plane inside its rectangle, grown by the placement's radius.
 						int pi;
-						for ( pi = 0; pi < tw->numPortals; pi++ ) {
-							const float *po = tw->portals[pi];
+						for ( pi = 0; pi < numAct; pi++ ) {
+							const float *po = act[pi];
 							const int ax = ( po[0] > 0.5f ) ? 1 : 0, ox = 1 - ax;
 							const float den = d[ax];
 							float tt, hx, hz, grow;
@@ -1121,7 +1152,7 @@ static qboolean RB_TWorldInstanced( tworld_t *tw, const int pass )
 							if ( fabsf( hx ) < po[4] + grow && fabsf( hz ) < po[5] + grow )
 								break;
 						}
-						if ( pi == tw->numPortals ) {
+						if ( pi == numAct ) {
 							tw->c_small++;
 							continue;
 						}
