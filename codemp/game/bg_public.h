@@ -323,7 +323,7 @@ extern qboolean			BGPAFtextLoaded;
 extern animation_t		bgHumanoidAnimations[MAX_TOTALANIMATIONS];
 
 #define MAX_ANIM_FILES	64
-#define MAX_ANIM_EVENTS 300
+#define MAX_ANIM_EVENTS 512 // NicJK: was 300; MovieDuels-style per-model animevents.cfg files have up to 350 per block
 
 typedef enum
 {

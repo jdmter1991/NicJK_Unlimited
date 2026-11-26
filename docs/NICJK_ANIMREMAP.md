@@ -100,6 +100,106 @@ would hide the user's loose file.
   differ from the original by a few ms (the log shows the shown length); the
   gameplay timer is untouched.
 
+## A model's own animations (its own GLA)
+
+Goal: as in single player, a model can carry its own animation file, so one
+model really has different moves from another, while unconfigured models keep
+the normal ones.
+
+### What multiplayer does today
+
+* A `.glm` names its GLA in its header (`animName`), and Ghoul2 loads that GLA
+  for the model, on the client and on the server.
+* Both the client (`CG_RegisterClientModelname`, cg_players.c) and the server
+  (`SetupGameGhoul2Model`, g_client.c) **replace a player model with Kyle if its
+  GLA path does not contain `players/_humanoid/`**. That check is the "not
+  possible in MP" part. A GLA *inside* that folder is accepted: the user's
+  Darth Talon pk3 already ships `models/players/_humanoid/talon_face.gla`.
+* Whatever the GLA, the animation table is found from the GLA's folder, so
+  every GLA in `players/_humanoid/` uses `_humanoid/animation.cfg` (table 0).
+  A model's own GLA therefore has to keep the humanoid frame numbers.
+* The server poses players with Kyle's model unless `d_perPlayerGhoul2` is on
+  (a cheat cvar, off), so saber hits follow `_humanoid.gla` motion, not the
+  model's own GLA.
+* Animation tables other than 0 are treated as "not humanoid" in about 40
+  places (broken limbs, ragdoll, `pm->nonHumanoid`, saber code in w_saber.c and
+  bg_pmove.c), so giving a model its own table index is not an option without
+  touching all of them.
+
+### Options (both 1 and 2 are implemented)
+
+1. **Separate GLA with its own animation.cfg** - the single-player and
+   MovieDuels convention, e.g. `models/players/_humanoid_dooku/_humanoid.gla`
+   with `animation.cfg` and `animevents.cfg` next to it. With `cg_animRemap 1`
+   (client) / `g_animRemap 1` (server) such a model is accepted instead of being
+   replaced by Kyle when its GLA has exactly the humanoid bones (names and
+   parents, read from the file) and an animation.cfg. The game keeps treating it
+   as humanoid (table 0, so pmove, bots, broken limbs, saber code are
+   unchanged); it is drawn with its own table: one-shot moves keep this game's
+   length (fit), loops play at their own speed. Its animevents.cfg is read
+   against its own frames. Its animation.cfg is read by name with NicJK's own
+   reader (MovieDuels' files are 72 KB, more than the stock 60 KB loader takes),
+   so single-player-only names are skipped and the few multiplayer animations
+   the file lacks fall back to its BOTH_STAND1 (both are listed in the console).
+   Remap lines still work on top (a replacement then comes from the model's own
+   table). A client without the feature (or a stock client) shows Kyle, as
+   before. The server poses Kyle for saber hits unless `d_perPlayerGhoul2` is on.
+2. **Model's own GLA = humanoid frames + extra frames appended**. The
+   GLA sits in `models/players/_humanoid/` (accepted everywhere, like Talon),
+   frames 0..21375 are byte-identical to `_humanoid.gla`, so the stock
+   animation.cfg, the server, bots and stock clients work unchanged on it.
+   `animset` lines name the appended frames, and remaps point moves at them for
+   that model only. Shown only where the entity's Ghoul2 model really uses the
+   GLA (checked with `G2API_GetGLAName`); a client without the model or the
+   server's Kyle use the normal frames, so nothing ever plays frames a GLA
+   does not have.
+3. **One bigger shared `_humanoid.gla`** with every model's extra frames
+   appended (what MB2 does). Same code as option 2 (animsets point at the one
+   GLA). Drawbacks: it replaces a base asset for everybody, the file grows with
+   every model's moves, all clients need that pk3 (pure servers: a large
+   download), and a mod replacing `_humanoid.gla` itself conflicts. Fine for a
+   closed server pack; option 2 is better for per-model pk3s.
+
+### Cost
+
+* Memory: Ghoul2 keeps a whole GLA in memory, once per file name (it is copied
+  at load, `R_LoadMDXA`). `_humanoid.gla` is 11.8 MB; a model's own GLA is that
+  plus its extra frames (the test one with two cinematics: 18.7 MB). Each extra
+  GLA in use costs that much on every client that draws the model. The
+  dedicated server does not load it (it poses Kyle).
+* Load time: reading the file from the pk3 when the model is first seen.
+* Frame limit: animation tables store frame numbers as 16 bits, so a GLA can
+  have at most 65535 frames (humanoid uses 21376, MovieDuels' Dooku 54612).
+* MovieDuels' GLAs are 26-27 MB each (Dooku 26.6 MB, Yoda 26.9 MB).
+* `MAX_ANIM_EVENTS` was raised from 300 to 512 per block: Yoda's
+  animevents.cfg has 350, and going over the limit ends the map with an error.
+  Client memory for event tables grows from about 1.2 MB to 2 MB.
+
+### Building one
+
+`tools/animremap/gla_append.py OUT.gla INTERNAL_NAME BASE.gla EXTRA.gla ...`
+appends the frames of GLAs with the same skeleton (checked: same 53 bones,
+same parents) and prints each one's frame offset. Sources can be read straight
+from a pk3 (`file.pk3::path/in/pk3.gla`). Then point the model's `.glm` header
+(`animName`, 64 bytes at offset 72) at the new GLA, e.g. with a hex editor or
+by re-exporting the model, and add an `animremap.cfg` to the model folder:
+
+    animset sour  models/players/_humanoid/_sith.gla  models/players/_humanoid_t1_sour/animation.cfg  33406
+    BOTH_SABERFAST_STANCE  sour:BOTH_CIN_10  free
+
+The base game's cinematic GLAs (`_humanoid_kor2`, `_humanoid_yavin1b`, ...)
+have the humanoid skeleton and named animation.cfg files, so they work as
+sources; note that most cinematic sequences move the whole body away from the
+player's origin (root motion), which looks wrong for a stance or taunt.
+
+### Seen while testing
+
+When a player changed model while standing still (same animation number), the
+new model showed its bind pose (T-pose) until the next animation change; the
+client does not set the animation on the new Ghoul2 instance until then. It
+happened with remaps off too; not checked whether stock JA does the same.
+`cg_animremap_reload` resets it.
+
 ## Code
 
 * `codemp/game/bg_animremap.c/.h` - parser, per-model tables, lookups (new).
@@ -110,3 +210,4 @@ would hide the user's loose file.
 * `codemp/cgame/cg_predict.c` - prediction table for `timing`.
 * `codemp/game/g_svcmds.c`, `codemp/cgame/cg_consolecmds.c` - list/reload.
 * `codemp/game/bg_panimate.c` - remaps are cleared with the anim sets.
+* `tools/animremap/gla_append.py` - builds a model's own GLA.

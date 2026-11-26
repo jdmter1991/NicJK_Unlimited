@@ -1783,7 +1783,8 @@ void SetupGameGhoul2Model(gentity_t *ent, char *modelname, char *skinName)
 				GLAName[0] = 0;
 				trap->G2API_GetGLAName( ent->ghoul2, 0, GLAName);
 
-				if (!GLAName[0] || (!strstr(GLAName, "players/_humanoid/") && ent->s.number < MAX_CLIENTS && !G_PlayerHasCustomSkeleton(ent)))
+				if (!GLAName[0] || (!strstr(GLAName, "players/_humanoid/") && ent->s.number < MAX_CLIENTS && !G_PlayerHasCustomSkeleton(ent)
+					&& !(g_animRemap.integer && BG_AnimRemap_OwnSkeleton(GLAName)))) // NicJK: a model's own humanoid skeleton (animremap)
 				{ //a bad model
 					trap->G2API_CleanGhoul2Models(&(ent->ghoul2));
 					ent->ghoul2 = NULL;
@@ -3464,11 +3465,16 @@ void G_AnimRemap_SetClientModel(int clientNum, const char *modelSkin)
 		Q_strncpyz(g_animRemapModel[clientNum], modelSkin ? modelSkin : "", sizeof(g_animRemapModel[clientNum]));
 }
 
-static qboolean G_AnimRemap_ClientModel(gentity_t *ent, char *model, char *skin, int size)
+static qboolean G_AnimRemap_ClientModel(gentity_t *ent, char *model, char *skin, char *gla, int size)
 {
 	if (!g_animRemap.integer || !ent->client || ent->s.number >= MAX_CLIENTS || ent->localAnimIndex != 0)
 		return qfalse;
 	BG_AnimRemap_SplitModel(g_animRemapModel[ent->s.number], model, size, skin, size);
+	// the GLA of the server's own Ghoul2 instance: frames from a model's own GLA
+	// are only used if this instance really has them (with d_perPlayerGhoul2 0 it is Kyle's)
+	gla[0] = 0;
+	if (ent->ghoul2 && trap->G2API_HaveWeGhoul2Models(ent->ghoul2))
+		trap->G2API_GetGLAName(ent->ghoul2, 0, gla);
 	return model[0] ? qtrue : qfalse;
 }
 
@@ -3488,19 +3494,19 @@ void G_AnimRemap_ListClients(void)
 // Frames used to pose this client's server-side Ghoul2 model (what saber traces hit)
 const animation_t *G_AnimRemap_Visual(gentity_t *ent)
 {
-	char model[MAX_QPATH], skin[MAX_QPATH];
-	if (G_AnimRemap_ClientModel(ent, model, skin, sizeof(model)))
-		return BG_AnimRemap_Visual(ent->s.number, ent->localAnimIndex, model, skin);
+	char model[MAX_QPATH], skin[MAX_QPATH], gla[MAX_QPATH];
+	if (G_AnimRemap_ClientModel(ent, model, skin, gla, sizeof(model)))
+		return BG_AnimRemap_Visual(ent->s.number, ent->localAnimIndex, model, skin, gla);
 	return bgAllAnims[ent->localAnimIndex].anims;
 }
 
 // Table for this client's pmove: only differs for lines in "timing" mode
 animation_t *G_AnimRemap_Pmove(gentity_t *ent)
 {
-	char model[MAX_QPATH], skin[MAX_QPATH];
+	char model[MAX_QPATH], skin[MAX_QPATH], gla[MAX_QPATH];
 	animation_t *t = NULL;
-	if (G_AnimRemap_ClientModel(ent, model, skin, sizeof(model)))
-		t = BG_AnimRemap_Pmove(ent->s.number, ent->localAnimIndex, model, skin);
+	if (G_AnimRemap_ClientModel(ent, model, skin, gla, sizeof(model)))
+		t = BG_AnimRemap_Pmove(ent->s.number, ent->localAnimIndex, model, skin, gla);
 	return t ? t : bgAllAnims[ent->localAnimIndex].anims;
 }
 

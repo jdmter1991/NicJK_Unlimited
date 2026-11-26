@@ -550,7 +550,8 @@ retryModel:
 	if (GLAName[0] != 0)
 	{
 		if (!strstr(GLAName, "players/_humanoid/") /*&&
-			(!strstr(GLAName, "players/rockettrooper/") || cgs.gametype != GT_SIEGE)*/) //only allow rockettrooper in siege
+			(!strstr(GLAName, "players/rockettrooper/") || cgs.gametype != GT_SIEGE)*/ //only allow rockettrooper in siege
+			&& !(cg_animRemap.integer && BG_AnimRemap_OwnSkeleton(GLAName))) // NicJK: a model's own humanoid skeleton (animremap)
 		{ //Bad!
 			badModel = qtrue;
 			goto retryModel;
@@ -804,6 +805,11 @@ int CG_G2SkelForModel(void *g2)
 	GLAName[0] = 0;
 	trap->G2API_GetGLAName(g2, 0, GLAName);
 
+	// NicJK animremap: a model's own humanoid skeleton plays the humanoid game
+	// (table 0); its own frames are applied where it is drawn
+	if (cg_animRemap.integer && BG_AnimRemap_OwnSkeleton(GLAName))
+		return 0;
+
 	slash = Q_strrchr( GLAName, '/' );
 	if ( slash )
 	{
@@ -830,6 +836,15 @@ int CG_G2EvIndexForModel(void *g2, int animIndex)
 
 	GLAName[0] = 0;
 	trap->G2API_GetGLAName(g2, 0, GLAName);
+
+	// NicJK animremap: a model's own skeleton has its own animevents.cfg, keyed
+	// to the frames of its own animation.cfg
+	if (cg_animRemap.integer && BG_AnimRemap_OwnSkeleton(GLAName))
+	{
+		int ownSlot = BG_AnimRemap_OwnSkeletonSlot(GLAName);
+		if (ownSlot >= 0)
+			animIndex = ownSlot;
+	}
 
 	slash = Q_strrchr( GLAName, '/' );
 	if ( slash )
@@ -3169,6 +3184,28 @@ void CG_PlayerAnimEventDo( centity_t *cent, animevent_t *animEvent )
 NicJK animremap.cfg: frames this client's model shows for each animation number.
 Animation numbers (what the server sends and the game code checks) never change.
 */
+// GLA of the Ghoul2 model this client is drawn with (a model's own GLA, or
+// _humanoid if the model fell back to the default one)
+static const char *CG_AnimRemapGLA( int entNum, clientInfo_t *ci )
+{
+	static void *cachedG2[MAX_CLIENTS];
+	static char cachedModel[MAX_CLIENTS][MAX_QPATH];
+	static char cachedGLA[MAX_CLIENTS][MAX_QPATH];
+	void *g2 = cg_entities[entNum].ghoul2;
+
+	if ( !g2 || !trap->G2_HaveWeGhoul2Models( g2 ) )
+		g2 = ci->ghoul2Model;
+	if ( g2 != cachedG2[entNum] || Q_stricmp( cachedModel[entNum], ci->modelName ) )
+	{
+		cachedG2[entNum] = g2;
+		Q_strncpyz( cachedModel[entNum], ci->modelName, sizeof( cachedModel[entNum] ) );
+		cachedGLA[entNum][0] = 0;
+		if ( g2 && trap->G2_HaveWeGhoul2Models( g2 ) )
+			trap->G2API_GetGLAName( g2, 0, cachedGLA[entNum] );
+	}
+	return cachedGLA[entNum];
+}
+
 const animation_t *CG_AnimRemapVisual( int entNum, int animIndex, clientInfo_t *ci )
 {
 	if ( cg_animRemap.integer && animIndex == 0 && entNum >= 0 && entNum < MAX_CLIENTS )
@@ -3176,7 +3213,7 @@ const animation_t *CG_AnimRemapVisual( int entNum, int animIndex, clientInfo_t *
 		if ( !ci )
 			ci = &cgs.clientinfo[entNum];
 		if ( ci->infoValid )
-			return BG_AnimRemap_Visual( entNum, animIndex, ci->modelName, ci->skinName );
+			return BG_AnimRemap_Visual( entNum, animIndex, ci->modelName, ci->skinName, CG_AnimRemapGLA( entNum, ci ) );
 	}
 	return bgAllAnims[animIndex].anims;
 }
@@ -3194,7 +3231,7 @@ animation_t *CG_AnimRemapPmove( int entNum, int animIndex )
 	ci = &cgs.clientinfo[entNum];
 	if ( !ci->infoValid )
 		return NULL;
-	return BG_AnimRemap_Pmove( entNum, animIndex, ci->modelName, ci->skinName );
+	return BG_AnimRemap_Pmove( entNum, animIndex, ci->modelName, ci->skinName, CG_AnimRemapGLA( entNum, ci ) );
 }
 
 /*
