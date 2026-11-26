@@ -36,6 +36,27 @@ g0 = np.load(os.path.join(ed, "dump", "meshes", "terrain_grid.npz"))["grid"].ast
 g = np.load(os.path.join(ed, "dump", "extras", "terrain_near_carved.npz"))["grid"].astype(np.float64)
 xs = g0[0, :, 0]; ys = g0[:, 0, 1]; dx = xs[1] - xs[0]; dy = ys[1] - ys[0]
 
+# ---- a floor under deep water. In places the source terrain lies tens of metres under the water plane (the source
+# only ever shows the surface). A player sank through the 12 m water volume there, fell onto ground far below the
+# city and came up through walls. The collision bed is therefore never deeper than `max_water_depth_m` below the
+# water surface (the drawn terrain is not changed; the water is opaque).
+MAXD = float(cc.get("max_water_depth_m", 3.0))
+floor_info = {}
+_wf0 = os.path.join(ed, "dump", "extras", "water_final.npz")
+if os.path.exists(_wf0):
+    _w0 = np.load(_wf0); _wr0 = _w0["water"].astype(np.float64); _fx0, _fy0, _fc = float(_w0["x0"]), float(_w0["y0"]), float(_w0["cell"])
+    _l0 = np.where(np.isnan(_wr0), -1e9, _wr0); _dl = _l0.copy()
+    for _dj in range(-2, 3):
+        for _di in range(-2, 3):
+            _dl = np.maximum(_dl, np.roll(np.roll(_l0, _dj, 0), _di, 1))
+    _gi = np.clip(np.rint((g[:, :, 0] - _fx0) / _fc).astype(np.int64), 0, _wr0.shape[1] - 1); _gj = np.clip(np.rint((g[:, :, 1] - _fy0) / _fc).astype(np.int64), 0, _wr0.shape[0] - 1)
+    _wl = _dl[_gj, _gi]
+    _raise = (_wl > -1e8) & (g[:, :, 2] < _wl - MAXD)
+    floor_info = {"max_water_depth_m": MAXD, "terrain_vertices_raised": int(_raise.sum()), "area_m2": float(_raise.sum() * dx * dy),
+                  "deepest_before_m": round(float((_wl - g[:, :, 2])[_raise].max()), 1) if _raise.any() else 0.0}
+    g[:, :, 2][_raise] = (_wl - MAXD)[_raise]
+    print("floor under deep water:", floor_info)
+
 # ---- drop the old terrain triangles: all three corners sit on grid points at the grid's height
 P = tris.reshape(-1, 3).astype(np.float64) / UPM + ORG
 ix = np.rint((P[:, 0] - xs[0]) / dx).astype(np.int64); iy = np.rint((P[:, 1] - ys[0]) / dy).astype(np.int64)
@@ -104,14 +125,31 @@ at_ground = (lowA[:, 2] < gA0 + SK_ABOVE) & (lowB[:, 2] < gB0 + SK_ABOVE) & (low
 gap = np.maximum(lowA[:, 2] - gA, lowB[:, 2] - gB)
 carved_here = ((gA0 - gA) > 0.05) | ((gB0 - gB) > 0.05)
 edge_len = np.linalg.norm((lowA - lowB)[:, :2], axis=1)
-sk = at_ground & carved_here & (gap > SK_MIN) & (edge_len > 0.05)
+# ... and walls that end above the bed of a river that was deep already in the source (their lowest edge lies under
+# the water surface but above the ground): the same skirt, wherever water is within 4 m of the edge.
+_wf = os.path.join(ed, "dump", "extras", "water_final.npz")
+under_water = np.zeros(len(cand), bool)
+if os.path.exists(_wf):
+    _w = np.load(_wf); _wr = _w["water"].astype(np.float64); _x0, _y0, _c = float(_w["x0"]), float(_w["y0"]), float(_w["cell"])
+    _lvl = np.where(np.isnan(_wr), -1e9, _wr)
+    _d = _lvl.copy()                                   # water level of the nearest water cell within two cells
+    for _dj in range(-2, 3):
+        for _di in range(-2, 3):
+            _d = np.maximum(_d, np.roll(np.roll(_lvl, _dj, 0), _di, 1))
+    def wlevel(xm, ym):
+        i_ = np.clip(np.rint((xm - _x0) / _c).astype(np.int64), 0, _wr.shape[1] - 1); j_ = np.clip(np.rint((ym - _y0) / _c).astype(np.int64), 0, _wr.shape[0] - 1)
+        return _d[j_, i_]
+    wA = wlevel(lowA[:, 0], lowA[:, 1]); wB = wlevel(lowB[:, 0], lowB[:, 1])
+    under_water = (lowA[:, 2] < wA + 0.3) & (lowB[:, 2] < wB + 0.3) & (lowA[:, 2] > gA - 0.2) & (lowB[:, 2] > gB - 0.2)
+n_first = int((at_ground & carved_here & (gap > SK_MIN) & (edge_len > 0.05)).sum())
+sk = ((at_ground & carved_here) | under_water) & (gap > SK_MIN) & (edge_len > 0.05)
 a_ = lowA[sk]; b_ = lowB[sk]
-a2 = a_.copy(); b2 = b_.copy(); a2[:, 2] = gA[sk] - SK_BELOW; b2[:, 2] = gB[sk] - SK_BELOW
+a2 = a_.copy(); b2 = b_.copy(); a2[:, 2] = np.maximum(gA[sk] - SK_BELOW, a_[:, 2] - WDEPTH); b2[:, 2] = np.maximum(gB[sk] - SK_BELOW, b_[:, 2] - WDEPTH)      # never deeper than the water volumes
 q1 = np.stack([a_, b_, b2], 1); q2 = np.stack([a_, b2, a2], 1)
 qn = np.cross(q1[:, 1] - q1[:, 0], q1[:, 2] - q1[:, 0]); flip = (qn * nrm[cand][sk]).sum(1) < 0
 q1[flip] = q1[flip][:, ::-1]; q2[flip] = q2[flip][:, ::-1]
 skirts = ((np.concatenate([q1, q2]) - ORG) * UPM).astype(np.float32)
-skirt_info = {"wall_edges": int(sk.sum()), "triangles": int(len(skirts)), "edge_length_m": round(float(edge_len[sk].sum()), 1), "mean_gap_m": round(float(gap[sk].mean()), 2) if sk.any() else 0.0,
+skirt_info = {"wall_edges": int(sk.sum()), "of_which_over_carved_ground": n_first, "gaps_over_1m": int((gap[sk] > 1.0).sum()), "gaps_over_1_6m_player_height": int((gap[sk] > 1.6).sum()), "triangles": int(len(skirts)), "edge_length_m": round(float(edge_len[sk].sum()), 1), "mean_gap_m": round(float(gap[sk].mean()), 2) if sk.any() else 0.0,
               "max_gap_m": round(float(gap[sk].max()), 2) if sk.any() else 0.0}
 print("skirts under walls over carved ground:", skirt_info)
 out = np.concatenate([objects.astype(np.float32), terr, skirts.reshape(-1, *objects.shape[1:])])
@@ -144,6 +182,6 @@ np.save(os.path.join(cdir, "water_boxes.npy"), boxes)
 rep = {"seconds": round(time.time() - t0, 1), "old_terrain_tris": int(is_terr.sum()), "object_tris": int(len(objects)), "blocks_2m": int((~fine).sum()),
        "blocks_1m": int(fine.sum()), "new_terrain_tris": int(len(terr)), "total_tris": int(len(out)), "tolerance_m": TOL,
        "carved_below_source_vertices": int((g[j0:j1 + 1, i0:i1 + 1, 2] < g0[j0:j1 + 1, i0:i1 + 1, 2] - 0.01).sum()),
-       "water_cells": n_cells, "water_boxes": int(len(boxes)), "water_depth_m": WDEPTH, "skirts": skirt_info}
+       "water_cells": n_cells, "water_boxes": int(len(boxes)), "water_depth_m": WDEPTH, "skirts": skirt_info, "deep_water_floor": floor_info}
 json.dump(rep, open(os.path.join(cdir, "terrain_rebuild.json"), "w"), indent=1)
 print(json.dumps(rep, indent=1))

@@ -104,3 +104,22 @@ What changed (engine):
 **Not reached:** 125 FPS in the palace hall with 31 bots (110 median, minimum about 100), and minima elsewhere dip
 to about 128. Screenshots taken at the moment of capture read lower still (82-131). Not measured: 1440p
 fullscreen, 4K, 32 bots, the visual effect of the tighter detail thresholds.
+
+## 7. Rivers and spawn points (2026-11-26, morning)
+
+**Rivers.** A bot was seen leaving the big river through a wall. Two causes found and fixed in
+`tools\build_collision_terrain.py`:
+* *No river bed.* Over 72,105 m2 the source terrain lies more than 3 m under the water plane, in places 206 m
+  (the source only shows the surface). A player sank through the 12 m water volume, fell onto ground far below
+  the city and walked up inside it. The collision bed is now never deeper than 3 m below the surface.
+* *Walls ending above the bed.* 2,684 wall edges (2.57 km) end under water but above the ground, 87 of them by
+  more than a player's height. Each has a collision skirt down to the bed now.
+Checked in game: a player dropped at 24 river points, including two where it had fallen through before, stays
+within 63 units of the surface at every point with visible water. Not checked: the exact wall where it was seen.
+
+**Spawn points** (`tools\add_palace_spawns.py`, `tools\fix_spawns.py`): 108 in the BSP.
+* Palace: 12, on two storeys. Spots under the flights of the grand staircase are rejected now (the nearest
+  ceiling must be level over a 120-unit circle); viewed one by one in `shots_v30\spawns_palace.jpg`.
+* Forecourt and the streets around the palace: 24 new ones on open, flat ground.
+* Cafes: 10, one beside each group of outdoor chairs and tables.
+* The 64 older city spawns are unchanged; none has a drawn or collidable surface above it.

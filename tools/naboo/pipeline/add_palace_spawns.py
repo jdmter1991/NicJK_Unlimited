@@ -5,7 +5,8 @@ none. This finds floor spots from the collision triangles (<export_dir>/collisio
 inside the bounds of the palace-interior meshes of dump/scene.json:
   * a near-level triangle under the spot, and the same floor height (within 6 units) at 8 points 36 units around
     it: flat, solid ground with room for the player box;
-  * nothing between 6 and 80 units above the floor at any of the 9 points (headroom);
+  * nothing between 6 and 260 units above the floor at any of the 9 points: room to stand, and not one of the low
+    spaces under the flights of the stairs;
   * a ceiling somewhere above (indoors), found with a ray straight up.
 From the spots that pass, `count` (default 14) are picked as far apart as possible, per storey in proportion to its
 share of the spots. They are appended to naboo/q3base/base/maps/<mapname>.map as info_player_deathmatch entities
@@ -81,7 +82,9 @@ def walk_distance(x, y, zf, ang):
     return 32.0 * 39
 
 
+HEADROOM = float(cfg.get("palace_spawn_headroom_units", 260.0))      # 6.6 m: not in the low spaces under stair flights
 RING = [(0.0, 0.0)] + [(36.0 * np.cos(a_), 36.0 * np.sin(a_)) for a_ in np.arange(8) * np.pi / 4]
+WIDE = RING + [(120.0 * np.cos(a_), 120.0 * np.sin(a_)) for a_ in np.arange(8) * np.pi / 4]
 cands = []
 STEP = float(cfg.get("palace_spawn_step_units", 96.0))
 for x in np.arange(lo[0], hi[0], STEP):
@@ -90,11 +93,20 @@ for x in np.arange(lo[0], hi[0], STEP):
         if len(z) == 0:
             continue
         for zf in np.unique(np.round(z[(nz > 0.95) & (z >= ZMIN) & (z <= hi[2])], 0)):
-            good = True
-            for ox, oy in RING:
+            good = True; first_above = []
+            for ox, oy in WIDE:
                 z2, nz2 = hits(x + ox, y + oy)
-                if not ((nz2 > 0.95) & (np.abs(z2 - zf) <= 6.0)).any() or ((z2 > zf + 6.0) & (z2 < zf + 80.0)).any():
+                up = z2[z2 > zf + 6.0]
+                first_above.append(float(up.min()) if len(up) else 1e9)
+                if (ox, oy) in RING and (not ((nz2 > 0.95) & (np.abs(z2 - zf) <= 6.0)).any() or ((z2 > zf + 6.0) & (z2 < zf + HEADROOM)).any()):
                     good = False; break
+            # a flight of stairs overhead shows as a ceiling whose height changes from point to point (the steps are
+            # level pieces, so slope alone does not give it away): the nearest ceiling must be level within 20 units
+            # over a circle of 120 units, unless it is more than 900 units up
+            if good:
+                fa = np.array(first_above)
+                if fa.min() < zf + 900.0 and fa.max() - fa.min() > 20.0:
+                    good = False
             if good and (z > zf + 80.0).any():                 # a ceiling above: indoors
                 cands.append((x, y, zf))
 C = np.array(cands)
