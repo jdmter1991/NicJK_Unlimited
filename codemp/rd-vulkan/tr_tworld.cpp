@@ -481,7 +481,7 @@ static void R_LoadTWorldPBR( tworld_t *tw, const char *bspName )
 		const twPbrMaterial_t *pmi = (const twPbrMaterial_t *)( buffer + 12 + (size_t)i * stride );
 		const int r = (int)( Com_Clamp( 0.0f, 1.0f, pmi->roughness ) * 255.0f + 0.5f );
 		const int m = (int)( Com_Clamp( 0.0f, 1.0f, pmi->metallic ) * 255.0f + 0.5f );
-		tw->pbrPacks[i] = (float)( ( r < 1 ? 1 : r ) + 256 * m + 65536 * (int)( pmi->flags & 7 ) );
+		tw->pbrPacks[i] = (float)( ( r < 1 ? 1 : r ) + 256 * m + 65536 * (int)( pmi->flags & 15 ) );
 		tw->pbrScales[i] = ( pmi->scale > 0.0f ) ? pmi->scale : 1.0f;
 		if ( version == 2 ) {
 			const twPbrMaterial2_t *p2 = (const twPbrMaterial2_t *)pmi;

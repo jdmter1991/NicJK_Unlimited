@@ -198,6 +198,8 @@ void main() {
 			rough = clamp( 1.0 - base.a, 0.06, 1.0 );		// the base texture's alpha is smoothness
 		if ( groundSmooth >= 0.0 )
 			rough = mix( 0.85, 1.0 - groundSmooth, 0.8 );		// the tiling layer's alpha is its smoothness
+		if ( ( flags & 8 ) != 0 )
+			rough *= rough;									// materials whose source squares the roughness (palace interior)
 		rough = clamp( rough, 0.06, 1.0 );
 
 		vec3 L = u_entity.localLightOrigin.xyz;

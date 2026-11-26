@@ -149,6 +149,7 @@ def shader_for(tex, cls, detail_rep=0):
 
 mat_pbr = {}            # engine material index -> (normal texture name or None, scale, roughness, metallic, flags)
 PBR_DEFAULT = (None, 1.0, 0.85, 0.0, 0)
+GLOSS_SQUARED = tuple(cfg.get("gloss_squared_materials", ["SS_NAB_PalaceInterio"]))
 PBR_SURVEY = {}
 _ps = os.path.join(export_dir, "pbr_survey.json")
 if os.path.exists(_ps) and cfg.get("pbr", True):
@@ -231,6 +232,10 @@ def pbr_of(name, m, cls):
                 flags |= 4
     elif isinstance(mt.get("const"), (int, float)):
         metal = float(mt["const"])
+    if any(w_ in name for w_ in GLOSS_SQUARED):
+        # the better-lit palace file computes roughness = (1 - smoothness)^2 and has no metallic input on these
+        # materials (tools/gloss_group.py); the main scene's graphs give 1 - smoothness and a metallic mask
+        flags = (flags & ~6) | 8; metal = 0.0
     return (ntex, round(scale, 3), round(min(max(rough, 0.0), 1.0), 3), round(min(max(metal, 0.0), 1.0), 3), flags)
 
 
