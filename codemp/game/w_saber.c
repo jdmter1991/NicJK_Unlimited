@@ -41,6 +41,7 @@ int saberSpinSound = 0;
 
 //would be cleaner if these were renamed to BG_ and proto'd in a header.
 qboolean PM_SaberInTransition( int move );
+qboolean G_MB2SaberBlock( gentity_t *attacker, gentity_t *defender, vec3_t hitloc, int attackStr );
 qboolean PM_SaberInDeflect( int move );
 qboolean PM_SaberInBrokenParry( int move );
 qboolean PM_SaberInBounce( int move );
@@ -4979,10 +4980,13 @@ static QINLINE qboolean CheckSaberDamage(gentity_t *self, int rSaberNum, int rBl
 
 		didHit = qtrue;
 
-		if (!SaberSPStyle(self)//let's trying making blocks have to be blocked by a saber
+		if (g_mb2manualblock.integer
+			? (g_entities[tr.entityNum].client && !unblockable && dmg > SABER_NONATTACK_DAMAGE
+				&& G_MB2SaberBlock(self, &g_entities[tr.entityNum], tr.endpos, attackStr))	// MB2: the guard decides, whatever the damage style
+			: (!SaberSPStyle(self)//let's trying making blocks have to be blocked by a saber
 			&& g_entities[tr.entityNum].client
 			&& !unblockable
-			&& WP_SaberCanBlock(&g_entities[tr.entityNum], tr.endpos, 0, MOD_SABER, qfalse, attackStr))
+			&& WP_SaberCanBlock(&g_entities[tr.entityNum], tr.endpos, 0, MOD_SABER, qfalse, attackStr)))
 		{//hit a client who blocked the attack (fake: didn't actually hit their saber)
 			if (dmg <= SABER_NONATTACK_DAMAGE)
 			{
@@ -5185,6 +5189,29 @@ static QINLINE qboolean CheckSaberDamage(gentity_t *self, int rSaberNum, int rBl
 			return qfalse;
 		if (otherOwner->client && otherOwner->client->ps.stats[STAT_RACEMODE])
 			return qfalse;
+
+		if ( g_mb2manualblock.integer && otherOwner->client && !otherOwner->client->ps.saberInFlight
+			&& dmg > SABER_NONATTACK_DAMAGE && !unblockable
+			&& !BG_SaberInAttack( otherOwner->client->ps.saberMove ) && !BG_SaberInSpecial( otherOwner->client->ps.saberMove ) )
+		{ //MB2: the blade met a saber that is not swinging. Only a guard blocks, and it pays for it; otherwise
+		  //the swing goes through to its owner. Once per swing per pair (the blade can touch for several frames).
+			static int mb2ClashNext[MAX_CLIENTS][MAX_CLIENTS];
+			const int a = self->s.number, b = otherOwner->s.number;
+			if ( a < MAX_CLIENTS && b < MAX_CLIENTS )
+			{
+				if ( mb2ClashNext[a][b] > level.time + 2000 ) mb2ClashNext[a][b] = 0;
+				if ( level.time < mb2ClashNext[a][b] )
+				{
+					return qfalse;
+				}
+				mb2ClashNext[a][b] = level.time + 350;
+			}
+			if ( !G_MB2SaberBlock( self, otherOwner, tr.endpos, attackStr ) )
+			{
+				G_Damage( otherOwner, self, self, dir, tr.endpos, dmg, 0, MOD_SABER );
+				return qtrue;
+			}
+		}
 
 		if ( otherOwner 
 			&& otherOwner->client 
@@ -6389,7 +6416,7 @@ static QINLINE qboolean CheckThrownSaberDamaged(gentity_t *saberent, gentity_t *
 
 			if (tr.fraction == 1 || tr.entityNum == ent->s.number)
 			{ //Slice them
-				if (!saberOwner->client->ps.isJediMaster && WP_SaberCanBlock(ent, tr.endpos, 0, MOD_SABER, qfalse, 999))
+				if (!saberOwner->client->ps.isJediMaster && (g_mb2manualblock.integer ? G_MB2SaberBlock(saberOwner, ent, tr.endpos, 999) : WP_SaberCanBlock(ent, tr.endpos, 0, MOD_SABER, qfalse, 999)))
 				{ //they blocked it
 					WP_SaberBlockNonRandom(ent, tr.endpos, qfalse);
 
@@ -9945,6 +9972,172 @@ static int G_SaberLevelForStance(int stance) { // Niksata Edit
 
 	return 0;
 } // Niksata Edit
+
+/*
+==============
+MB2-style manual blocking (g_mb2manualblock 1)
+
+Modelled on Movie Battles II's rules as its players document them (closed source; mainly the
+2026 "R21+ Dueling Guide" by Leons on community.moviebattles.org):
+- A swing is blocked only while the defender holds the guard (alt attack) with a lit saber and
+  the hit comes from the front. Nothing blocks automatically.
+- Each blocked swing costs block points: 100 * attacker style offence / defender style defence,
+  scaled by what both are doing. Block points come back only while not running and not attacking.
+  Too few points left and the swing gets through.
+- Perfect block: the defender aims at the side the swing comes from (one of seven zones round the
+  attacker's body). It costs nothing, gives 2 points back and bounces the attacker.
+- A defender at 0 points who is hit while guarding loses the saber.
+Projectiles are blocked as in base JKA.
+==============
+*/
+int g_mb2Stats[6];	// guarded hits blocked, perfect blocks, guarded hits that got through, disarms, unguarded hits, hits from behind
+static const int mb2Offence[SS_NUM_SABER_STYLES] = { 9, 7, 9, 12, 11, 8, 8, 8 };	// none, blue, yellow, red, purple, cyan, duals, staff
+static const int mb2Defence[SS_NUM_SABER_STYLES] = { 50, 55, 50, 48, 48, 48, 50, 53 };
+
+static int G_MB2Zone( float dyaw, float dpitch, float z ) {
+	const int h = ( dyaw > z ) ? -1 : ( ( dyaw < -z ) ? 1 : 0 );	// -1 the defender aims left of the attacker, 1 right
+	const int v = ( dpitch < -z ) ? 1 : ( ( dpitch > z ) ? -1 : 0 );	// 1 above, -1 below
+	if ( v == 1 ) return ( h < 0 ) ? Q_TL : ( ( h > 0 ) ? Q_TR : Q_T );
+	if ( v == 0 ) return ( h < 0 ) ? Q_L : ( ( h > 0 ) ? Q_R : -1 );
+	return ( h < 0 ) ? Q_BL : ( ( h > 0 ) ? Q_BR : -1 );
+}
+
+// the zone, in the defender's view, a swing starting at quad q (attacker's own frame) comes from
+static int G_MB2Mirror( int q ) {
+	switch ( q ) {
+	case Q_TR: return Q_TL;
+	case Q_TL: return Q_TR;
+	case Q_R: return Q_L;
+	case Q_L: return Q_R;
+	case Q_BR: return Q_BL;
+	case Q_BL: return Q_BR;
+	case Q_T: return Q_T;
+	default: return -1;
+	}
+}
+
+int G_MB2PerfectBlockZone( gentity_t *attacker ) {	// for the bots: where to aim to perfect block this swing
+	if ( !attacker || !attacker->client || attacker->client->ps.saberMove <= LS_NONE || attacker->client->ps.saberMove >= LS_MOVE_MAX ) return -1;
+	return G_MB2Mirror( saberMoveData[attacker->client->ps.saberMove].startQuad );
+}
+
+qboolean G_MB2SaberBlock( gentity_t *attacker, gentity_t *defender, vec3_t hitloc, int attackStr ) {
+	gclient_t *dc;
+	float factor, drain, pbZone;
+	int dStyle, aStyle, zone, want;
+	vec3_t dEye, aChest, to, ang;
+	qboolean thrown = ( attackStr == 999 ) ? qtrue : qfalse;
+
+	if ( !defender || !defender->client || !attacker || !attacker->client ) {
+		return qfalse;
+	}
+	dc = defender->client;
+	if ( dc->ps.weapon != WP_SABER || BG_SabersOff( &dc->ps ) || dc->ps.saberInFlight || !dc->ps.saberEntityNum
+		|| dc->ps.fd.forcePowerLevel[FP_SABER_DEFENSE] < FORCE_LEVEL_1 || BG_InKnockDown( dc->ps.legsAnim ) ) {
+		g_mb2Stats[4]++;
+		return qfalse;
+	}
+	if ( !dc->ps.userInt3 ) {
+		g_mb2Stats[4]++;
+		return qfalse;	// not guarding: no block
+	}
+	// the front: a wider arc with more saber defence
+	factor = ( dc->ps.fd.forcePowerLevel[FP_SABER_DEFENSE] >= FORCE_LEVEL_3 ) ? -0.2f : ( ( dc->ps.fd.forcePowerLevel[FP_SABER_DEFENSE] == FORCE_LEVEL_2 ) ? -0.1f : 0.0f );
+	if ( !InFront( hitloc, dc->ps.origin, dc->ps.viewangles, factor ) ) {
+		g_mb2Stats[5]++;
+		return qfalse;
+	}
+	if ( dc->mb2bp <= 0.0f ) {
+		// guarding with nothing left: the saber is knocked away and the swing lands
+		if ( dc->ps.saberEntityNum && !dc->ps.saberInFlight ) {
+			vec3_t fling;
+			VectorSubtract( dc->ps.origin, attacker->client->ps.origin, fling );
+			VectorNormalize( fling );
+			VectorScale( fling, 300, fling );
+			fling[2] = 150;
+			saberKnockOutOfHand( &g_entities[dc->ps.saberEntityNum], defender, fling );
+			g_mb2Stats[3]++;
+		}
+		g_mb2Stats[2]++;
+		return qfalse;
+	}
+
+	// perfect block: aimed at the side the swing comes from
+	want = thrown ? -1 : G_MB2PerfectBlockZone( attacker );
+	VectorCopy( dc->ps.origin, dEye );
+	dEye[2] += dc->ps.viewheight;
+	VectorCopy( attacker->client->ps.origin, aChest );
+	aChest[2] += 16;
+	VectorSubtract( aChest, dEye, to );
+	vectoangles( to, ang );
+	pbZone = g_mb2pbZone.value > 1.0f ? g_mb2pbZone.value : 1.0f;
+	zone = G_MB2Zone( AngleNormalize180( dc->ps.viewangles[YAW] - ang[YAW] ), AngleNormalize180( dc->ps.viewangles[PITCH] - ang[PITCH] ), pbZone );
+	if ( want >= 0 && zone == want ) {
+		dc->mb2bp += 2.0f;
+		if ( dc->mb2bp > 100.0f ) dc->mb2bp = 100.0f;
+		attacker->client->mb2bp -= 5.0f;
+		if ( attacker->client->mb2bp < 0.0f ) attacker->client->mb2bp = 0.0f;
+		attacker->client->ps.saberBlocked = BLOCKED_ATK_BOUNCE;
+		g_mb2Stats[1]++;
+		g_mb2Stats[0]++;
+		return qtrue;
+	}
+
+	// ordinary block: pay for it
+	aStyle = attacker->client->ps.fd.saberAnimLevel;
+	dStyle = dc->ps.fd.saberAnimLevel;
+	if ( aStyle < 0 || aStyle >= SS_NUM_SABER_STYLES ) aStyle = SS_MEDIUM;
+	if ( dStyle < 0 || dStyle >= SS_NUM_SABER_STYLES ) dStyle = SS_MEDIUM;
+	drain = 100.0f * (float)mb2Offence[aStyle] / (float)mb2Defence[dStyle];
+	if ( thrown ) {
+		drain *= 0.75f;
+	} else {
+		const float aSpeed = sqrt( attacker->client->ps.velocity[0] * attacker->client->ps.velocity[0] + attacker->client->ps.velocity[1] * attacker->client->ps.velocity[1] );
+		if ( attacker->client->ps.groundEntityNum == ENTITYNUM_NONE ) drain *= 1.2f;
+		else if ( aSpeed > 200.0f ) drain *= 0.8f;
+		if ( PM_SaberInTransition( attacker->client->ps.saberMove ) ) drain *= 0.5f;	// a later swing of a chain
+	}
+	if ( dc->pers.cmd.buttons & BUTTON_ATTACK ) drain *= 1.2f;	// swinging while guarding
+	if ( dc->ps.pm_flags & PMF_DUCKED ) drain *= 1.5f;
+	if ( dc->ps.groundEntityNum == ENTITYNUM_NONE ) drain *= 1.3f;
+	if ( dc->ps.fd.forcePowerLevel[FP_SABER_DEFENSE] == FORCE_LEVEL_1 ) drain *= 1.4f;
+	if ( dc->mb2bp < drain ) {
+		dc->mb2bp = 0.0f;
+		g_mb2Stats[2]++;
+		return qfalse;	// not enough left: it gets through
+	}
+	dc->mb2bp -= drain;
+	g_mb2Stats[0]++;
+	return qtrue;
+}
+
+// every client frame: regain block points, show them in the fuel bar
+void G_MB2BlockThink( gentity_t *ent ) {
+	gclient_t *cl = ent->client;
+	float speed;
+
+	if ( !cl ) {
+		return;
+	}
+	if ( !g_mb2manualblock.integer ) {
+		cl->ps.userInt3 = 0;
+		return;
+	}
+	if ( cl->mb2bp > 100.0f || cl->mb2bp < 0.0f ) cl->mb2bp = 100.0f;
+	if ( cl->mb2bpNextRegen > level.time + 5000 ) cl->mb2bpNextRegen = 0;
+	speed = sqrt( cl->ps.velocity[0] * cl->ps.velocity[0] + cl->ps.velocity[1] * cl->ps.velocity[1] );
+	if ( level.time >= cl->mb2bpNextRegen ) {
+		cl->mb2bpNextRegen = level.time + ( g_mb2bpRegenTime.integer > 20 ? g_mb2bpRegenTime.integer : 20 );
+		if ( cl->ps.stats[STAT_HEALTH] > 0 && cl->ps.groundEntityNum != ENTITYNUM_NONE && speed <= 190.0f
+			&& !BG_SaberInAttack( cl->ps.saberMove ) && !BG_SaberInSpecial( cl->ps.saberMove ) ) {
+			cl->mb2bp += ( cl->ps.pm_flags & PMF_DUCKED ) ? g_mb2bpRegen.value * 0.5f : g_mb2bpRegen.value;
+			if ( cl->mb2bp > 100.0f ) cl->mb2bp = 100.0f;
+		}
+	}
+	if ( cl->ps.weapon == WP_SABER && !( cl->ps.stats[STAT_HOLDABLE_ITEMS] & ( 1 << HI_CLOAK ) ) && !cl->ps.powerups[PW_CLOAKED] ) {
+		cl->ps.cloakFuel = (int)cl->mb2bp;
+	}
+}
 
 int WP_SaberCanBlock(gentity_t* self, vec3_t point, int dflags, int mod, qboolean projectile, int attackStr) // Niksata Edit
 {

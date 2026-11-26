@@ -3452,6 +3452,7 @@ static void G_GunDuelEndWeapon(gentity_t *ent)
 }
 
 void Cmd_RaceTele_f(gentity_t *ent, qboolean useForce);
+extern void G_MB2BlockThink( gentity_t *ent );
 void ClientThink_real( gentity_t *ent ) {
 	gclient_t	*client;
 	pmove_t		pmove;
@@ -3462,6 +3463,8 @@ void ClientThink_real( gentity_t *ent ) {
 	qboolean	controlledByPlayer = qfalse;
 	qboolean	killJetFlags = qtrue;
 	qboolean	isFollowing;
+
+	G_MB2BlockThink( ent );
 
 	client = ent->client;
 

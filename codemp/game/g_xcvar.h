@@ -303,6 +303,12 @@ XCVAR_DEF( g_antiWallhack,				"0",			NULL,				CVAR_ARCHIVE,									qtrue )
 
 
 //JAPRO Other
+// MB2-style manual saber blocking (off = base JKA blocking, unchanged). In the server info, so
+// clients can predict the guard: hold alt attack with a saber to guard; alt attack + use throws.
+XCVAR_DEF( g_mb2manualblock,				"0",			NULL,				CVAR_ARCHIVE|CVAR_SERVERINFO,					qtrue )
+XCVAR_DEF( g_mb2bpRegen,					"4",			NULL,				CVAR_ARCHIVE,									qtrue ) // block points regained per tick when not running or attacking
+XCVAR_DEF( g_mb2bpRegenTime,				"250",			NULL,				CVAR_ARCHIVE,									qtrue ) // ms per regen tick
+XCVAR_DEF( g_mb2pbZone,						"8",			NULL,				CVAR_ARCHIVE,									qtrue ) // degrees off the attacker's body that count as aiming at a side for a perfect block
 XCVAR_DEF( jcinfo,						"0",			NULL,				CVAR_SERVERINFO|CVAR_ROM,						qfalse) //not a cvar, dont change it
 XCVAR_DEF( jcinfo2,						"0",			NULL,				CVAR_SERVERINFO|CVAR_ROM,						qfalse ) //not a cvar, dont change it
 XCVAR_DEF( g_emotesDisable,				"0",			CVU_Jawarun,		CVAR_ARCHIVE,									qtrue )
