@@ -32,12 +32,15 @@
    "spawn_grid_m": 14.0,
    "spawn_max_above_terrain_m": 2.5,
    "collision": {
-    "box_below_extent_m": 3.0,
-    "skip_below_extent_m": 0.6,
-    "decimate_fraction": 0.04,
-    "decimate_min_tris": 60,
-    "decimate_max_tris": 800,
-    "terrain_stride": 2
+    "box_below_extent_m": 1.0,
+    "skip_below_extent_m": 0.3,
+    "decimate_fraction": 0.08,
+    "decimate_min_tris": 100,
+    "decimate_max_tris": 2000,
+    "planar_first": true,
+    "planar_angle_deg": 1.0,
+    "terrain_stride": 2,
+    "weld_m": 0.005
    }
   }
  },
@@ -111,7 +114,8 @@
   "plane_tolerance": 0.05,
   "line_tolerance": 0.05,
   "merge_max_corners": 12,
-  "merge_max_extent": 1024.0
+  "merge_max_extent": 1024.0,
+  "bot_wall_above": 1200.0
  },
  "shadow": {
   "size": 6912,
@@ -160,5 +164,26 @@
   "points": 6,
   "ray_length": 3200.0,
   "cell": 160.0
- }
+ },
+ "carve_terrain_under_water": false,
+ "water_gap_m": 0.0,
+ "far_water_gap_m": 0.0,
+ "_note_exact_geometry": "2026-11-26, user: the whole map's geometry should match the source file exactly. Terrain lowering under water and generated gap-fill water are off; only invisible gameplay helpers (deep-water floor, kill volume, bot walls) are added.",
+ "collision_terrain": {
+  "floor_cover_radius_units": 300.0,
+  "drop_terrain_under_floors": false
+ },
+ "avoid_zones": [
+  {
+   "name": "west garden lawn (plain grass and blob bushes, user 2026-11-27)",
+   "box": [
+    -8400,
+    4300,
+    -4300,
+    8000
+   ],
+   "lawn_only": true,
+   "min_grass": 0.5
+  }
+ ]
 }

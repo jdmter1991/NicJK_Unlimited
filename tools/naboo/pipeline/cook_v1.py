@@ -937,6 +937,10 @@ def carve_under_water(g, reach_m, label, exclude=None, tol=None):
     carved = np.zeros(g.shape[:2], bool)
     if WATER is None:
         return carved
+    if not cfg.get("carve_terrain_under_water", True):
+        # the terrain stays exactly as in the source file (the user's choice): no lowering under water
+        carve_stats[label] = {"skipped": "carve_terrain_under_water is off"}
+        return carved
     wr, wx0, wy0, wc = WATER
     tol = float(cfg.get("water_carve_tolerance_m", 0.3)) if tol is None else tol
     depth = float(cfg.get("water_carve_depth_m", 1.0))

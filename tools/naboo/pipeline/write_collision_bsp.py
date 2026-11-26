@@ -44,6 +44,11 @@ SURF_NODRAW_COL = 0x00200000; CONT_SOLID = 0x00008001      # as written by q3map
 SURF_SKY = 0x00082000
 
 tris = np.load(os.path.join(export_dir, "collision", "collision_tris.npy")).astype(np.float64)
+_sk = os.path.join(export_dir, "collision", "skirts.npy")
+if os.path.exists(_sk) and cfg.get("backdrop_skirts", {}).get("use", True):
+    # invisible walls closing the hidden space under the backdrop canal walkways (tools/backdrop_skirts.py)
+    _s = np.load(_sk).astype(np.float64).reshape(-1, *tris.shape[1:])
+    tris = np.concatenate([tris, _s]); print("backdrop skirts: %d triangles" % len(_s))
 N_IN = len(tris)
 # opening doors (tools/build_doors.py): their static collision goes, each leaf comes back as a brush model
 DOORS = None
@@ -292,6 +297,134 @@ if os.path.exists(_wb) and bool(_w.get("water", True)):
         NWATER = len(WB)
         bmin = np.concatenate([bmin, WB[:, 0]]); bmax = np.concatenate([bmax, WB[:, 1]])
         nonax_count = np.concatenate([nonax_count, np.zeros(NWATER, np.int64)])
+
+
+def water_edge_walls(wb):
+    """thin boxes on every edge of the water volumes that borders dry ground. The volumes are rows of water
+    raster cells, so they are put back on that raster; an edge is walled where the neighbouring cell is not water"""
+    if not len(wb):
+        return np.zeros((0, 2, 3))
+    cs = float(np.median(wb[:, 1, 1] - wb[:, 0, 1]))
+    X0 = float(wb[:, 0, 0].min()); Y0 = float(wb[:, 0, 1].min())
+    i0 = np.rint((wb[:, 0, 0] - X0) / cs).astype(np.int64); i1 = np.rint((wb[:, 1, 0] - X0) / cs).astype(np.int64)
+    jy = np.rint((wb[:, 0, 1] - Y0) / cs).astype(np.int64)
+    nx = int(i1.max()) + 2; ny = int(jy.max()) + 2
+    wet = np.zeros((ny + 2, nx + 2), bool); top = np.full((ny + 2, nx + 2), np.nan)
+    for k in range(len(wb)):
+        wet[jy[k] + 1, i0[k] + 1:i1[k] + 1] = True; top[jy[k] + 1, i0[k] + 1:i1[k] + 1] = wb[k, 1, 2]
+    # open water: no solid surface above the water within reach. The source's water continues under quay paving and
+    # bridges; walls belong where open water meets anything else (the quay edge), not at the hidden wet/dry line
+    jj_, ii_ = np.nonzero(wet)
+    cxs = X0 + (ii_ - 1 + 0.5) * cs; cys = Y0 + (jj_ - 1 + 0.5) * cs; tps = top[jj_, ii_]
+    U_ = tris
+    nz_ = np.cross(U_[:, 1] - U_[:, 0], U_[:, 2] - U_[:, 0])
+    tmin_ = U_.min(1); tmax_ = U_.max(1)
+    sel_ = (tmax_[:, 2] > np.nanmin(tps) + 8) & (tmin_[:, 2] < np.nanmax(tps) + 600) & (tmax_[:, 0] >= cxs.min()) & (tmin_[:, 0] <= cxs.max())         & (tmax_[:, 1] >= cys.min()) & (tmin_[:, 1] <= cys.max()) & (np.abs(nz_[:, 2]) > 1e-6)
+    U_ = U_[sel_]; tmin_ = tmin_[sel_]; tmax_ = tmax_[sel_]
+    CELLW = 256.0
+    bx0 = np.floor(tmin_[:, 0] / CELLW).astype(np.int64); bx1 = np.floor(tmax_[:, 0] / CELLW).astype(np.int64)
+    by0 = np.floor(tmin_[:, 1] / CELLW).astype(np.int64); by1 = np.floor(tmax_[:, 1] / CELLW).astype(np.int64)
+    bk = {}
+    for t_ in np.flatnonzero((bx1 - bx0 + 1) * (by1 - by0 + 1) <= 256):
+        for gx_ in range(bx0[t_], bx1[t_] + 1):
+            for gy_ in range(by0[t_], by1[t_] + 1):
+                bk.setdefault((gx_, gy_), []).append(t_)
+    covered = np.zeros(len(cxs), bool); cover_h = np.full(len(cxs), np.inf)
+    kx_ = np.floor(cxs / CELLW).astype(np.int64); ky_ = np.floor(cys / CELLW).astype(np.int64)
+    for key in set(zip(kx_.tolist(), ky_.tolist())):
+        fi = bk.get(key)
+        if not fi:
+            continue
+        fi = np.array(fi); a = U_[fi, 0]; e1 = U_[fi, 1] - a; e2 = U_[fi, 2] - a
+        det = e1[:, 0] * e2[:, 1] - e1[:, 1] * e2[:, 0]
+        pi = np.flatnonzero((kx_ == key[0]) & (ky_ == key[1]))
+        dxw = cxs[pi][:, None] - a[None, :, 0]; dyw = cys[pi][:, None] - a[None, :, 1]
+        with np.errstate(divide="ignore", invalid="ignore"):
+            u = (dxw * e2[None, :, 1] - dyw * e2[None, :, 0]) / det[None, :]; v = (dyw * e1[None, :, 0] - dxw * e1[None, :, 1]) / det[None, :]
+        ins = (np.abs(det)[None, :] > 1e-6) & (u >= 0) & (v >= 0) & (u + v <= 1)
+        hz = a[None, :, 2] + u * e1[None, :, 2] + v * e2[None, :, 2] - tps[pi][:, None]
+        okh = ins & (hz > 8) & (hz < 600)
+        covered[pi] = okh.any(1)
+        cover_h[pi] = np.where(okh, hz, np.inf).min(1)
+    wet_open = np.zeros_like(wet); wet_open[jj_[~covered], ii_[~covered]] = True
+    print("water cells %d, open %d, under a floor or bridge %d" % (len(cxs), int((~covered).sum()), int(covered.sum())))
+    wet_all = wet.copy()
+    capr = np.full(wet.shape, np.inf); capr[jj_, ii_] = cover_h
+    wet = wet_open
+    th = float(_w.get("bot_wall_thickness", 8.0)); below = float(_w.get("bot_wall_below", 16.0)); above = float(_w.get("bot_wall_above", 128.0))
+    out = []
+    # edges facing -x / +x: walls along y, merged over consecutive rows of the same column
+    for dxs in (-1, 1):
+        edge = wet & ~np.roll(wet, -dxs, axis=1)
+        for i in np.flatnonzero(edge.any(0)):
+            rows = np.flatnonzero(edge[:, i])
+            for run in np.split(rows, np.flatnonzero(np.diff(rows) > 1) + 1):
+                x = X0 + (i - 1 + (1 if dxs > 0 else 0)) * cs
+                y0 = Y0 + (run[0] - 1) * cs; y1 = Y0 + (run[-1]) * cs
+                t = np.nanmax(top[run, i])
+                out.append([(x - th / 2, y0, t - below), (x + th / 2, y1, t + above)])
+    for dys in (-1, 1):
+        edge = wet & ~np.roll(wet, -dys, axis=0)
+        for j in np.flatnonzero(edge.any(1)):
+            cols = np.flatnonzero(edge[j])
+            for run in np.split(cols, np.flatnonzero(np.diff(cols) > 1) + 1):
+                y = Y0 + (j - 1 + (1 if dys > 0 else 0)) * cs
+                x0 = X0 + (run[0] - 1) * cs; x1 = X0 + (run[-1]) * cs
+                t = np.nanmax(top[j, run])
+                out.append([(x0, y - th / 2, t - below), (x1, y + th / 2, t + above)])
+    # water under quay paving and bridges: walls along its dry banks too, ending 8 units under the floor above
+    cov = wet_all & ~wet
+    n_cov = 0
+    for axis_, d_ in ((1, -1), (1, 1), (0, -1), (0, 1)):
+        edge = cov & ~np.roll(wet_all, -d_, axis=axis_)
+        for j, i in zip(*np.nonzero(edge)):
+            t = top[j, i]; cap = capr[j, i]
+            if not np.isfinite(cap) or cap < 48:
+                continue
+            n_cov += 1
+            if axis_ == 1:
+                x = X0 + (i - 1 + (1 if d_ > 0 else 0)) * cs
+                out.append([(x - th / 2, Y0 + (j - 1) * cs, t - below), (x + th / 2, Y0 + j * cs, t + cap - 8)])
+            else:
+                y = Y0 + (j - 1 + (1 if d_ > 0 else 0)) * cs
+                out.append([(X0 + (i - 1) * cs, y - th / 2, t - below), (X0 + i * cs, y + th / 2, t + cap - 8)])
+    print("bot walls under floors and bridges: %d" % n_cov)
+    # water that runs on under a low floor (quay paving, backdrop canal tops): the source closes these spaces only to
+    # the eye. A solid invisible wall for everyone where open water meets them, from deep under the water up to the
+    # floor, so nobody swims into the hidden space under the quay
+    low = float(_w.get("closed_cover_below", 200.0)); deep = float(_w.get("closed_cover_depth", 1200.0))
+    solid = []
+    for axis_, d_ in ((1, -1), (1, 1), (0, -1), (0, 1)):
+        edge = cov & np.roll(wet, -d_, axis=axis_)
+        for j, i in zip(*np.nonzero(edge)):
+            t = top[j, i]; cap = capr[j, i]
+            if not np.isfinite(cap) or cap > low:
+                continue
+            if axis_ == 1:
+                x = X0 + (i - 1 + (1 if d_ > 0 else 0)) * cs - d_ * th / 2
+                solid.append([(x - th / 2, Y0 + (j - 1) * cs, t - deep), (x + th / 2, Y0 + j * cs, t + cap)])
+            else:
+                y = Y0 + (j - 1 + (1 if d_ > 0 else 0)) * cs - d_ * th / 2
+                solid.append([(X0 + (i - 1) * cs, y - th / 2, t - deep), (X0 + i * cs, y + th / 2, t + cap)])
+    print("solid walls closing water under low floors: %d (cell %.0f units)" % (len(solid), cs))
+    return np.array(out, np.float64).reshape(-1, 2, 3), np.array(solid, np.float64).reshape(-1, 2, 3)
+
+
+NMCLIP = 0; NSOLIDW = 0
+if len(WB) and bool(_w.get("bot_water_walls", True)):
+    MW, SW = water_edge_walls(WB)
+    if len(MW):
+        NMCLIP = len(MW)
+        bmin = np.concatenate([bmin, MW[:, 0]]); bmax = np.concatenate([bmax, MW[:, 1]])
+        nonax_count = np.concatenate([nonax_count, np.zeros(NMCLIP, np.int64)])
+        print("bot walls along water edges: %d brushes" % NMCLIP)
+        np.save(os.path.join(export_dir, "collision", "bot_walls.npy"), MW.astype(np.float32))
+    if len(SW):
+        # solid for everyone: appended last, so the shader ranges below keep them as plain collision
+        NSOLIDW = len(SW)
+        bmin = np.concatenate([bmin, SW[:, 0]]); bmax = np.concatenate([bmax, SW[:, 1]])
+        nonax_count = np.concatenate([nonax_count, np.zeros(NSOLIDW, np.int64)])
+        np.save(os.path.join(export_dir, "collision", "closing_walls.npy"), SW.astype(np.float32))
 NPOLY = len(bmin)
 print("polygons by corner count %s; bevel planes %d (%.2f per brush)   %.1fs" % (poly_hist, n_bevel, n_bevel / NPOLY, time.time() - t0))
 
@@ -323,8 +456,10 @@ plane_lump = np.concatenate([ax_tab, nonax])
 NP = len(plane_lump)
 
 # ---- brush sides and brushes
-SH_COL, SH_SKY, SH_WATER = 0, 1, 2
+SH_COL, SH_SKY, SH_WATER, SH_MCLIP, SH_TRIG = 0, 1, 2, 3, 4
 CONT_WATER = 0x00000004
+CONT_MONSTERCLIP = 0x00000020
+CONT_TRIGGER = 0x00000400
 cnt = np.concatenate([6 + nonax_count, np.full(6, 6, np.int64)])
 first = np.concatenate([[0], np.cumsum(cnt)[:-1]])
 side_lump = np.zeros(int(cnt.sum()), dtype=[("plane", "<i4"), ("shader", "<i4"), ("surf", "<i4")])
@@ -334,13 +469,18 @@ na_before = np.concatenate([[0], np.cumsum(nonax_count)[:-1]])
 pos_na = np.repeat(first[:NPOLY] + 6, nonax_count) + (np.arange(tot_na) - np.repeat(na_before, nonax_count))
 side_lump["plane"][pos_na] = n_ax + np.arange(tot_na)
 side_lump["shader"] = SH_COL; side_lump["shader"][first[NPOLY]:] = SH_SKY
+_E = NPOLY - NSOLIDW          # the closing walls after the bot walls stay plain collision
 if NWATER:
-    side_lump["shader"][first[NPOLY - NWATER]:first[NPOLY]] = SH_WATER
+    side_lump["shader"][first[_E - NMCLIP - NWATER]:first[_E - NMCLIP]] = SH_WATER
+if NMCLIP:
+    side_lump["shader"][first[_E - NMCLIP]:first[_E]] = SH_MCLIP
 side_lump["surf"] = -1
 brush_lump = np.zeros(NB, dtype=[("first", "<i4"), ("num", "<i4"), ("shader", "<i4")])
 brush_lump["first"] = first; brush_lump["num"] = cnt; brush_lump["shader"] = SH_COL; brush_lump["shader"][NPOLY:] = SH_SKY
 if NWATER:
-    brush_lump["shader"][NPOLY - NWATER:NPOLY] = SH_WATER
+    brush_lump["shader"][_E - NMCLIP - NWATER:_E - NMCLIP] = SH_WATER
+if NMCLIP:
+    brush_lump["shader"][_E - NMCLIP:_E] = SH_MCLIP
 print("brushes %d, sides %d (%.2f per brush), planes %d (%d axial shared)   %.1fs" % (NB, len(side_lump), len(side_lump) / NB, NP, n_ax, time.time() - t0))
 
 # ---- kd-tree over brush bounds
@@ -439,7 +579,9 @@ dv["lm"] = 0
 index_lump = np.tile(np.array([0, 1, 2, 0, 2, 3], "<i4"), 6)
 
 # ---- shaders, model, entities
-shader_lump = np.zeros(3, dtype=[("name", "S64"), ("surf", "<i4"), ("cont", "<i4")])
+shader_lump = np.zeros(5, dtype=[("name", "S64"), ("surf", "<i4"), ("cont", "<i4")])
+shader_lump[3] = (b"textures/naboo_sys/botclip", SURF_NODRAW_COL, CONT_MONSTERCLIP)
+shader_lump[4] = (b"textures/naboo_sys/trigger", SURF_NODRAW_COL, CONT_TRIGGER)
 shader_lump[0] = (b"textures/naboo_sys/col", SURF_NODRAW_COL, CONT_SOLID)
 shader_lump[1] = (b"textures/naboo_sys/sky", SURF_SKY, CONT_SOLID)
 shader_lump[2] = (b"textures/naboo_sys/water", 0, CONT_WATER)
@@ -510,6 +652,20 @@ if DOORS:
     for k_, (mn_, mx_, fb_) in enumerate(md_new):
         md2["mins"][k_] = mn_; md2["maxs"][k_] = mx_; md2["firstBrush"][k_] = fb_; md2["numBrush"][k_] = 1
     model_lump = np.concatenate([model_lump, md2])
+if bool(_w.get("kill_volume", True)):
+    # whoever falls out of the world lands in this and dies: a trigger_hurt over the whole map, from the hull
+    # floor up KILL_H units (the lowest collision surface is at least 64 units above the hull floor)
+    KILL_H = float(_w.get("kill_volume_height", 56.0))
+    kmn = np.array([lo[0], lo[1], lo[2]]); kmx = np.array([hi[0], hi[1], lo[2] + KILL_H])
+    f_ = len(side_lump); pl0 = len(plane_lump)
+    kpl = [((-1, 0, 0), -kmn[0]), ((1, 0, 0), kmx[0]), ((0, -1, 0), -kmn[1]), ((0, 1, 0), kmx[1]), ((0, 0, -1), -kmn[2]), ((0, 0, 1), kmx[2])]
+    plane_lump = np.concatenate([plane_lump, np.array([(n_[0], n_[1], n_[2], d_) for n_, d_ in kpl], np.float32)])
+    side_lump = np.concatenate([side_lump, np.array([(pl0 + k_, SH_TRIG, -1) for k_ in range(6)], dtype=side_lump.dtype)])
+    brush_lump = np.concatenate([brush_lump, np.array([(f_, 6, SH_TRIG)], dtype=brush_lump.dtype)])
+    mk = np.zeros(1, dtype=model_lump.dtype); mk["mins"][0] = kmn; mk["maxs"][0] = kmx; mk["firstBrush"][0] = len(brush_lump) - 1; mk["numBrush"][0] = 1
+    model_lump = np.concatenate([model_lump, mk])
+    ent_text += '{\n"classname" "trigger_hurt"\n"dmg" "1000"\n"model" "*%d"\n}\n' % (len(model_lump) - 1)
+    print("kill volume: z %.0f to %.0f over the whole map (model *%d)" % (kmn[2], kmx[2], len(model_lump) - 1))
 if not ent_text:
     ent_text = '{\n"classname" "worldspawn"\n}\n'
 ent_lump = ent_text.encode("ascii") + b"\0"
