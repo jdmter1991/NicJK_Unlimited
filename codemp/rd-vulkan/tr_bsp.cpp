@@ -457,7 +457,7 @@ void		RE_SetWorldVisData( const byte *vis ) {
 R_LoadVisibility
 =================
 */
-static	void R_LoadVisibility( const lump_t *l, world_t &worldData ) {
+static	void R_LoadVisibility( const lump_t *l, world_t &worldData, int index ) {
 	int		len;
 	byte	*buf;
 
@@ -475,8 +475,8 @@ static	void R_LoadVisibility( const lump_t *l, world_t &worldData ) {
 	worldData.clusterBytes = LittleLong( ((int *)buf)[1] );
 
 	// CM_Load should have given us the vis data to share, so
-	// we don't need to allocate another copy
-	if ( tr.externalVisData ) {
+	// we don't need to allocate another copy. That data is the main map's: a misc_bsp part (index != 0) copies its own
+	if ( tr.externalVisData && !index ) {
 		worldData.vis = tr.externalVisData;
 	} else {
 		byte	*dest;
@@ -1742,6 +1742,8 @@ static	void R_LoadSubmodels( const lump_t *l, world_t &worldData, int index ) {
 
 		out->firstSurface = worldData.surfaces + LittleLong( in->firstSurface );
 		out->numSurfaces = LittleLong( in->numSurfaces );
+		// the world model of a misc_bsp part is drawn through the part's own tree and PVS
+		out->partWorld = ( index && i == 0 ) ? &worldData : NULL;
 	}
 }
 
@@ -2393,7 +2395,10 @@ void RE_LoadWorldMap_Actual( const char *name, world_t &worldData, int index )
 	R_LoadMarksurfaces (&header->lumps[LUMP_LEAFSURFACES], worldData);
 	R_LoadNodesAndLeafs (&header->lumps[LUMP_NODES], &header->lumps[LUMP_LEAFS], worldData);
 	R_LoadSubmodels (&header->lumps[LUMP_MODELS], worldData, index);
-	R_LoadVisibility( &header->lumps[LUMP_VISIBILITY], worldData );
+	R_LoadVisibility( &header->lumps[LUMP_VISIBILITY], worldData, index );
+	worldData.partVisCount = 0;
+	worldData.partViewCluster = -2;		// nothing marked yet
+	worldData.partNovis = -1;
 
 #ifdef USE_VBO
 	// there is a single world VBO: built for the main world only. A misc_bsp part (index != 0) used to rebuild

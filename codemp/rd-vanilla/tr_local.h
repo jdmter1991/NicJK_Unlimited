@@ -798,6 +798,7 @@ typedef struct bmodel_s {
 	vec3_t		bounds[2];		// for culling
 	msurface_t	*firstSurface;
 	int			numSurfaces;
+	struct world_s	*partWorld;	// world model of a misc_bsp part: its own tree and PVS (else NULL)
 } bmodel_t;
 
 typedef struct
@@ -858,6 +859,11 @@ typedef struct world_s {
 	const byte	*vis;			// may be passed in by CM_LoadMap to save space
 
 	byte		*novis;			// clusterBytes of 0xff
+
+	// misc_bsp parts: leaf marking of the part's own tree (R_AddPartWorldSurfaces)
+	int			partVisCount;
+	int			partViewCluster;
+	int			partNovis;
 
 	char		*entityString;
 	char		*entityParsePoint;
@@ -1240,6 +1246,7 @@ extern	cvar_t	*r_offsetUnits;
 
 extern	cvar_t	*r_fullbright;					// avoid lightmap pass
 extern	cvar_t	*r_lightmap;					// render lightmaps only
+extern	cvar_t	*r_partVis;
 extern	cvar_t	*r_distanceCull;					// render lightmaps only
 extern	cvar_t	*r_vertexLight;					// vertex lighting mode for better performance
 extern	cvar_t	*r_uiFullScreen;				// ui is running fullscreen

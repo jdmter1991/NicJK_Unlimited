@@ -125,6 +125,7 @@ cvar_t	*r_texturebitslm;
 
 cvar_t	*r_lightmap;
 cvar_t	*r_distanceCull;
+cvar_t	*r_partVis;
 cvar_t	*r_vertexLight;
 cvar_t	*r_uiFullScreen;
 cvar_t	*r_shadows;
@@ -1713,6 +1714,7 @@ void R_Register( void )
 	r_drawfog							= ri.Cvar_Get( "r_drawfog",						"2",						CVAR_ARCHIVE_ND, "" );
 	r_lightmap							= ri.Cvar_Get( "r_lightmap",						"0",						CVAR_ARCHIVE_ND, "" );
 	r_distanceCull						= ri.Cvar_Get( "r_distanceCull",					"0",						CVAR_ARCHIVE_ND, "" );
+	r_partVis = ri.Cvar_Get( "r_partVis", "1", 0, "misc_bsp parts: walk the part's own BSP tree and PVS when drawing it (0: add every surface of the part)" );
 	r_portalOnly						= ri.Cvar_Get( "r_portalOnly",						"0",						CVAR_CHEAT, "" );
 	r_skipBackEnd						= ri.Cvar_Get( "r_skipBackEnd",					"0",						CVAR_CHEAT, "" );
 	r_measureOverdraw					= ri.Cvar_Get( "r_measureOverdraw",				"0",						CVAR_NONE, "" );

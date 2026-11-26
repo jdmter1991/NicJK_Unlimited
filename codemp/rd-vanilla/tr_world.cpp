@@ -533,6 +533,131 @@ static void R_AddWorldSurface( msurface_t *surf, int dlightBits, qboolean noView
 R_AddBrushModelSurfaces
 =================
 */
+/*
+=================
+misc_bsp parts: the part's own tree and PVS
+=================
+*/
+static void R_PartMarkLeaves( world_t *w, const vec3_t p ) {
+	mnode_t		*node, *parent;
+	const byte	*vis;
+	int			i, cluster;
+	const int	novis = r_novis->integer ? 1 : 0;
+
+	node = w->nodes;
+	while ( node->contents == -1 ) {
+		const float d = DotProduct( p, node->plane->normal ) - node->plane->dist;
+		node = d > 0 ? node->children[0] : node->children[1];
+	}
+	cluster = node->cluster;
+	if ( cluster == w->partViewCluster && novis == w->partNovis ) {
+		return;
+	}
+	w->partViewCluster = cluster;
+	w->partNovis = novis;
+	w->partVisCount++;
+
+	// outside the part (or in its solid), no vis data, or r_novis: every leaf, frustum culling only
+	if ( novis || cluster < 0 || cluster >= w->numClusters || !w->vis ) {
+		for ( i = 0; i < w->numnodes; i++ ) {
+			if ( w->nodes[i].contents != CONTENTS_SOLID ) {
+				w->nodes[i].visframe = w->partVisCount;
+			}
+		}
+		return;
+	}
+
+	vis = w->vis + cluster * w->clusterBytes;
+	for ( i = 0, node = w->nodes; i < w->numnodes; i++, node++ ) {
+		cluster = node->cluster;
+		if ( cluster < 0 || cluster >= w->numClusters ) {
+			continue;
+		}
+		if ( !( vis[cluster >> 3] & ( 1 << ( cluster & 7 ) ) ) ) {
+			continue;
+		}
+		// (no area check: the area mask belongs to the main map)
+		parent = node;
+		do {
+			if ( parent->visframe == w->partVisCount )
+				break;
+			parent->visframe = w->partVisCount;
+			parent = parent->parent;
+		} while ( parent );
+	}
+}
+
+static void R_PartWorldNode( mnode_t *node, const cplane_t *frustum, int planeBits, int visCount, int stamp, int dlightBits ) {
+	do {
+		if ( node->visframe != visCount ) {
+			return;
+		}
+		if ( r_nocull->integer != 1 ) {
+			for ( int i = 0; i < 4; i++ ) {
+				if ( planeBits & ( 1 << i ) ) {
+					const int r = BoxOnPlaneSide( node->mins, node->maxs, &frustum[i] );
+					if ( r == 2 ) {
+						return;					// culled
+					}
+					if ( r == 1 ) {
+						planeBits &= ~( 1 << i );	// all descendants are in front of this plane
+					}
+				}
+			}
+		}
+		if ( node->contents != -1 ) {
+			break;
+		}
+		R_PartWorldNode( node->children[0], frustum, planeBits, visCount, stamp, dlightBits );
+		node = node->children[1];
+	} while ( 1 );
+
+	tr.pc.c_leafs++;
+	msurface_t **mark = node->firstmarksurface;
+	for ( int c = node->nummarksurfaces; c > 0; c--, mark++ ) {
+		msurface_t *surf = *mark;
+		// a surface spanning several leafs is added once per entity (two entities may draw the same part)
+		if ( surf->viewCount == stamp ) {
+			continue;
+		}
+		surf->viewCount = stamp;
+		R_AddWorldSurface( surf, dlightBits, qtrue );
+	}
+}
+
+static void R_AddPartWorldSurfaces( world_t *w, int dlightBits ) {
+	static int	partStamp = -1;
+	cplane_t	frustum[4];
+	vec3_t		delta, pvs;
+	int			i, j;
+
+	// view (PVS) position in the part's space; tr.ori holds the entity's origin and axes
+	VectorSubtract( tr.viewParms.pvsOrigin, tr.ori.origin, delta );
+	for ( j = 0; j < 3; j++ ) {
+		const float len2 = DotProduct( tr.ori.axis[j], tr.ori.axis[j] );
+		pvs[j] = len2 > 0.0f ? DotProduct( delta, tr.ori.axis[j] ) / len2 : 0.0f;
+	}
+	R_PartMarkLeaves( w, pvs );
+
+	// the four side planes of the view frustum in the part's space
+	for ( i = 0; i < 4; i++ ) {
+		const cplane_t *f = &tr.viewParms.frustum[i];
+		for ( j = 0; j < 3; j++ ) {
+			frustum[i].normal[j] = DotProduct( f->normal, tr.ori.axis[j] );
+		}
+		frustum[i].dist = f->dist - DotProduct( f->normal, tr.ori.origin );
+		frustum[i].type = PLANE_NON_AXIAL;
+		SetPlaneSignbits( &frustum[i] );
+	}
+
+	// stamps count down from -1, so they never meet the (positive) view counts the main world uses
+	partStamp--;
+	if ( partStamp > -2 ) {
+		partStamp = -2;
+	}
+	R_PartWorldNode( w->nodes, frustum, 15, w->partVisCount, partStamp, dlightBits );
+}
+
 void R_AddBrushModelSurfaces ( trRefEntity_t *ent ) {
 	bmodel_t	*bmodel;
 	int			clip;
@@ -563,6 +688,10 @@ void R_AddBrushModelSurfaces ( trRefEntity_t *ent ) {
 //		R_DlightBmodel( bmodel, true );
 //	}
 
+	if ( bmodel->partWorld && bmodel->partWorld->nodes && r_partVis->integer ) {
+		R_AddPartWorldSurfaces( bmodel->partWorld, tr.currentEntity->dlightBits );
+		return;
+	}
 	for ( i = 0 ; i < bmodel->numSurfaces ; i++ ) {
 		R_AddWorldSurface( bmodel->firstSurface + i, tr.currentEntity->dlightBits, qtrue );
 	}
