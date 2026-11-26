@@ -154,3 +154,13 @@ within 63 units of the surface at every point with visible water. Not checked: t
   and map name come up, no missing texture in the developer log (`release\beta1\pk3_loadtest.jpg`). Not tested
   from the pk3: bots, dedicated server.
 * **Main branch:** `NicJK_Unlimited` fast-forwarded locally to `naboo-theed`; not pushed to the public remote.
+* **Server and bots from the pk3** (`tools\take_showcase_pk3.sh`, home folder with only the two pk3 files and the
+  game modules): dedicated server, 31 bot lines from the user's list, client joined and played about 3 minutes;
+  bots fight and chat, no error in the client log. Frame-rate counter at the four captures, 1920 x 1080 window,
+  uncapped: palace room 340, palace steps 87, market 119, lantern court 112 (single moments, not averages).
+  The server's own count of joined bots was not captured (its console output file stayed empty).
+  Pictures: `release\beta1\shots\`.
+* **Loading screen:** the saved 3D viewport of `Naboo_Theed.blend` (read with `tools\inspect_viewport.py`: eye
+  1434 -5997 2146, yaw 97.4, 9.7 degrees down, 50 mm) taken in game without HUD; `levelshots_16_9\naboo_theed.jpg`
+  (2048 x 1024) and `levelshots\naboo_theed.jpg` (1024 x 1024); the engine refuses sizes that are not powers of two.
+  Seen on the loading screen with the map name (`release\beta1\loading_screen.png`).
