@@ -51,7 +51,7 @@ NB=0; [ "$W" -ge 2560 ] && NB=1
 rm -f nicjk/qconsole.log
 ( sleep 150; nvidia-smi --query-gpu=memory.used,utilization.gpu --format=csv,noheader > "$OUT/gpu_$L.txt" 2>/dev/null ) &
 timeout 900 ./nicjk.x86_64.exe +set fs_basepath "$GD" +set fs_homepath "$(cygpath -w "$D")" +set fs_game nicjk +set cl_renderer rd-vulkant \
-  +set r_mode -1 +set r_fullscreen 0 +set r_noborder $NB +set r_customwidth $W +set r_customheight $H $EXTRA +set r_swapInterval 0 \
+  +set r_mode -1 +set r_fullscreen 0 +set r_noborder $NB +set r_customwidth $W +set r_customheight $H $EXTRA +set r_swapInterval 0 +set r_tworldCullSize 0.004 +set r_tworldLodSize1 0.12 +set r_tworldLodSize2 0.035 \
   +set net_port 29181 +set logfile 2 +connect 127.0.0.1:29180 +exec naboo_bench2.cfg > client_bench.out 2>&1
 sleep 1; stop_mine; wait
 cp nicjk/qconsole.log "$OUT/client31_$L.qconsole.log"

@@ -102,3 +102,28 @@ GPU memory in use 6.3-6.5 GB of 8 GB; GPU load 63 % at 720p, 77 % at 1080p, 90 %
 Server alone, bots only (`run_bench.sh server`): 31 bots entered although 32 were requested (the reason was not
 found; no "bot not found" line). 4.7-5.0 ms per server frame on average (budget 25 ms at sv_fps 40), worst frame
 19 ms, none over budget, 2 hitch lines. So 32 bots were not measured.
+
+### Later the same night: repeat run, and what the detail thresholds are worth
+
+A second 1080p run of the same benchmark (with the look-neutral culling change of commit `fcbe57588`) came out
+*slower* than the first (avenue 107 -> 88 average, market 142 -> 109, following a bot 195 -> 105). The machine
+was at 20-26 % processor load from other programs at the time, and the limit is one processor thread, so single
+runs of this benchmark differ by tens of percent. **A change is only measured when both variants run back to
+back in one session.** Done that way (1650 frames each, twice, 31 bots, 1080p; average / 1 % low FPS):
+
+| Viewpoint | Approved detail (0.004 / 0.12 / 0.035) | Tighter (0.0055 / 0.15 / 0.045) |
+|---|---|---|
+| Avenue | 89 / 59 and 85 / 53 | 100 / 56 and 107 / 64 |
+| Market | 155 / 77 and 143 / 103 | 153 / 108 and 157 / 108 |
+| Hall | 112 / 61 and 116 / 91 | 120 / 85 and 120 / 93 |
+
+The tighter thresholds are worth 10-20 % on the avenue and little elsewhere. The user chose to keep the look, so
+the approved values are the defaults again. The culling change itself has no back-to-back measurement.
+
+### Collision: walls over the carved river bed
+
+A bot was seen coming out of the water through a canal wall. Cause found in the data: carving the river bed
+lowered the ground under 2,046 wall edges (1.76 km) that used to stand on it, leaving gaps of 0.82 m on average
+and up to 3.6 m under the walls. `build_collision_terrain.py` now adds a collision skirt from each such edge to
+0.4 m below the carved ground (4,092 triangles). BSP rewritten (900,691 brushes, 77 spawns); 31 bots ran five
+minutes on it without errors. **Not verified at the place where it was seen** (the place is not known).

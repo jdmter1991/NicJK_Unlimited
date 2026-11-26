@@ -78,7 +78,43 @@ n = np.cross(terr_m[:, 1] - terr_m[:, 0], terr_m[:, 2] - terr_m[:, 0])
 if (n[:, 2] < 0).mean() > 0.5:
     terr_m = terr_m[:, ::-1]
 terr = ((terr_m - ORG) * UPM).astype(np.float32)
-out = np.concatenate([objects.astype(np.float32), terr])
+# ---- skirts under walls that stood on terrain which is now carved river bed.
+# Carving lowers the ground under visible water by up to a metre; walls, quays and steps whose lowest edge sat on
+# the old ground then hang above the new one, and a swimmer passes underneath them (seen in game: a bot came out
+# of the water through a canal wall). Every steep object triangle whose two lowest corners were at the old ground
+# gets a wall from that edge down to 0.4 m below the carved ground.
+def ground(grid, xm, ym):
+    fx = np.clip((xm - xs[0]) / dx, 0, len(xs) - 1.001); fy = np.clip((ym - ys[0]) / dy, 0, len(ys) - 1.001)
+    i_ = fx.astype(np.int64); j_ = fy.astype(np.int64); u = fx - i_; v = fy - j_
+    z = grid[:, :, 2]
+    return z[j_, i_] * (1 - u) * (1 - v) + z[j_, i_ + 1] * u * (1 - v) + z[j_ + 1, i_] * (1 - u) * v + z[j_ + 1, i_ + 1] * u * v
+
+
+T = objects.reshape(-1, 3, 3).astype(np.float64) / UPM + ORG               # metres
+nrm = np.cross(T[:, 1] - T[:, 0], T[:, 2] - T[:, 0]); nl = np.linalg.norm(nrm, axis=1)
+steep = (nl > 1e-9) & (np.abs(nrm[:, 2]) < 0.5 * np.maximum(nl, 1e-12))
+inb = (T[:, :, 0].min(1) > xs[1]) & (T[:, :, 0].max(1) < xs[-2]) & (T[:, :, 1].min(1) > ys[1]) & (T[:, :, 1].max(1) < ys[-2])
+cand = np.flatnonzero(steep & inb)
+order = np.argsort(T[cand, :, 2], axis=1)
+lowA = T[cand, order[:, 0]]; lowB = T[cand, order[:, 1]]                   # the two lowest corners
+gA0 = ground(g0, lowA[:, 0], lowA[:, 1]); gB0 = ground(g0, lowB[:, 0], lowB[:, 1])
+gA = ground(g, lowA[:, 0], lowA[:, 1]); gB = ground(g, lowB[:, 0], lowB[:, 1])
+SK_ABOVE = float(cc.get("skirt_edge_above_old_ground_m", 0.6)); SK_MIN = float(cc.get("skirt_min_gap_m", 0.15)); SK_BELOW = float(cc.get("skirt_below_m", 0.4))
+at_ground = (lowA[:, 2] < gA0 + SK_ABOVE) & (lowB[:, 2] < gB0 + SK_ABOVE) & (lowA[:, 2] > gA0 - 1.0) & (lowB[:, 2] > gB0 - 1.0)
+gap = np.maximum(lowA[:, 2] - gA, lowB[:, 2] - gB)
+carved_here = ((gA0 - gA) > 0.05) | ((gB0 - gB) > 0.05)
+edge_len = np.linalg.norm((lowA - lowB)[:, :2], axis=1)
+sk = at_ground & carved_here & (gap > SK_MIN) & (edge_len > 0.05)
+a_ = lowA[sk]; b_ = lowB[sk]
+a2 = a_.copy(); b2 = b_.copy(); a2[:, 2] = gA[sk] - SK_BELOW; b2[:, 2] = gB[sk] - SK_BELOW
+q1 = np.stack([a_, b_, b2], 1); q2 = np.stack([a_, b2, a2], 1)
+qn = np.cross(q1[:, 1] - q1[:, 0], q1[:, 2] - q1[:, 0]); flip = (qn * nrm[cand][sk]).sum(1) < 0
+q1[flip] = q1[flip][:, ::-1]; q2[flip] = q2[flip][:, ::-1]
+skirts = ((np.concatenate([q1, q2]) - ORG) * UPM).astype(np.float32)
+skirt_info = {"wall_edges": int(sk.sum()), "triangles": int(len(skirts)), "edge_length_m": round(float(edge_len[sk].sum()), 1), "mean_gap_m": round(float(gap[sk].mean()), 2) if sk.any() else 0.0,
+              "max_gap_m": round(float(gap[sk].max()), 2) if sk.any() else 0.0}
+print("skirts under walls over carved ground:", skirt_info)
+out = np.concatenate([objects.astype(np.float32), terr, skirts.reshape(-1, *objects.shape[1:])])
 np.save(os.path.join(cdir, "collision_tris.npy"), out)
 
 # ---- water volumes
@@ -108,6 +144,6 @@ np.save(os.path.join(cdir, "water_boxes.npy"), boxes)
 rep = {"seconds": round(time.time() - t0, 1), "old_terrain_tris": int(is_terr.sum()), "object_tris": int(len(objects)), "blocks_2m": int((~fine).sum()),
        "blocks_1m": int(fine.sum()), "new_terrain_tris": int(len(terr)), "total_tris": int(len(out)), "tolerance_m": TOL,
        "carved_below_source_vertices": int((g[j0:j1 + 1, i0:i1 + 1, 2] < g0[j0:j1 + 1, i0:i1 + 1, 2] - 0.01).sum()),
-       "water_cells": n_cells, "water_boxes": int(len(boxes)), "water_depth_m": WDEPTH}
+       "water_cells": n_cells, "water_boxes": int(len(boxes)), "water_depth_m": WDEPTH, "skirts": skirt_info}
 json.dump(rep, open(os.path.join(cdir, "terrain_rebuild.json"), "w"), indent=1)
 print(json.dumps(rep, indent=1))
