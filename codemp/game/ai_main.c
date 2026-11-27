@@ -53,6 +53,11 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "chars.h"
 #include "inv.h"
 
+// JK2 1.02 mode: heal costs 25 at every rank, so the bots read the force table instead of the JKA threshold
+extern int forcePowerNeeded[NUM_FORCE_POWER_LEVELS][NUM_FORCE_POWERS];
+#define BOT_HEAL_NEED(ps, base) ( g_jk2_102sabersystem.integer ? forcePowerNeeded[(ps)->fd.forcePowerLevel[FP_HEAL]][FP_HEAL] : (base) )
+
+
 // Declarations for functions this file uses that no header declares. MSVC accepts a call to an
 // undeclared function; GCC and Clang then reject the real declaration further down as a conflict.
 qboolean BG_InKnockDown(int anim);
@@ -714,6 +719,11 @@ static void BotEval_Report(void) {
 	trap->Print("BOTEVAL kata rolls: old logic %d, new logic %d of which started %d; targeted style changes completed %d\n", botEvalKataTried[0], botEvalKataTried[1], botEvalKataStarted[1], botEvalStyleSwitches);
 	if (g_jk2_102sabersystem.integer) {
 		char jk2buf[256];
+		{
+			char jk2fbuf[1024];
+			G_JK2ForceStats(jk2fbuf, sizeof(jk2fbuf));
+			trap->Print("BOTEVAL %s\n", jk2fbuf);
+		}
 		G_JK2SaberStats(jk2buf, sizeof(jk2buf));
 		trap->Print("BOTEVAL %s\n", jk2buf);
 	}
@@ -3059,6 +3069,11 @@ int BotAISetupClient(int client, struct bot_settings_s* settings, qboolean resta
 	bs->botWeaponWeights[WP_MELEE] = 1;
 
 	BotUtilizePersonality(bs);
+
+	if (g_jk2_102sabersystem.integer)
+	{ // JK2 1.02 mode: the pistol is WP_BRYAR_OLD (JK2's charging pistol), weighted like the pistol
+		bs->botWeaponWeights[WP_BRYAR_OLD] = bs->botWeaponWeights[WP_BRYAR_PISTOL];
+	}
 
 	if (level.gametype == GT_DUEL || level.gametype == GT_POWERDUEL)
 	{
@@ -13883,7 +13898,7 @@ static qboolean Bot_DefensiveReaction(bot_state_t* bs) {
 	if (myHealth > 0 && myHealth < BT(bs, BT_RETREAT_HEALTH) && bs->currentEnemy->health > myHealth + 15 && dist < 220 && bs->frame_Enemy_Vis) {
 		if (level.time >= bs->defNextHealTime) {
 			int cmd = 0;
-			if ((cl->ps.fd.forcePowersKnown & (1 << FP_HEAL)) && cl->ps.fd.forcePower >= 50 && dist > 100) {
+			if ((cl->ps.fd.forcePowersKnown & (1 << FP_HEAL)) && cl->ps.fd.forcePower >= BOT_HEAL_NEED(&cl->ps, 50) && dist > 100) {
 				cmd = GENCMD_FORCE_HEAL;
 			} else if ((cl->ps.fd.forcePowersKnown & (1 << FP_PROTECT)) && cl->ps.fd.forcePower >= 50 && !(cl->ps.fd.forcePowersActive & (1 << FP_PROTECT))) {
 				cmd = GENCMD_FORCE_PROTECT;
@@ -15911,7 +15926,7 @@ int NewBotAI_GetHeal(bot_state_t* bs) {
 
 	if (ourHealth >= 100)
 		return 0;
-	if (ourForce < 50)
+	if (ourForce < BOT_HEAL_NEED(&bs->cur_ps, 50))
 		return 0;
 	return diff;
 }
@@ -16721,7 +16736,7 @@ void NewBotAI_DoAloneStuff(bot_state_t* bs, float thinktime) {
 				level.clients[bs->client].ps.fd.forcePowerSelected = FP_ABSORB;
 				useTheForce = qtrue;
 			}
-			else if ((bs->cur_ps.fd.forcePowersKnown & (1 << FP_HEAL)) && (ourHealth < 100) && (bs->cur_ps.fd.forcePower > 50)) {
+			else if ((bs->cur_ps.fd.forcePowersKnown & (1 << FP_HEAL)) && (ourHealth < 100) && (bs->cur_ps.fd.forcePower > BOT_HEAL_NEED(&bs->cur_ps, 50))) {
 				level.clients[bs->client].ps.fd.forcePowerSelected = FP_HEAL;
 				useTheForce = qtrue;
 			}
