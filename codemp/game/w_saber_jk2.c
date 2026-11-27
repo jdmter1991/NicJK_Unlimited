@@ -48,6 +48,14 @@ int jk2SaberStatBlocks;		// body hits that were blocked
 int jk2SaberStatClashes;	// saber vs saber contacts
 int jk2SaberStatLocks;		// saber locks started
 int jk2SaberStatBounces;	// attacker bounced (BLOCKED_ATK_BOUNCE)
+// per client, for the bot tactics counters (ai_main.c Bot_JK2Tactics): last full hit made (time,
+// saber move, victim) and last block, and totals
+int jk2StatHitTime[MAX_CLIENTS], jk2StatHitMove[MAX_CLIENTS], jk2StatHitVictim[MAX_CLIENTS];
+int jk2StatBlockTime[MAX_CLIENTS], jk2StatHitsDealt[MAX_CLIENTS], jk2StatHitsTaken[MAX_CLIENTS];
+int jk2StatBlocks[MAX_CLIENTS], jk2StatGotBlocked[MAX_CLIENTS];
+// why the last WP_SaberCanBlock_JK2 call said no (1-19, in the order of its checks; 0 = unblockable move),
+// and per client the last frame its bot was guarding (set by ai_main.c); for the bot counters only
+int jk2BlockFail, jk2BotGuardFrame[MAX_CLIENTS], jk2GuardFail[20];
 
 /*
 =============================================================================
@@ -538,7 +546,7 @@ int WP_SaberCanBlock_JK2( gentity_t *self, vec3_t point, int dflags, int mod, qb
 
 	if (!self || !self->client || !point)
 	{
-		return 0;
+		{ jk2BlockFail = 1; return 0; }
 	}
 
 	if (attackStr == 8 || attackStr == 999)
@@ -549,7 +557,7 @@ int WP_SaberCanBlock_JK2( gentity_t *self, vec3_t point, int dflags, int mod, qb
 
 	if (BG_SaberInAttack_JK2(self->client->ps.saberMove))
 	{
-		return 0;
+		{ jk2BlockFail = 2; return 0; }
 	}
 
 	if (PM_InSaberAnim(self->client->ps.torsoAnim) && !self->client->ps.saberBlocked &&
@@ -557,7 +565,7 @@ int WP_SaberCanBlock_JK2( gentity_t *self, vec3_t point, int dflags, int mod, qb
 	{
 		if ( self->client->ps.saberMove < LS_PARRY_UP || self->client->ps.saberMove > LS_REFLECT_LL )
 		{
-			return 0;
+			{ jk2BlockFail = 3; return 0; }
 		}
 	}
 
@@ -565,27 +573,27 @@ int WP_SaberCanBlock_JK2( gentity_t *self, vec3_t point, int dflags, int mod, qb
 
 	if (self->client->ps.saberHolstered)
 	{
-		return 0;
+		{ jk2BlockFail = 4; return 0; }
 	}
 
 	if (self->client->ps.weapon != WP_SABER)
 	{
-		return 0;
+		{ jk2BlockFail = 5; return 0; }
 	}
 
 	if (self->client->ps.weaponstate == WEAPON_RAISING)
 	{
-		return 0;
+		{ jk2BlockFail = 6; return 0; }
 	}
 
 	if (self->client->ps.saberInFlight)
 	{
-		return 0;
+		{ jk2BlockFail = 7; return 0; }
 	}
 
 	if ((self->client->pers.cmd.buttons & BUTTON_ATTACK))
 	{ //don't block when the player is trying to slash, if it's a projectile or he's doing a very strong attack
-		return 0;
+		{ jk2BlockFail = 8; return 0; }
 	}
 
 	//This is how blocks were decided before the 1.03 patch
@@ -595,12 +603,12 @@ int WP_SaberCanBlock_JK2( gentity_t *self, vec3_t point, int dflags, int mod, qb
 		{
 			if (Q_irand(1, 10) < 3)
 			{
-				return 0;
+				{ jk2BlockFail = 9; return 0; }
 			}
 		}
 		else
 		{
-			return 0;
+			{ jk2BlockFail = 10; return 0; }
 		}
 	}
 
@@ -614,40 +622,40 @@ int WP_SaberCanBlock_JK2( gentity_t *self, vec3_t point, int dflags, int mod, qb
 		{
 			if (Q_irand(1, 10) < 5)
 			{
-				return 0;
+				{ jk2BlockFail = 11; return 0; }
 			}
 		}
 		else
 		{
-			return 0;
+			{ jk2BlockFail = 12; return 0; }
 		}
 	}
 
 	if (attackStr == FORCE_LEVEL_1 && !self->client->ps.fd.forcePowerLevel[FP_SABER_DEFENSE] &&
 		Q_irand(1, 40) < 3)
 	{ //if I have no defense level at all then I might be unable to block a level 1 attack (but very rarely)
-		return 0;
+		{ jk2BlockFail = 13; return 0; }
 	}
 
 	if (BG_SaberInAttack_JK2(self->client->ps.saberMove))
 	{ //attacking, can't block now (1.02 SaberAttacking)
-		return 0;
+		{ jk2BlockFail = 14; return 0; }
 	}
 
 	if (self->client->ps.saberMove != LS_READY &&
 		!self->client->ps.saberBlocking)
 	{
-		return 0;
+		{ jk2BlockFail = 15; return 0; }
 	}
 
 	if (self->client->ps.saberBlockTime >= level.time)
 	{
-		return 0;
+		{ jk2BlockFail = 16; return 0; }
 	}
 
 	if (self->client->ps.forceHandExtend != HANDEXTEND_NONE)
 	{
-		return 0;
+		{ jk2BlockFail = 17; return 0; }
 	}
 
 	if (self->client->ps.fd.forcePowerLevel[FP_SABER_DEFENSE] == FORCE_LEVEL_3)
@@ -664,7 +672,7 @@ int WP_SaberCanBlock_JK2( gentity_t *self, vec3_t point, int dflags, int mod, qb
 	}
 	else
 	{ //for now we just don't get to autoblock with no def
-		return 0;
+		{ jk2BlockFail = 18; return 0; }
 	}
 
 	if (thrownSaber)
@@ -676,7 +684,7 @@ int WP_SaberCanBlock_JK2( gentity_t *self, vec3_t point, int dflags, int mod, qb
 
 	if (!InFront( point, self->client->ps.origin, self->client->ps.viewangles, blockFactor )) //orig 0.2f
 	{
-		return 0;
+		{ jk2BlockFail = 19; return 0; }
 	}
 
 	//1.02: every successful block sets the parry
@@ -843,6 +851,7 @@ static qboolean CheckSaberDamage_JK2( gentity_t *self, vec3_t saberStart, vec3_t
 			}
 		}
 
+		jk2BlockFail = 0;
 		if (g_entities[tr.entityNum].client && !unblockable && WP_SaberCanBlock_JK2(&g_entities[tr.entityNum], tr.endpos, 0, MOD_SABER, qfalse, attackStr))
 		{
 			te = G_TempEntity( tr.endpos, EV_SABER_BLOCK );
@@ -852,6 +861,12 @@ static qboolean CheckSaberDamage_JK2( gentity_t *self, vec3_t saberStart, vec3_t
 			JK2_BlockTE(te);
 
 			jk2SaberStatBlocks++;
+			if (tr.entityNum < MAX_CLIENTS && self->s.number < MAX_CLIENTS)
+			{
+				jk2StatBlockTime[tr.entityNum] = level.time;
+				jk2StatBlocks[tr.entityNum]++;
+				jk2StatGotBlocked[self->s.number]++;
+			}
 
 			if (dmg > 5)
 			{
@@ -914,6 +929,18 @@ static qboolean CheckSaberDamage_JK2( gentity_t *self, vec3_t saberStart, vec3_t
 			if (dmg > 5)
 			{
 				jk2SaberStatHits++;
+				if (tr.entityNum < MAX_CLIENTS && self->s.number < MAX_CLIENTS)
+				{
+					jk2StatHitTime[self->s.number] = level.time;
+					jk2StatHitMove[self->s.number] = self->client->ps.saberMove;
+					jk2StatHitVictim[self->s.number] = tr.entityNum;
+					jk2StatHitsDealt[self->s.number]++;
+					jk2StatHitsTaken[tr.entityNum]++;
+					if (jk2BotGuardFrame[tr.entityNum] && jk2BotGuardFrame[tr.entityNum] >= level.time - 100 && jk2BlockFail >= 0 && jk2BlockFail < 20)
+					{
+						jk2GuardFail[jk2BlockFail]++;
+					}
+				}
 			}
 			else
 			{
