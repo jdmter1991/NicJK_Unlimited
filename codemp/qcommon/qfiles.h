@@ -350,7 +350,8 @@ typedef struct {
 //=============================================================================
 
 typedef struct lump_s {
-	int		fileofs, filelen;
+	// unsigned: a big map's .bsp is over 2 GB, so a lump can start past 2 GB (the format allows up to 4 GB)
+	unsigned int	fileofs, filelen;
 } lump_t;
 
 #define	LUMP_ENTITIES		0

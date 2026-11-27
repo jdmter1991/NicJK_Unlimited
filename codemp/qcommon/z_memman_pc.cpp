@@ -50,7 +50,7 @@ typedef struct zoneHeader_s
 {
 		int					iMagic;
 		memtag_t			eTag;
-		int					iSize;
+		size_t				iSize;		// size_t: a big map's .bsp image is over 2 GB
 struct	zoneHeader_s		*pNext;
 struct	zoneHeader_s		*pPrev;
 } zoneHeader_t;
@@ -74,13 +74,13 @@ map <void*,int> mapAllocatedZones;
 typedef struct zoneStats_s
 {
 	int		iCount;
-	int		iCurrent;
-	int		iPeak;
+	int64_t	iCurrent;
+	int64_t	iPeak;
 
 	// I'm keeping these updated on the fly, since it's quicker for cache-pool
 	//	purposes rather than recalculating each time...
 	//
-	int		iSizesPerTag [TAG_COUNT];
+	int64_t	iSizesPerTag [TAG_COUNT];
 	int		iCountsPerTag[TAG_COUNT];
 
 } zoneStats_t;
@@ -173,6 +173,16 @@ StaticMem_t gNumberString[] = {
 qboolean gbMemFreeupOccured = qfalse;
 void *Z_Malloc(int iSize, memtag_t eTag, qboolean bZeroit /* = qfalse */, int iUnusedAlign /* = 4 */)
 {
+	if (iSize < 0)
+	{
+		Com_Error(ERR_FATAL, "Z_Malloc(): negative size %d (TAG_%s): a size of 2 GB or more wrapped; use Z_MallocLarge", iSize, psTagStrings[eTag]);
+	}
+	return Z_MallocLarge((size_t)iSize, eTag, bZeroit);
+}
+
+// Z_Malloc with a 64-bit size, for blocks of 2 GB or more (a big map's .bsp image)
+void *Z_MallocLarge(size_t iSize, memtag_t eTag, qboolean bZeroit /* = qfalse */)
+{
 	gbMemFreeupOccured = qfalse;
 
 	if (iSize == 0)
@@ -183,7 +193,7 @@ void *Z_Malloc(int iSize, memtag_t eTag, qboolean bZeroit /* = qfalse */, int iU
 
 	// Add in tracking info
 	//
-	int iRealSize = (iSize + sizeof(zoneHeader_t) + sizeof(zoneTail_t));
+	size_t iRealSize = (iSize + sizeof(zoneHeader_t) + sizeof(zoneTail_t));
 
 	// Allocate a chunk...
 	//
@@ -263,7 +273,7 @@ void *Z_Malloc(int iSize, memtag_t eTag, qboolean bZeroit /* = qfalse */, int iU
 					while ( (iTheseBytesFreed = SND_FreeOldestSound()) != 0)
 					{
 						iBytesFreed += iTheseBytesFreed;
-						if (iBytesFreed >= iRealSize)
+						if ((size_t)iBytesFreed >= iRealSize)
 							break;	// early opt-out since we've managed to recover enough (mem-contiguity issues aside)
 					}
 					gbMemFreeupOccured = qtrue;
@@ -275,9 +285,9 @@ void *Z_Malloc(int iSize, memtag_t eTag, qboolean bZeroit /* = qfalse */, int iU
 			//
 			// findlabel:  "recovermem"
 
-			Com_Printf(S_COLOR_RED"Z_Malloc(): Failed to alloc %d bytes (TAG_%s) !!!!!\n", iSize, psTagStrings[eTag]);
+			Com_Printf(S_COLOR_RED"Z_Malloc(): Failed to alloc %lld bytes (TAG_%s) !!!!!\n", (long long)iSize, psTagStrings[eTag]);
 			Z_Details_f();
-			Com_Error(ERR_FATAL,"(Repeat): Z_Malloc(): Failed to alloc %d bytes (TAG_%s) !!!!!\n", iSize, psTagStrings[eTag]);
+			Com_Error(ERR_FATAL,"(Repeat): Z_Malloc(): Failed to alloc %lld bytes (TAG_%s) !!!!!\n", (long long)iSize, psTagStrings[eTag]);
 			return NULL;
 		}
 	}
@@ -424,7 +434,7 @@ int Z_Size(void *pvAddress)
 		return 0;	// won't get here
 	}
 
-	return pMemory->iSize;
+	return pMemory->iSize > 0x7fffffff ? 0x7fffffff : (int)pMemory->iSize;	// int API; only a .bsp image is larger
 }
 
 
@@ -474,7 +484,8 @@ void Z_Free(void *pvAddress)
 
 int Z_MemSize(memtag_t eTag)
 {
-	return TheZone.Stats.iSizesPerTag[eTag];
+	const int64_t n = TheZone.Stats.iSizesPerTag[eTag];
+	return n > 0x7fffffff ? 0x7fffffff : (int)n;	// int API
 }
 
 // Frees all blocks with the specified tag...
@@ -538,14 +549,14 @@ static void Z_MemRecoverTest_f(void)
 
 static void Z_Stats_f(void)
 {
-	Com_Printf("\nThe zone is using %d bytes (%.2fMB) in %d memory blocks\n",
-								  TheZone.Stats.iCurrent,
+	Com_Printf("\nThe zone is using %lld bytes (%.2fMB) in %d memory blocks\n",
+								  (long long)TheZone.Stats.iCurrent,
 									        (float)TheZone.Stats.iCurrent / 1024.0f / 1024.0f,
 													  TheZone.Stats.iCount
 				);
 
-	Com_Printf("The zone peaked at %d bytes (%.2fMB)\n",
-									TheZone.Stats.iPeak,
+	Com_Printf("The zone peaked at %lld bytes (%.2fMB)\n",
+									(long long)TheZone.Stats.iPeak,
 									         (float)TheZone.Stats.iPeak / 1024.0f / 1024.0f
 				);
 }
@@ -560,7 +571,7 @@ static void Z_Details_f(void)
 	for (int i=0; i<TAG_COUNT; i++)
 	{
 		int iThisCount = TheZone.Stats.iCountsPerTag[i];
-		int iThisSize  = TheZone.Stats.iSizesPerTag	[i];
+		const long long iThisSize  = TheZone.Stats.iSizesPerTag	[i];
 
 		if (iThisCount)
 		{
@@ -570,7 +581,7 @@ static void Z_Details_f(void)
 			float	fSize		= (float)(iThisSize) / 1024.0f / 1024.0f;
 			int		iSize		= fSize;
 			int		iRemainder 	= 100.0f * (fSize - floor(fSize));
-			Com_Printf("%20s %9d (%2d.%02dMB) in %6d blocks (%9d average)\n",
+			Com_Printf("%20s %9lld (%2d.%02dMB) in %6d blocks (%9lld average)\n",
 					    psTagStrings[i],
 							  iThisSize,
 								iSize,iRemainder,
@@ -593,7 +604,7 @@ void Com_ShutdownZoneMemory(void)
 
 	if(TheZone.Stats.iCount)
 	{
-		Com_Printf("Automatically freeing %d blocks making up %d bytes\n", TheZone.Stats.iCount, TheZone.Stats.iCurrent);
+		Com_Printf("Automatically freeing %d blocks making up %lld bytes\n", TheZone.Stats.iCount, (long long)TheZone.Stats.iCurrent);
 		Z_TagFree(TAG_ALL);
 
 		assert(!TheZone.Stats.iCount);
@@ -665,7 +676,7 @@ Touch all known used data to make sure it is paged in
 */
 void Com_TouchMemory( void ) {
 //	int		start, end;
-	int		i, j;
+	size_t		i, j;		// size_t: a .bsp image block is over 2 GB
 	unsigned int		sum;
 
 //	start = Sys_Milliseconds();

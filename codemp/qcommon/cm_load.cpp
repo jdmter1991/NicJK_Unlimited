@@ -697,12 +697,25 @@ static void CM_LoadMap_Actual( const char *name, qboolean clientload, int *check
 	//
 	buf = NULL;
 	fileHandle_t h;
-	const int iBSPLen = FS_FOpenFileRead( name, &h, qfalse );
+	// 64-bit length and read: a big map's .bsp can be over 2 GB (lumps are found by unsigned 32-bit positions, so
+	// 4 GB is the format's limit); a .bsp that large can only be a loose file, since the pk3 reader has no zip64
+	const int64_t iBSPLen = FS_FOpenFileReadLarge( name, &h );
 	if (h)
 	{
-		newBuff = Z_Malloc( iBSPLen, TAG_BSP_DISKIMAGE );
-		FS_Read( newBuff, iBSPLen, h);
+		if ( iBSPLen < (int64_t)sizeof( dheader_t ) || iBSPLen > 0xffffffffLL ) {
+			FS_FCloseFile( h );
+			Com_Error( ERR_DROP, "CM_LoadMap: %s is %lld bytes; a .bsp must be under 4 GB", name, (long long)iBSPLen );
+		}
+		newBuff = Z_MallocLarge( (size_t)iBSPLen, TAG_BSP_DISKIMAGE );
+		if ( FS_ReadLarge( newBuff, iBSPLen, h ) != iBSPLen ) {
+			FS_FCloseFile( h );
+			Z_Free( newBuff );
+			Com_Error( ERR_DROP, "CM_LoadMap: could not read all %lld bytes of %s", (long long)iBSPLen, name );
+		}
 		FS_FCloseFile( h );
+		if ( iBSPLen > 0x7fffffffLL ) {
+			Com_Printf( "CM_LoadMap: %s is a large .bsp (%.2f GB)\n", name, iBSPLen / 1073741824.0 );
+		}
 
 		buf = (int*) newBuff;	// so the rest of the code works as normal
 		if (&cm == &cmg)
@@ -722,7 +735,7 @@ static void CM_LoadMap_Actual( const char *name, qboolean clientload, int *check
 		Com_Error (ERR_DROP, "Couldn't load %s", name);
 	}
 
-	last_checksum = LittleLong (Com_BlockChecksum (buf, iBSPLen));
+	last_checksum = LittleLong (Com_BlockChecksumLarge (buf, (size_t)iBSPLen));
 	if ( checksum )
 		*checksum = last_checksum;
 
@@ -777,7 +790,7 @@ static void CM_LoadMap_Actual( const char *name, qboolean clientload, int *check
 	{
 		Z_Free(newBuff);
 	}
-	else if (Sys_LowPhysicalMemory()
+	else if ((Sys_LowPhysicalMemory() && iBSPLen <= 0x7fffffffLL)	// a .bsp of 2 GB or more is kept: the renderer's re-read (FS_ReadFile) is 32-bit
 		|| com_dedicated->integer
 //		|| we're on a big-endian machine
 		)
