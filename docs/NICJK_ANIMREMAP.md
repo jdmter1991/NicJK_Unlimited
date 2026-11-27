@@ -29,7 +29,8 @@ Line format: `model[/skin]  ANIMATION  REPLACEMENT  [fit|free|timing]`
 * `timing`: the replacement plays at its own speed and the move also lasts as
   long as the replacement in gameplay. This changes combat timing.
 
-`BOTH_A2_* BOTH_A3_*` maps a whole group by prefix. `*` as the model means every
+`BOTH_A2_* BOTH_A3_*` maps a whole group by prefix. `MODEL * SET:*` gives a model every animation of an animset that has a game
+animation's name (loops at their own speed, other moves keep this game's length, unless a mode is given). `*` as the model means every
 model. A model can ship its own `models/players/<model>/animremap.cfg` (lines
 without the model column); the central file overrides it.
 
