@@ -14150,7 +14150,16 @@ static void PM_JAPlusNewMoveControl( qboolean *stiffenedUp )
 #undef PM_ANY_MOVE_INPUT
 #endif
 
+// MB2-style manual block: the movement keys of a guard with attack held give the side blocked, in the
+// guarding player's own view (W top, A left, D right, W+A top left ... S+A bottom left); -1 none
+int BG_MB2ManualBlockQuad( int forwardmove, int rightmove ) {
+	if ( forwardmove > 0 ) return ( rightmove < 0 ) ? Q_TL : ( ( rightmove > 0 ) ? Q_TR : Q_T );
+	if ( forwardmove < 0 ) return ( rightmove < 0 ) ? Q_BL : ( ( rightmove > 0 ) ? Q_BR : -1 );
+	return ( rightmove < 0 ) ? Q_L : ( ( rightmove > 0 ) ? Q_R : -1 );
+}
+
 void PmoveSingle (pmove_t *pmove) {
+	int mb2ManualQuad = -1;
 	qboolean stiffenedUp = qfalse;
 	float gDist = 0;
 	qboolean noAnimate = qfalse;
@@ -14169,6 +14178,12 @@ void PmoveSingle (pmove_t *pmove) {
 		pm->ps->userInt3 = guard ? 1 : 0;
 		if ( guard )
 		{
+			// guard with attack held is a manual block, not a swing (the server times it and decides it)
+			if ( pm->cmd.buttons & BUTTON_ATTACK )
+			{
+				mb2ManualQuad = BG_MB2ManualBlockQuad( pm->cmd.forwardmove, pm->cmd.rightmove );
+				pm->cmd.buttons &= ~BUTTON_ATTACK;
+			}
 			pm->cmd.buttons &= ~BUTTON_ALT_ATTACK;
 			if ( pm->cmd.forwardmove > 64 ) pm->cmd.forwardmove = 64;
 			if ( pm->cmd.forwardmove < -64 ) pm->cmd.forwardmove = -64;
@@ -15731,6 +15746,39 @@ void PmoveSingle (pmove_t *pmove) {
 	{ //don't do this if we're on a vehicle, or we are one
 		// footstep events / legs animations
 		PM_Footsteps();
+	}
+
+	// MB2-style manual block: a plain guard keeps the style's own stance (as in MB2); a manual block (guard
+	// with attack held and a direction key) shows the parry pose for that side. The timer is kept topped up
+	// so the walking/standing animations do not take the torso back while it is held.
+	if ( mb2ManualQuad >= 0 && pm->ps->userInt3 && pm->ps->weapon == WP_SABER && pm->ps->clientNum < MAX_CLIENTS
+		&& pm->ps->weaponTime <= 0 && pm->ps->forceHandExtend == HANDEXTEND_NONE
+		&& ( pm->ps->saberMove == LS_READY || ( pm->ps->saberMove >= LS_PARRY_UP && pm->ps->saberMove <= LS_PARRY_LL ) )
+		&& !BG_SabersOff( pm->ps ) && !pm->ps->saberInFlight && pm->ps->stats[STAT_HEALTH] > 0 )
+	{
+		static const int poseSingle[] = { BOTH_P1_S1_T_, BOTH_P1_S1_TR, BOTH_P1_S1_TR, BOTH_P1_S1_BR, BOTH_P1_S1_BR, BOTH_P1_S1_BL, BOTH_P1_S1_TL, BOTH_P1_S1_TL };
+		static const int poseDual[] = { BOTH_P6_S6_T_, BOTH_P6_S6_TR, BOTH_P6_S6_TR, BOTH_P6_S6_BR, BOTH_P6_S6_BR, BOTH_P6_S6_BL, BOTH_P6_S6_TL, BOTH_P6_S6_TL };
+		static const int poseStaff[] = { BOTH_P7_S7_T_, BOTH_P7_S7_TR, BOTH_P7_S7_TR, BOTH_P7_S7_BR, BOTH_P7_S7_BR, BOTH_P7_S7_BL, BOTH_P7_S7_TL, BOTH_P7_S7_TL };
+		// pose index: top, top right, right, bottom right, (unused), bottom left, left, top left
+		int idx, guardAnim;
+		switch ( mb2ManualQuad ) {
+		case Q_T:  idx = 0; break;
+		case Q_TR: idx = 1; break;
+		case Q_R:  idx = 2; break;
+		case Q_BR: idx = 3; break;
+		case Q_BL: idx = 5; break;
+		case Q_L:  idx = 6; break;
+		case Q_TL: idx = 7; break;
+		default:   idx = 0; break;
+		}
+		guardAnim = poseSingle[idx];
+		if ( pm->ps->fd.saberAnimLevel == SS_DUAL )
+			guardAnim = poseDual[idx];
+		else if ( pm->ps->fd.saberAnimLevel == SS_STAFF )
+			guardAnim = poseStaff[idx];
+		PM_SetAnim( SETANIM_TORSO, guardAnim, SETANIM_FLAG_OVERRIDE | SETANIM_FLAG_HOLD );
+		if ( pm->ps->torsoAnim == guardAnim && pm->ps->torsoTimer < 100 )
+			pm->ps->torsoTimer = 100;
 	}
 
 	// entering / leaving water splashes

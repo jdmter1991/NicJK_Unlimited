@@ -264,6 +264,10 @@ vmCvar_t bot_abTest;
 //          once ("instant counter"); after blocking a swing, strike straight back ("riposte");
 //          at the edge of reach and with nothing happening, circle him instead of closing straight.
 #define BOTF_DUEL		8388608
+// 16777216: MB2 manual block (with g_mb2manualblock): a swing read in time is met with a manual block
+//          (attack pressed while guarding, direction keys on the side the swing comes from), aimed for
+//          the perfect block too when read well enough, which disarms the attacker. 1.5 s cooldown.
+#define BOTF_MBLOCK		16777216
 
 // the distance band a bot wants to fight in with this weapon; qfalse for the saber and melee
 static qboolean Bot_GunBand(int weapon, qboolean enemyHasSaber, float *min, float *max) {
@@ -517,7 +521,8 @@ static int botEvalObjDirect, botEvalObjWp, botEvalWpThinks, botEvalNoWpThinks;
 static int botEvalCliffStops, botEvalFallDeaths, botEvalCliffJumps;
 extern int g_mb2Stats[6];
 extern int G_MB2PerfectBlockZone( gentity_t *attacker );
-static int botEvalMb2LowBp;
+static int botEvalMb2LowBp, botEvalMb2Manual, botEvalMb2SwingNoGuard;
+extern int g_mb2MbStats[4];
 static int botEvalMb2Guard, botEvalMb2PbTry, botEvalWalkFrames, botEvalRunFrames;
 static int botEvalDuelHold, botEvalDuelCounter, botEvalDuelRiposte, botEvalDuelCircle;
 extern qboolean PM_SaberInReturn( int move );
@@ -756,6 +761,8 @@ static void BotEval_Report(void) {
 		trap->Print("BOTEVAL mb2 block: guarded hits blocked %d of which perfect blocks %d, guarded hits that got through %d, disarms %d, hits on players not guarding %d, from behind %d; bot guard frames %d, perfect-block aims %d\n",
 			g_mb2Stats[0], g_mb2Stats[1], g_mb2Stats[2], g_mb2Stats[3], g_mb2Stats[4], g_mb2Stats[5], botEvalMb2Guard, botEvalMb2PbTry);
 		trap->Print("BOTEVAL mb2 block: bot frames backing off with no block points left %d\n", botEvalMb2LowBp);
+		trap->Print("BOTEVAL mb2 manual block: started %d (by bots %d), matched the swing %d, matched + perfect = attacker disarmed %d, attacker kept his saber (guarding) %d; bot frames swinging instead of guarding %d\n",
+			g_mb2MbStats[0], botEvalMb2Manual, g_mb2MbStats[1], g_mb2MbStats[2], g_mb2MbStats[3], botEvalMb2SwingNoGuard);
 	}
 	trap->Print("BOTEVAL cliffs: jumps with nothing to land on refused %d\n", botEvalCliffJumps);
 	trap->Print("BOTEVAL cliffs: steps over an edge refused %d; deaths by falling %d, of which right after a navigation jump %d, after being hit %d, other %d\n",
@@ -1782,6 +1789,7 @@ void BotInputToUserCommand(bot_state_t* bs, bot_input_t* bi, usercmd_t* ucmd, in
 				continue;
 			}
 			if (DistanceSquared(o->client->ps.origin, cl->ps.origin) < 140.0f * 140.0f) {
+				ucmd->buttons &= ~BUTTON_ATTACK;	// guarding and swinging do not go together (attack would be a manual block)
 				ucmd->buttons |= BUTTON_ALT_ATTACK;
 				botEvalMb2Guard++;
 				break;
@@ -1790,7 +1798,8 @@ void BotInputToUserCommand(bot_state_t* bs, bot_input_t* bi, usercmd_t* ucmd, in
 	}
 	if (g_mb2manualblock.integer && cl && cl->ps.weapon == WP_SABER && cl->ps.stats[STAT_HEALTH] > 0
 		&& bs->currentEnemy && bs->currentEnemy->client && bs->frame_Enemy_Vis && !(ucmd->buttons & BUTTON_USE)) {
-		static int pbMove[MAX_CLIENTS], pbGo[MAX_CLIENTS];
+		static int pbMove[MAX_CLIENTS], pbGo[MAX_CLIENTS], mbGo[MAX_CLIENTS];
+		const qboolean wantsSwing = (ucmd->buttons & BUTTON_ATTACK) ? qtrue : qfalse;
 		const gclient_t *ec = bs->currentEnemy->client;
 		const float d = bs->frame_Enemy_Len;
 		const qboolean enemySwinging = (ec->ps.weapon == WP_SABER && (BG_SaberInAttack(ec->ps.saberMove) || BG_SaberInSpecial(ec->ps.saberMove))) ? qtrue : qfalse;
@@ -1805,13 +1814,37 @@ void BotInputToUserCommand(bot_state_t* bs, bot_input_t* bi, usercmd_t* ucmd, in
 			if (ucmd->rightmove < -64) ucmd->rightmove = -64;
 			ucmd->buttons &= ~BUTTON_ATTACK;
 			botEvalMb2LowBp++;
+		} else if (wantsSwing && !(enemySwinging && BotPred_BladeHits(bs->currentEnemy, &g_entities[bs->client], 250) >= 0)) {
+			// the bot means to swing and nothing is about to land: swing, without the guard (in MB2 attack
+			// while guarding is a manual block, not a swing)
+			ucmd->buttons &= ~BUTTON_ALT_ATTACK;
+			botEvalMb2SwingNoGuard++;
 		} else if (ec->ps.weapon == WP_SABER && !BG_SabersOff(&ec->ps) && (d < 150.0f || (d < 240.0f && enemySwinging))) {
+			ucmd->buttons &= ~BUTTON_ATTACK;
 			ucmd->buttons |= BUTTON_ALT_ATTACK;
 			botEvalMb2Guard++;
 			if (enemySwinging) {
 				if (pbMove[bs->client] != ec->ps.saberMove) {	// a new swing: decide once whether this one is read
 					pbMove[bs->client] = ec->ps.saberMove;
 					pbGo[bs->client] = (Q_irand(1, 100) <= skill * 18) ? 1 : 0;
+					mbGo[bs->client] = (Q_irand(1, 100) <= skill * 14) ? 1 : 0;
+				}
+				if ((bs->features & BOTF_MBLOCK) && mbGo[bs->client] && level.time >= cl->mb2mbReady
+					&& BotPred_BladeHits(bs->currentEnemy, &g_entities[bs->client], 100 + skill * 30) >= 0) {
+					// manual block: press attack with the keys for the side the swing comes from
+					const int want = G_MB2PerfectBlockZone(bs->currentEnemy);
+					int fm = 0, rm = 0;
+					if (want == Q_T || want == Q_TL || want == Q_TR) fm = 64;
+					if (want == Q_BL || want == Q_BR) fm = -64;
+					if (want == Q_L || want == Q_TL || want == Q_BL) rm = -64;
+					if (want == Q_R || want == Q_TR || want == Q_BR) rm = 64;
+					if (fm || rm) {
+						ucmd->forwardmove = fm;
+						ucmd->rightmove = rm;
+						ucmd->buttons |= BUTTON_ATTACK;
+						mbGo[bs->client] = 0;	// one try per swing
+						botEvalMb2Manual++;
+					}
 				}
 				if (pbGo[bs->client] && BotPred_BladeHits(bs->currentEnemy, &g_entities[bs->client], 120 + skill * 40) >= 0) {
 					const int zone = G_MB2PerfectBlockZone(bs->currentEnemy);

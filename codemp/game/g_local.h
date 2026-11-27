@@ -1099,6 +1099,10 @@ struct gclient_s {
 	int			cloakDebRecharge;
 	float		mb2bp;				// MB2-style block points (g_mb2manualblock), 0..100
 	int			mb2bpNextRegen;
+	int			mb2mbUntil;			// MB2 manual block: open until this time
+	int			mb2mbReady;			// and can be started again from this time (1.5 s cooldown)
+	int			mb2mbQuad;			// the side it covers (BG_MB2ManualBlockQuad)
+	qboolean	mb2mbAttackWas;		// attack was held last frame (a manual block starts on the press)
 	int			cloakDebReduce;
 
 	int			saberStoredIndex; //stores saberEntityNum from playerstate for when it's set to 0 (indicating saber was knocked out of the air)
