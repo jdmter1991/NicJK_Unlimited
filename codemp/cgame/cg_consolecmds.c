@@ -2445,10 +2445,10 @@ int cmdcmp( const void *a, const void *b ) {
 	return Q_stricmp( (const char *)a, ((consoleCommand_t*)b)->cmd );
 }
 
-// NicJK animremap.cfg (per-model animation remapping)
+// NicJK per-model-anims-config.cfg (per-model animation remapping)
 static void CG_AnimRemapList_f( void ) {
-	if ( !cg_animRemap.integer )
-		trap->Print( "AnimRemap: cg_animRemap is 0, remapped animations are not shown\n" );
+	if ( !cg_permodelanims.integer )
+		trap->Print( "AnimRemap: cg_permodelanims is 0, remapped animations are not shown\n" );
 	BG_AnimRemap_List();
 }
 

@@ -4921,7 +4921,7 @@ void ClientThink_real( gentity_t *ent ) {
 	pmove.pmove_msec = pmove_msec.integer;
 	pmove.pmove_float = pmove_float.integer;
 
-	pmove.animations = G_AnimRemap_Pmove(ent); // NicJK animremap.cfg: base table unless the model has "timing" lines
+	pmove.animations = G_AnimRemap_Pmove(ent); // NicJK per-model-anims-config.cfg: base table unless the model has "timing" lines
 
 	//rww - bgghoul2
 	pmove.ghoul2 = NULL;

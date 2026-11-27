@@ -1,19 +1,19 @@
-# Per-model animation remapping (animremap.cfg)
+# Per-model animation remapping (per-model-anims-config.cfg)
 
 The same move can play a different animation depending on the player model,
 chosen by a text file you can edit without recompiling. Example: a Sith model
 stands in the strong-style stance and uses the strong-style kata, while a Jedi
 model with the same saber style keeps the normal ones.
 
-It is off by default. Nothing changes unless `g_animRemap 1` (server) and/or
-`cg_animRemap 1` (client) is set and a cfg exists.
+It is off by default. Nothing changes unless `g_permodelanims 1` (server) and/or
+`cg_permodelanims 1` (client) is set and a cfg exists.
 
 ## Setup
 
-1. Copy `docs/animremap.cfg` to `GameData/nicjk/animremap.cfg` and remove the
+1. Copy `docs/per-model-anims-config.cfg` to `GameData/nicjk/per-model-anims-config.cfg` and remove the
    `//` in front of the lines you want (the file explains the format).
-2. Server: `g_animRemap 1`. Client: `cg_animRemap 1`. On a local game set both.
-3. `cg_animRemap 2` = on, plus a console line every time a player's animation
+2. Server: `g_permodelanims 1`. Client: `cg_permodelanims 1`. On a local game set both.
+3. `cg_permodelanims 2` = on, plus a console line every time a player's animation
    starts, with the frames really shown and "(remapped)" when they are not the
    stock ones - the quickest way to check what a model plays.
 4. After editing: `animremap_reload` (server console / rcon) and
@@ -31,7 +31,7 @@ Line format: `model[/skin]  ANIMATION  REPLACEMENT  [fit|free|timing]`
 
 `BOTH_A2_* BOTH_A3_*` maps a whole group by prefix. `MODEL * SET:*` gives a model every animation of an animset that has a game
 animation's name (loops at their own speed, other moves keep this game's length, unless a mode is given). `*` as the model means every
-model. A model can ship its own `models/players/<model>/animremap.cfg` (lines
+model. A model can ship its own `models/players/<model>/per-model-anims-config.cfg` (lines
 without the model column); the central file overrides it.
 
 When a model is first seen, the console prints every remap with both lengths and
@@ -73,7 +73,7 @@ shares one table (index 0), and dozens of places in the game code test
 
 ### Where the cfg lives
 
-Both: one central `GameData/nicjk/animremap.cfg` keyed by model (like
+Both: one central `GameData/nicjk/per-model-anims-config.cfg` keyed by model (like
 `modelscale.cfg`) and an optional per-model file inside the model's folder so a
 model pk3 can carry its own. Central lines win, model/skin beats model beats `*`.
 The example ships in `docs/` and not in the nicjk assets pk3, because a pk3 copy
@@ -82,10 +82,10 @@ would hide the user's loose file.
 ### Server and client agreement
 
 * `fit` and `free` never touch pmove, so prediction cannot disagree. A client
-  without the cfg, or with `cg_animRemap 0`, or a stock client, simply sees the
+  without the cfg, or with `cg_permodelanims 0`, or a stock client, simply sees the
   original animations and plays exactly the same game.
-* `timing` changes pmove on the server when `g_animRemap 1`. The client uses
-  the same table for prediction only when the server's `g_animRemap` (sent in
+* `timing` changes pmove on the server when `g_permodelanims 1`. The client uses
+  the same table for prediction only when the server's `g_permodelanims` (sent in
   serverinfo) is on and the client has the same cfg. If the files differ, or for
   stock clients, the server corrects the client's prediction during those moves
   (a small snap), as with any server-side gameplay change. Ship the cfg in a pk3
@@ -107,7 +107,7 @@ would hide the user's loose file.
 ## Recommended: one shared humanoid with extra animations
 
 Every model keeps the one shared `models/players/_humanoid/_humanoid.gla`; new
-animations are appended to it once, and `animremap.cfg` picks per model which
+animations are appended to it once, and `per-model-anims-config.cfg` picks per model which
 animation each move plays. Because the server and every client have the same
 file, the server's hit model can be posed with the remapped frames (saber hits
 follow what is drawn), stock clients see the model with its normal animations,
@@ -120,7 +120,7 @@ and corpses, faces and ragdolls only ever get valid frames.
    Base frames keep their numbers; the bone data is shared, so only new poses
    add size. Limit: 65535 frames in total (NicJK's humanoid uses 48591).
 2. Ship the new `_humanoid.gla` and `added.cfg` in a pk3 that every player has.
-3. In animremap.cfg:
+3. In per-model-anims-config.cfg:
 
         animset ext  models/players/_humanoid/_humanoid.gla  models/players/_humanoid/added.cfg  0
         kyle    BOTH_SABERFAST_STANCE  ext:DOOKU_FAST_STANCE  free
@@ -163,8 +163,8 @@ the normal ones.
 
 1. **Separate GLA with its own animation.cfg** - the single-player and
    MovieDuels convention, e.g. `models/players/_humanoid_dooku/_humanoid.gla`
-   with `animation.cfg` and `animevents.cfg` next to it. With `cg_animRemap 1`
-   (client) / `g_animRemap 1` (server) such a model is accepted instead of being
+   with `animation.cfg` and `animevents.cfg` next to it. With `cg_permodelanims 1`
+   (client) / `g_permodelanims 1` (server) such a model is accepted instead of being
    replaced by Kyle when its GLA has exactly the humanoid bones (names and
    parents, read from the file) and an animation.cfg. The game keeps treating it
    as humanoid (table 0, so pmove, bots, broken limbs, saber code are
@@ -184,7 +184,7 @@ the normal ones.
    `.glm`: rd-vulkan, rd-vanilla, rd-rend2 and rd-dedicated). From then on it
    is the same as a model that names the GLA itself. Models are cached, so a
    changed line applies after `vid_restart` or a restart. A client whose
-   renderer is not NicJK's, or with `cg_animRemap 0`, shows the model as usual.
+   renderer is not NicJK's, or with `cg_permodelanims 0`, shows the model as usual.
 2. **Model's own GLA = humanoid frames + extra frames appended**. The
    GLA sits in `models/players/_humanoid/` (accepted everywhere, like Talon),
    frames 0..21375 are byte-identical to `_humanoid.gla`, so the stock
@@ -223,7 +223,7 @@ appends the frames of GLAs with the same skeleton (checked: same 53 bones,
 same parents) and prints each one's frame offset. Sources can be read straight
 from a pk3 (`file.pk3::path/in/pk3.gla`). Then point the model's `.glm` header
 (`animName`, 64 bytes at offset 72) at the new GLA, e.g. with a hex editor or
-by re-exporting the model, and add an `animremap.cfg` to the model folder:
+by re-exporting the model, and add an `per-model-anims-config.cfg` to the model folder:
 
     animset sour  models/players/_humanoid/_sith.gla  models/players/_humanoid_t1_sour/animation.cfg  33406
     BOTH_SABERFAST_STANCE  sour:BOTH_CIN_10  free

@@ -1,6 +1,6 @@
 /*
 ===========================================================================
-NicJK Unlimited - per-model animation remapping (animremap.cfg)
+NicJK Unlimited - per-model animation remapping (per-model-anims-config.cfg)
 
 How it works
 ------------
@@ -37,8 +37,8 @@ are used, because the extra frames do not exist there.
 
 Files (read through the game file system, so they can be loose in the mod
 folder or inside a pk3):
-  animremap.cfg                          central, lines: model[/skin] FROM TO [mode]
-  models/players/<model>/animremap.cfg   per model,  lines: FROM TO [mode]
+  per-model-anims-config.cfg                          central, lines: model[/skin] FROM TO [mode]
+  models/players/<model>/per-model-anims-config.cfg   per model,  lines: FROM TO [mode]
 Both can hold animset lines. Central lines override per-model lines for the
 same animation. A model of "*" applies to every model. Names ending in '*' map
 a whole group by prefix, e.g. "BOTH_A1_* BOTH_A5_*".
@@ -77,7 +77,7 @@ static const char *arModeNames[] = { "fit", "free", "timing" };
 
 typedef enum {
 	AR_SRC_ALL,			// central file, model "*"
-	AR_SRC_MODELFILE,	// models/players/<model>/animremap.cfg
+	AR_SRC_MODELFILE,	// models/players/<model>/per-model-anims-config.cfg
 	AR_SRC_MODEL,		// central file, model without skin
 	AR_SRC_MODELSKIN,	// central file, model/skin
 	AR_SRC_COUNT
@@ -683,7 +683,7 @@ static void AR_LoadCentral( void ) {
 	if ( ar_centralLoaded )
 		return;
 	ar_centralLoaded = qtrue;
-	AR_ParseFile( "animremap.cfg", NULL );
+	AR_ParseFile( "per-model-anims-config.cfg", NULL );
 }
 
 static void AR_LoadModelFile( const char *model ) {
@@ -697,7 +697,7 @@ static void AR_LoadModelFile( const char *model ) {
 	}
 	if ( ar_numModelFiles < AR_MAX_MODELFILES )
 		Q_strncpyz( ar_modelFiles[ar_numModelFiles++], model, AR_NAME );
-	AR_ParseFile( va( "models/players/%s/animremap.cfg", model ), model );
+	AR_ParseFile( va( "models/players/%s/per-model-anims-config.cfg", model ), model );
 }
 
 static animation_t *AR_AllocTable( const animation_t *base ) {
