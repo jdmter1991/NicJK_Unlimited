@@ -1103,6 +1103,7 @@ struct gclient_s {
 	int			mb2mbReady;			// and can be started again from this time (1.5 s cooldown)
 	int			mb2mbQuad;			// the side it covers (BG_MB2ManualBlockQuad)
 	qboolean	mb2mbAttackWas;		// attack was held last frame (a manual block starts on the press)
+	qboolean	modelScaleBoxPending;	// modelscale.cfg box not yet applied (no room where the player stood when the model changed)
 	int			cloakDebReduce;
 
 	int			saberStoredIndex; //stores saberEntityNum from playerstate for when it's set to 0 (indicating saber was knocked out of the air)
