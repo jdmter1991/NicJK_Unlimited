@@ -295,7 +295,7 @@ void WP_ActivateSaber( gentity_t *self )
 		self->client->ps.forceHandExtendTime = 0;
 	}
 //[JAPRO - Serverside - Force - Fix Saber in grip - Start]
-	else if (g_fixSaberInGrip.integer > 1 && self->client->ps.fd.forceGripCripple)
+	else if (g_fixSaberInGrip.integer > 1 && self->client->ps.fd.forceGripCripple && !JK2SABER()) // JK2 1.02 has no grip rule here
 	{ //can't activate saber while being gripped
 		return;
 	}

@@ -17216,7 +17216,7 @@ stillDoSaber:
 	//Showing only when the power has been active (absorbed something) recently now, instead of always.
 	//AND
 	//always show if it is you with the absorb on
-	if (((cg_alwaysShowAbsorb.integer && cgs.serverMod != SVMOD_BASEENHANCED) && cent->currentState.forcePowersActive & (1<<FP_ABSORB)) ||
+	if (((cgs.jk2_102sabersystem || (cg_alwaysShowAbsorb.integer && cgs.serverMod != SVMOD_BASEENHANCED)) && cent->currentState.forcePowersActive & (1<<FP_ABSORB)) || // JK2 1.02 draws it whenever absorb is on (mv cg_players.c:7550)
 		(cent->teamPowerEffectTime > cg.time && cent->teamPowerType == 3))
 	{ //aborb is represented by blue..
 		legs.shaderRGBA[0] = 0;

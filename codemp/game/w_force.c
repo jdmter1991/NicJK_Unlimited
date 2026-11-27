@@ -51,6 +51,24 @@ int		ysalamiriLoopSound	= 0;
 
 int ForceShootDrain( gentity_t *self );
 
+// JK2 1.02 force powers (w_force_jk2.c), used while JK2SABER() is true
+int ForcePowerUsableOn_JK2( gentity_t *attacker, gentity_t *other, forcePowers_t forcePower );
+qboolean WP_ForcePowerAvailable_JK2( gentity_t *self, forcePowers_t forcePower );
+qboolean WP_ForcePowerUsable_JK2( gentity_t *self, forcePowers_t forcePower );
+int WP_AbsorbConversion_JK2( gentity_t *attacked, int atdAbsLevel, gentity_t *attacker, int atPower, int atPowerLevel, int atForceSpent );
+void ForceHeal_JK2( gentity_t *self );
+void ForceTeamHeal_JK2( gentity_t *self );
+void ForceTeamForceReplenish_JK2( gentity_t *self );
+void ForceGrip_JK2( gentity_t *self );
+void ForceLightning_JK2( gentity_t *self );
+void ForceShootLightning_JK2( gentity_t *self );
+void ForceDrain_JK2( gentity_t *self );
+int ForceShootDrain_JK2( gentity_t *self );
+void ForceTelepathy_JK2( gentity_t *self );
+void ForceThrow_JK2( gentity_t *self, qboolean pull );
+void DoGripAction_JK2( gentity_t *self, forcePowers_t forcePower );
+void WP_ForcePowersUpdate_JK2( gentity_t *self, usercmd_t *ucmd );
+
 gentity_t *G_PreDefSound(vec3_t org, int pdSound)
 {
 	gentity_t	*te;
@@ -273,7 +291,7 @@ void WP_InitForcePowers( gentity_t *ent ) {
 	ent->client->ps.fd.forceSide = atoi( readBuf );
 	i++;
 
-	if ( level.gametype != GT_SIEGE && (ent->r.svFlags & SVF_BOT) && botstates[ent->s.number] ) {
+	if ( level.gametype != GT_SIEGE && (ent->r.svFlags & SVF_BOT) && botstates[ent->s.number] && !JK2SABER() ) { // JK2 1.02 takes the bot file's powers as they are (mv w_force.c:228)
 		// hmm..I'm going to cheat here.
 		int oldI = i;
 		i_r = 0;
@@ -554,6 +572,7 @@ extern qboolean BG_InKnockDown( int anim ); //bg_pmove.c
 
 int ForcePowerUsableOn(gentity_t *attacker, gentity_t *other, forcePowers_t forcePower)
 {
+	if ( JK2SABER() ) { return ForcePowerUsableOn_JK2(attacker, other, forcePower); } // JK2 1.02 (w_force_jk2.c)
 	//if (other && other->client && other->client->pers.raceMode)
 		//return 0;
 
@@ -659,6 +678,7 @@ int ForcePowerUsableOn(gentity_t *attacker, gentity_t *other, forcePowers_t forc
 
 qboolean WP_ForcePowerAvailable( gentity_t *self, forcePowers_t forcePower, int overrideAmt )
 {
+	if ( JK2SABER() && !self->NPC ) { return WP_ForcePowerAvailable_JK2(self, forcePower); } // JK2 1.02 (w_force_jk2.c)
 	int drain = overrideAmt ? overrideAmt :
 				forcePowerNeeded[self->client->ps.fd.forcePowerLevel[forcePower]][forcePower];
 
@@ -715,6 +735,7 @@ qboolean WP_ForcePowerInUse( gentity_t *self, forcePowers_t forcePower )
 
 qboolean WP_ForcePowerUsable( gentity_t *self, forcePowers_t forcePower )
 {
+	if ( JK2SABER() && !self->NPC ) { return WP_ForcePowerUsable_JK2(self, forcePower); } // JK2 1.02 (w_force_jk2.c)
 	if (self->client && self->client->sess.raceMode && !self->client->ps.duelInProgress)
 		return qfalse;
 	
@@ -864,6 +885,7 @@ qboolean WP_ForcePowerUsable( gentity_t *self, forcePowers_t forcePower )
 
 int WP_AbsorbConversion(gentity_t *attacked, int atdAbsLevel, gentity_t *attacker, int atPower, int atPowerLevel, int atForceSpent)
 {
+	if ( JK2SABER() ) { return WP_AbsorbConversion_JK2(attacked, atdAbsLevel, attacker, atPower, atPowerLevel, atForceSpent); } // JK2 1.02 (w_force_jk2.c)
 	int getLevel = 0;
 	int addTot = 0;
 	gentity_t *abSound;
@@ -1137,7 +1159,8 @@ void WP_ForcePowerStart( gentity_t *self, forcePowers_t forcePower, int override
 		duration = overrideAmt;
 		overrideAmt = 0;
 		self->client->ps.fd.forcePowersActive |= ( 1 << forcePower );
-		self->client->ps.fd.forceDrainTime = level.time;
+		if (!JK2SABER()) // not in JK2 1.02 (mv w_force.c:WP_ForcePowerStart)
+			self->client->ps.fd.forceDrainTime = level.time;
 		//self->client->ps.activeForcePass = self->client->ps.fd.forcePowerLevel[FP_DRAIN];
 		break;
 	case FP_SEE:
@@ -1204,6 +1227,7 @@ void WP_ForcePowerStart( gentity_t *self, forcePowers_t forcePower, int override
 
 void ForceHeal( gentity_t *self )
 {
+	if ( JK2SABER() && !self->NPC ) { ForceHeal_JK2(self); return; } // JK2 1.02 (w_force_jk2.c)
 	if ( self->health <= 0 )
 	{
 		return;
@@ -1287,6 +1311,7 @@ void WP_AddToClientBitflags(gentity_t *ent, int entNum)
 
 void ForceTeamHeal( gentity_t *self )
 {
+	if ( JK2SABER() && !self->NPC ) { ForceTeamHeal_JK2(self); return; } // JK2 1.02 (w_force_jk2.c)
 	float radius = 256;
 	int i = 0;
 	gentity_t *ent;
@@ -1394,6 +1419,7 @@ void ForceTeamHeal( gentity_t *self )
 
 void ForceTeamForceReplenish( gentity_t *self )
 {
+	if ( JK2SABER() && !self->NPC ) { ForceTeamForceReplenish_JK2(self); return; } // JK2 1.02 (w_force_jk2.c)
 	float radius = 256;
 	int i = 0;
 	gentity_t *ent;
@@ -1495,6 +1521,7 @@ void ForceTeamForceReplenish( gentity_t *self )
 
 void ForceGrip( gentity_t *self )
 {
+	if ( JK2SABER() && !self->NPC ) { ForceGrip_JK2(self); return; } // JK2 1.02 (w_force_jk2.c)
 	trace_t tr;
 	vec3_t tfrom, tto, fwd;
 
@@ -1608,6 +1635,10 @@ void ForceSpeed( gentity_t *self, int forceDuration )
 	self->client->ps.forceAllowDeactivateTime = level.time + 1500;
 
 	WP_ForcePowerStart( self, FP_SPEED, forceDuration );
+	if (JK2SABER())
+	{ // mv w_force.c:ForceSpeed: forceSpeedSmash = 2, initial boost (clamped to the level's cap in BG_AdjustClientSpeed)
+		self->client->ps.stats[STAT_DASHTIME] = 2000;
+	}
 	G_Sound( self, CHAN_BODY, G_SoundIndex("sound/weapons/force/speed.wav") );
 	G_Sound( self, TRACK_CHANNEL_2, speedLoopSound );
 }
@@ -1800,6 +1831,7 @@ void ForceRage( gentity_t *self )
 
 void ForceLightning( gentity_t *self )
 {
+	if ( JK2SABER() && !self->NPC ) { ForceLightning_JK2(self); return; } // JK2 1.02 (w_force_jk2.c)
 	if ( self->health <= 0 )
 	{
 		return;
@@ -1948,6 +1980,7 @@ void ForceLightningDamage(gentity_t* self, gentity_t* traceEnt, vec3_t dir, vec3
 
 void ForceShootLightning( gentity_t *self )
 {
+	if ( JK2SABER() && !self->NPC ) { ForceShootLightning_JK2(self); return; } // JK2 1.02 (w_force_jk2.c)
 	trace_t	tr;
 	vec3_t	end, forward;
 	gentity_t	*traceEnt;
@@ -2068,6 +2101,7 @@ void ForceShootLightning( gentity_t *self )
 
 void ForceDrain( gentity_t *self )
 {
+	if ( JK2SABER() && !self->NPC ) { ForceDrain_JK2(self); return; } // JK2 1.02 (w_force_jk2.c)
 	if ( self->health <= 0 )
 	{
 		return;
@@ -2280,6 +2314,7 @@ void ForceDrainDamage( gentity_t *self, gentity_t *traceEnt, vec3_t dir, vec3_t 
 void G_TestLine(vec3_t start, vec3_t end, int color, int time);
 int ForceShootDrain( gentity_t *self )
 {
+	if ( JK2SABER() && !self->NPC ) { return ForceShootDrain_JK2(self); } // JK2 1.02 (w_force_jk2.c)
 	trace_t	tr;
 	vec3_t	end, forward, center;
 	gentity_t	*traceEnt;
@@ -2938,6 +2973,7 @@ qboolean ForceTelepathyCheckDirectNPCTarget( gentity_t *self, trace_t *tr, qbool
 
 void ForceTelepathy(gentity_t *self)
 {
+	if ( JK2SABER() && !self->NPC ) { ForceTelepathy_JK2(self); return; } // JK2 1.02 (w_force_jk2.c)
 	trace_t tr;
 	vec3_t tto, thispush_org, a;
 	vec3_t mins, maxs, fwdangles, forward, right, center;
@@ -3277,6 +3313,7 @@ extern void G_TestLine(vec3_t start, vec3_t end, int color, int time);
 extern void Touch_Button(gentity_t *ent, gentity_t *other, trace_t *trace );
 void ForceThrow( gentity_t *self, qboolean pull )
 {
+	if ( JK2SABER() && !self->NPC ) { ForceThrow_JK2(self, pull); return; } // JK2 1.02 (w_force_jk2.c)
 	//shove things in front of you away
 	float		dist;
 	gentity_t	*ent;
@@ -4338,6 +4375,7 @@ void WP_ForcePowerStop( gentity_t *self, forcePowers_t forcePower )
 
 void DoGripAction(gentity_t *self, forcePowers_t forcePower)
 {
+	if ( JK2SABER() && !self->NPC ) { DoGripAction_JK2(self, forcePower); return; } // JK2 1.02 (w_force_jk2.c)
 	gentity_t *gripEnt;
 	int gripLevel = 0;
 	trace_t tr;
@@ -4649,7 +4687,7 @@ static void RemoveTrickedEnt(forcedata_t *fd, int client)
 extern int g_LastFrameTime;
 extern int g_TimeSinceLastFrame;
 
-static void WP_UpdateMindtrickEnts(gentity_t *self)
+void WP_UpdateMindtrickEnts(gentity_t *self)
 {
 	int i = 0;
 
@@ -5096,7 +5134,7 @@ int WP_DoSpecificPower( gentity_t *self, usercmd_t *ucmd, forcePowers_t forcepow
 		break;
 	case FP_PUSH:
 		powerSucceeded = 0; //always 0 for nonhold powers
-		if (self->client->ps.fd.forceButtonNeedRelease && !(self->r.svFlags & SVF_BOT))
+		if (self->client->ps.fd.forceButtonNeedRelease && (!(self->r.svFlags & SVF_BOT) || JK2SABER())) // JK2 1.02: bots must release push too
 		{ //need to release before we can use nonhold powers again
 			break;
 		}
@@ -5628,6 +5666,7 @@ qboolean G_SpecialRollGetup(gentity_t *self)
 
 void WP_ForcePowersUpdate( gentity_t *self, usercmd_t *ucmd )
 {
+	if ( JK2SABER() && self && !self->NPC ) { WP_ForcePowersUpdate_JK2(self, ucmd); return; } // JK2 1.02 (w_force_jk2.c)
 	int			i;//, holo, holoregen;
 	int			prepower = 0;
 	//see if any force powers are running

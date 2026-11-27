@@ -119,10 +119,16 @@ void BG_ForcePowerDrain( playerState_t *ps, forcePowers_t forcePower, int overri
 		{
 			ps->fd.forcePower = 0;
 		}
+#ifdef _GAME
+		if ( JK2SABER() ) G_JK2CountDrain( forcePower, jumpDrain ); // test counter (w_force_jk2.c)
+#endif
 
 		return;
 	}
 
+#ifdef _GAME
+	if ( JK2SABER() ) G_JK2CountDrain( forcePower, drain ); // test counter (w_force_jk2.c)
+#endif
 	ps->fd.forcePower -= drain;
 	if ( ps->fd.forcePower < 0 )
 	{
