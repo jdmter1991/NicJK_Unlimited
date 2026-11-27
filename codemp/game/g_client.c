@@ -4068,7 +4068,7 @@ void GiveClientWeapons(gclient_t *client) {
 				client->ps.stats[STAT_WEAPONS] |= (1 << i);
 		}
 
-		if (g_tweakWeapons.integer & WT_TRIBES) { //oh right, startingWeapons bit 1 gives more ammo
+		if (JK2O_TWEAKWEAPONS & WT_TRIBES) { //oh right, startingWeapons bit 1 gives more ammo
 			if (g_startingWeapons.integer & (1 << WP_BLASTER) || g_startingWeapons.integer & (1 << WP_BRYAR_OLD))
 				client->ps.ammo[AMMO_BLASTER] = 600;
 			if (g_startingWeapons.integer & (1 << WP_DISRUPTOR) || g_startingWeapons.integer & (1 << WP_BOWCASTER) || g_startingWeapons.integer & (1 << WP_DEMP2))
@@ -4605,7 +4605,7 @@ void ClientSpawn(gentity_t *ent) {
 			client->ps.stats[STAT_WEAPONS] |= (1 << WP_MELEE);
 		}
 
-		if (client->ps.stats[STAT_WEAPONS] & (1 << WP_SABER) && (!(g_tweakWeapons.integer & WT_TRIBES)))
+		if (client->ps.stats[STAT_WEAPONS] & (1 << WP_SABER) && (!(JK2O_TWEAKWEAPONS & WT_TRIBES)))
 		{
 			client->ps.weapon = WP_SABER;
 		}
@@ -4850,7 +4850,7 @@ void ClientSpawn(gentity_t *ent) {
 	}
 	else
 	{//Clan Arena starting armor/hp here
-		if (g_tweakWeapons.integer & WT_TRIBES) {
+		if (JK2O_TWEAKWEAPONS & WT_TRIBES) {
 			ent->health = client->ps.stats[STAT_HEALTH] = client->ps.stats[STAT_MAX_HEALTH];
 			client->ps.stats[STAT_ARMOR] = 0;
 		}
@@ -5067,7 +5067,7 @@ void ClientDisconnect( int clientNum ) {
 	}
 
 //JAPRO - Serverside - Stop those pesky reconnect whores - Start
-	if (g_fixKillCredit.integer > 1 && (ent->health > 0) && !(ent->r.svFlags & SVF_BOT) && 0 <= ent->client->ps.otherKiller && ent->client->ps.otherKiller < MAX_CLIENTS && ent->client->ps.otherKillerTime > level.time && ent->client->sess.sessionTeam != TEAM_SPECTATOR)
+	if (JK2O_FIXKILLCREDIT > 1 && (ent->health > 0) && !(ent->r.svFlags & SVF_BOT) && 0 <= ent->client->ps.otherKiller && ent->client->ps.otherKiller < MAX_CLIENTS && ent->client->ps.otherKillerTime > level.time && ent->client->sess.sessionTeam != TEAM_SPECTATOR)
 	{
 		attacker = &g_entities[ent->client->ps.otherKiller];
 		if (attacker->client) {

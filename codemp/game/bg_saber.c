@@ -1241,7 +1241,7 @@ void PM_SaberLockBreak( playerState_t *genemy, qboolean victory, int strength )
 
 //JAPRO - Serverside - Remove otherkiller info from everything but g_damage (which will cover everything) if fixkillcredit is on - Start
 #ifdef _GAME
-				if (!g_fixKillCredit.integer) {
+				if (!JK2O_FIXKILLCREDIT) {
 					genemy->otherKiller = pm->ps->clientNum;
 					genemy->otherKillerTime = pm->cmd.serverTime + 5000;
 					genemy->otherKillerDebounceTime = pm->cmd.serverTime + 100;
@@ -1545,7 +1545,7 @@ void PM_SaberLocked( void )
 qboolean PM_SaberInBrokenParry( int move )
 {
 #ifdef _GAME
-	if (g_tweakSaber.integer & ST_NO_REDCHAIN) return qfalse;
+	if (JK2O_TWEAKSABER & ST_NO_REDCHAIN) return qfalse;
 #elif _CGAME
 	if (pm && JK2SWINGS(pm->ps)) return qfalse;
 #endif
@@ -1599,10 +1599,10 @@ qboolean PM_CanBackstab(void)
 	vec3_t trmaxs = {15, 15, 8};
 
 #ifdef _GAME
-	if (g_tweakSaber.integer & ST_EASIERBACKSLASH)
+	if (JK2O_TWEAKSABER & ST_EASIERBACKSLASH)
 		return qtrue;
 
-	if (g_tweakSaber.integer & ST_EASYBACKSLASH) //easybackslash
+	if (JK2O_TWEAKSABER & ST_EASYBACKSLASH) //easybackslash
 	{
 		gclient_t	*cl;
 		int i;
@@ -1728,7 +1728,7 @@ saberMoveName_t PM_SaberFlipOverAttackMove(void)
 	fwdAngles[PITCH] = fwdAngles[ROLL] = 0;
 	AngleVectors( fwdAngles, jumpFwd, NULL, NULL );
 #ifdef _GAME
-	if (g_tweakSaber.integer & ST_FIXYELLOWDFA)
+	if (JK2O_TWEAKSABER & ST_FIXYELLOWDFA)
 #else
 	if ((cgs.cinfo & JAPLUS_CINFO_YELLOWDFA) || (cgs.jcinfo & JAPRO_CINFO_YELLOWDFA))
 #endif
@@ -2730,7 +2730,7 @@ saberMoveName_t PM_SaberAttackForMovement(saberMoveName_t curmove)
 			}
 			else if (
 #ifdef _GAME
-				(!(g_tweakSaber.integer & ST_JK2RDFA) || pm->ps->stats[STAT_RACEMODE])
+				(!(JK2O_TWEAKSABER & ST_JK2RDFA) || pm->ps->stats[STAT_RACEMODE])
 #else
 				((cgs.serverMod == SVMOD_JAPRO && (!(cgs.jcinfo & JAPRO_CINFO_JK2DFA) || pm->ps->stats[STAT_RACEMODE])) || (cgs.serverMod == SVMOD_JAPLUS && PM_JAPlusRedDFAAllowed()) || cgs.serverMod < SVMOD_JAPLUS)
 #endif
@@ -2750,7 +2750,7 @@ saberMoveName_t PM_SaberAttackForMovement(saberMoveName_t curmove)
 						&& newmove != LS_NONE )
 					{
 #ifdef _GAME
-						if (!(g_tweakSaber.integer & ST_REDDFANOFORCE))
+						if (!(JK2O_TWEAKSABER & ST_REDDFANOFORCE))
 #endif
 							BG_ForcePowerDrain(pm->ps, FP_GRIP, SABER_ALT_ATTACK_POWER_FB);
 					}
@@ -2759,7 +2759,7 @@ saberMoveName_t PM_SaberAttackForMovement(saberMoveName_t curmove)
 
 			else if ( //Loda fixme, why isnt this easy to do like jk2?
 #ifdef _GAME
-				((g_tweakSaber.integer & ST_JK2RDFA) && !pm->ps->stats[STAT_RACEMODE])
+				((JK2O_TWEAKSABER & ST_JK2RDFA) && !pm->ps->stats[STAT_RACEMODE])
 #else
 				((cgs.serverMod == SVMOD_JAPRO && !pm->ps->stats[STAT_RACEMODE] && (cgs.jcinfo & JAPRO_CINFO_JK2DFA)) || (cgs.serverMod == SVMOD_JAPLUS && (cgs.cinfo & JAPLUS_CINFO_JK2DFA)))
 #endif
@@ -2796,14 +2796,14 @@ saberMoveName_t PM_SaberAttackForMovement(saberMoveName_t curmove)
 					&& newmove != LS_NONE )
 				{
 #ifdef _GAME
-					if (!(g_tweakForce.integer & FT_NO_CROUCHATTACK_FP))
+					if (!(JK2O_TWEAKFORCE & FT_NO_CROUCHATTACK_FP))
 #endif
 						BG_ForcePowerDrain(pm->ps, FP_GRIP, SABER_ALT_ATTACK_POWER_FB);
 				}
 			}
 			else if ((pm->ps->fd.saberAnimLevel == SS_FAST || pm->ps->fd.saberAnimLevel == SS_DUAL) && !pm->ps->stats[STAT_RACEMODE] &&
 #ifdef _GAME
-				(g_tweakSaber.integer & ST_JK2LUNGE) && //japro idk
+				(JK2O_TWEAKSABER & ST_JK2LUNGE) && //japro idk
 #else
 				(cgs.jcinfo & JAPRO_CINFO_JK2LUNGE) && //japro idk
 #endif
@@ -2817,7 +2817,7 @@ saberMoveName_t PM_SaberAttackForMovement(saberMoveName_t curmove)
 					&& newmove != LS_NONE )
 				{
 #ifdef _GAME
-					if (!(g_tweakForce.integer & FT_NO_CROUCHATTACK_FP))
+					if (!(JK2O_TWEAKFORCE & FT_NO_CROUCHATTACK_FP))
 #endif
 						BG_ForcePowerDrain(pm->ps, FP_GRIP, SABER_ALT_ATTACK_POWER_FB);
 				}
@@ -2857,7 +2857,7 @@ saberMoveName_t PM_SaberAttackForMovement(saberMoveName_t curmove)
 			else if (PM_CanBackstab() && !BG_SaberInSpecialAttack(pm->ps->torsoAnim))
 			{ //BACKSTAB (attack varies by level)
 #if _GAME
-				if ((pm->ps->fd.saberAnimLevel >= FORCE_LEVEL_2 && pm->ps->fd.saberAnimLevel != SS_STAFF) || (g_tweakWeapons.integer & WT_TRIBES))
+				if ((pm->ps->fd.saberAnimLevel >= FORCE_LEVEL_2 && pm->ps->fd.saberAnimLevel != SS_STAFF) || (JK2O_TWEAKWEAPONS & WT_TRIBES))
 #else
 				if ((pm->ps->fd.saberAnimLevel >= FORCE_LEVEL_2 && pm->ps->fd.saberAnimLevel != SS_STAFF) || (cgs.jcinfo2 & JAPRO_CINFO2_WTTRIBES))
 #endif
@@ -3043,7 +3043,7 @@ int PM_KickMoveForConditions(void)
 	else
 	{
 #ifdef _GAME
-		if (g_flipKick.integer) //if we are not pressing any keys and we alt attack in staff it should default to forward kick like in ja+, not just sit there (link this to flipKick? :/)
+		if (JK2O_FLIPKICK) //if we are not pressing any keys and we alt attack in staff it should default to forward kick like in ja+, not just sit there (link this to flipKick? :/)
 #else
 		if (cgs.serverMod == SVMOD_JAPLUS || (cgs.serverMod == SVMOD_JAPRO && cgs.jcinfo & JAPRO_CINFO_FLIPKICK))
 #endif
@@ -4187,7 +4187,7 @@ weapChecks:
 					if (PM_SaberKataDone(curmove, newmove))
 					{//cannot chain this time
 #ifdef _GAME
-						if ((newmove != LS_A_JUMP_T__B_) || !(g_tweakSaber.integer & ST_REDDFAFIX))
+						if ((newmove != LS_A_JUMP_T__B_) || !(JK2O_TWEAKSABER & ST_REDDFAFIX))
 #endif
 							newmove = saberMoveData[curmove].chain_idle;
 					}

@@ -284,7 +284,7 @@ void CreateShield(gentity_t *ent)
 //	static int	shieldID;
 	int shieldheight = MAX_SHIELD_HEIGHT, shieldhalfthickness = SHIELD_HALFTHICKNESS, shieldhalfwidth = MAX_SHIELD_HALFWIDTH, shieldhealth = SHIELD_HEALTH;
 
-	if (g_tweakWeapons.integer & WT_TRIBES) {
+	if (JK2O_TWEAKWEAPONS & WT_TRIBES) {
 		shieldheight = 102;
 		shieldhalfthickness = 4;
 		shieldhalfwidth = 76;
@@ -569,10 +569,10 @@ void pas_fire( gentity_t *ent )
 	myOrg[1] += fwd[1]*16;
 	myOrg[2] += fwd[2]*16;
 
-	if (g_tweakWeapons.integer & WT_TRIBES)
-		WP_FireTurretMissile(&g_entities[ent->genericValue3], myOrg, fwd, qfalse, 10*g_weaponDamageScale.value, 5220 * g_projectileVelocityScale.value, MOD_SENTRY, ent );
+	if (JK2O_TWEAKWEAPONS & WT_TRIBES)
+		WP_FireTurretMissile(&g_entities[ent->genericValue3], myOrg, fwd, qfalse, 10*JK2O_WEAPONDAMAGESCALE, 5220 * JK2O_PROJVELOCITYSCALE, MOD_SENTRY, ent );
 	else
-		WP_FireTurretMissile(&g_entities[ent->genericValue3], myOrg, fwd, qfalse, 10*g_weaponDamageScale.value, 2300 * g_projectileVelocityScale.value, MOD_SENTRY, ent);
+		WP_FireTurretMissile(&g_entities[ent->genericValue3], myOrg, fwd, qfalse, 10*JK2O_WEAPONDAMAGESCALE, 2300 * JK2O_PROJVELOCITYSCALE, MOD_SENTRY, ent);
 
 	G_RunObject(ent);
 }
@@ -602,7 +602,7 @@ static qboolean pas_find_enemies( gentity_t *self )
 		}
 	}
 
-	if (g_tweakWeapons.integer & WT_TRIBES) {
+	if (JK2O_TWEAKWEAPONS & WT_TRIBES) {
 		radius = 3200;
 		bestDist = 3200*3200;
 	}
@@ -761,7 +761,7 @@ void pas_think( gentity_t *ent )
 	qboolean	clTrapped = qfalse;
 	vec3_t		testMins, testMaxs;
 	int lifetime = TURRET_LIFETIME;
-	if (g_tweakWeapons.integer & WT_TRIBES)
+	if (JK2O_TWEAKWEAPONS & WT_TRIBES)
 		lifetime = 600000;
 
 	testMins[0] = ent->r.currentOrigin[0] + ent->r.mins[0]+4;
@@ -1423,7 +1423,7 @@ void ItemUse_UseDisp(gentity_t *ent, int type)
 	if (ent->client->ps.weaponTime > 0 ||
 		ent->client->ps.forceHandExtend != HANDEXTEND_NONE)
 	{ //busy doing something else
-		if (!(g_tweakWeapons.integer & WT_TRIBES))
+		if (!(JK2O_TWEAKWEAPONS & WT_TRIBES))
 			return;
 	}
 
@@ -1508,7 +1508,7 @@ void EWebDie(gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int dam
 {
 	vec3_t fxDir;
 
-	G_RadiusDamage(self->r.currentOrigin, self, EWEB_DEATH_DMG*g_splashDamageScale.value, EWEB_DEATH_RADIUS, self, self, MOD_SUICIDE);
+	G_RadiusDamage(self->r.currentOrigin, self, EWEB_DEATH_DMG*JK2O_SPLASHDAMAGESCALE, EWEB_DEATH_RADIUS, self, self, MOD_SUICIDE);
 
 	VectorSet(fxDir, 1.0f, 0.0f, 0.0f);
 	G_PlayEffect(EFFECT_EXPLOSION_DETPACK, self->r.currentOrigin, fxDir);
@@ -1695,12 +1695,12 @@ void EWebFire(gentity_t *owner, gentity_t *eweb)
 	VectorMA(p, -16.0f, d, bPoint);
 
 	//create the missile
-	if (g_tweakWeapons.integer & WT_TRIBES) {
+	if (JK2O_TWEAKWEAPONS & WT_TRIBES) {
 		vec3_t angs;
 		vectoangles(d, angs);
 
 		// add some slop
-		if (g_tweakWeapons.integer & WT_PSEUDORANDOM_FIRE) {
+		if (JK2O_TWEAKWEAPONS & WT_PSEUDORANDOM_FIRE) {
 			int seed = owner->client->pers.cmd.serverTime % 10000;
 			float theta = M_PI * Q_crandom(&seed); //Lets use circular spread instead of the shitty box spread?
 			float r = Q_random(&seed) * 2.75f;
@@ -1713,12 +1713,12 @@ void EWebFire(gentity_t *owner, gentity_t *eweb)
 			angs[YAW] += Q_flrand(-1.0f, 1.0f) * 2.75f;
 		}
 		AngleVectors(angs, d, NULL, NULL);
-		missile = CreateMissileNew(bPoint, d, 20880*g_projectileVelocityScale.value, 10000, owner, qfalse, qfalse, qfalse);
+		missile = CreateMissileNew(bPoint, d, 20880*JK2O_PROJVELOCITYSCALE, 10000, owner, qfalse, qfalse, qfalse);
 
 		missile->classname = "flech_proj";
 		missile->s.weapon = WP_FLECHETTE;
 
-		missile->damage = 20 * g_weaponDamageScale.value;
+		missile->damage = 20 * JK2O_WEAPONDAMAGESCALE;
 		missile->dflags = DAMAGE_DEATH_KNOCKBACK;
 		missile->methodOfDeath = MOD_TURBLAST;
 		missile->clipmask = MASK_SHOT | CONTENTS_LIGHTSABER;
@@ -1827,7 +1827,7 @@ void EWebUpdateBoneAngles(gentity_t *owner, gentity_t *eweb)
 	float ideal;
 	float incr;
 	float turnCap = 4.0f; //max degrees we can turn per update
-	if (g_tweakWeapons.integer & WT_TRIBES)
+	if (JK2O_TWEAKWEAPONS & WT_TRIBES)
 		turnCap = 24;
 	
 	VectorClear(yAng);
@@ -2260,7 +2260,7 @@ int Pickup_Ammo (gentity_t *ent, gentity_t *other)
 				Add_Ammo(other, AMMO_TRIPMINE, 2);
 			}
 		}
-		else if (g_tweakWeapons.integer & WT_TRIBES)
+		else if (JK2O_TWEAKWEAPONS & WT_TRIBES)
 		{
 			if (other && other->client) { //need to do this in a better way. also need to give ammo for any startingweapons ?
 				other->client->ps.ammo[AMMO_BLASTER] = 600;
@@ -2457,7 +2457,7 @@ void RespawnItem( gentity_t *ent ) {
 			;
 	}
 
-	if (g_tweakForce.integer & FT_PUSHPULLITEMS)
+	if (JK2O_TWEAKFORCE & FT_PUSHPULLITEMS)
 	{
 		VectorCopy(ent->origOrigin, ent->s.origin);
 		VectorCopy(ent->origOrigin, ent->s.pos.trBase);
@@ -2597,7 +2597,7 @@ void Touch_Item(gentity_t *ent, gentity_t *other, trace_t *trace) {
 		if (other->client->pers.tribesClass || (g_tribesMode.integer == 2))
 			return;
 	}
-	if (ent->item->giType == IT_TEAM && other->client->ps.m_iVehicleNum && g_tweakWeapons.integer & WT_TRIBES)
+	if (ent->item->giType == IT_TEAM && other->client->ps.m_iVehicleNum && JK2O_TWEAKWEAPONS & WT_TRIBES)
 		return;//cant pick up flags in vehicles
 
 
@@ -2870,7 +2870,7 @@ gentity_t *LaunchItem( gitem_t *item, vec3_t origin, vec3_t velocity ) {
 	dropped->flags |= FL_BOUNCE_HALF;
 	if (((level.gametype == GT_CTF || level.gametype == GT_CTY) || ((level.gametype == GT_FFA || level.gametype == GT_TEAM) && g_neutralFlag.integer < 4)) && item->giType == IT_TEAM) { // Special case for CTF flags
 		dropped->think = Team_DroppedFlagThink;
-		if (g_tweakWeapons.integer & WT_TRIBES)
+		if (JK2O_TWEAKWEAPONS & WT_TRIBES)
 			dropped->nextthink = level.time + 45000; //MV_TRIBES todo
 		else
 			dropped->nextthink = level.time + 30000;
@@ -2900,7 +2900,7 @@ gentity_t *LaunchItem( gitem_t *item, vec3_t origin, vec3_t velocity ) {
 //JAPRO - Serverside - Flagthrow - Physics bounce - Start
 	if (g_allowFlagThrow.integer && item->giType == IT_TEAM)
 	{
-		if (g_tweakWeapons.integer & WT_TRIBES)
+		if (JK2O_TWEAKWEAPONS & WT_TRIBES)
 			dropped->physicsBounce = 0.5f;
 		else
 			dropped->physicsBounce = 0.6f;
@@ -2982,7 +2982,7 @@ gentity_t *Drop_Flag( gentity_t *ent, gitem_t *item, qboolean forced ) {
 
 	AngleVectors( angles, velocity, NULL, NULL );
 
-	if (g_tweakWeapons.integer & WT_TRIBES)
+	if (JK2O_TWEAKWEAPONS & WT_TRIBES)
 		VectorScale(velocity, 700, velocity);
 	else
 		VectorScale( velocity, 625, velocity );
@@ -3331,7 +3331,7 @@ void ClearRegisteredItems( void ) {
 	RegisterItem( BG_FindItemForWeapon( WP_MELEE ) );
 	RegisterItem( BG_FindItemForWeapon( WP_SABER ) );
 
-	if (level.gametype == GT_SIEGE || (g_tweakWeapons.integer & WT_TRIBES))
+	if (level.gametype == GT_SIEGE || (JK2O_TWEAKWEAPONS & WT_TRIBES))
 	{ //kind of cheesy, maybe check if siege class with disp's is gonna be on this map too
 		G_PrecacheDispensers();
 	}

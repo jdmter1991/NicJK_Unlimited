@@ -523,8 +523,8 @@ void PM_VehicleImpact(bgEntity_t *pEnt, trace_t *trace)
 				{ //probably a humanoid, or something
 					if (pSelfVeh->m_pVehicleInfo->type == VH_FIGHTER)
 					{ //player die good.. if me fighter
-						if (g_tweakWeapons.integer & WT_TRIBES)
-							pmult = 7.0f * g_weaponDamageScale.value;
+						if (JK2O_TWEAKWEAPONS & WT_TRIBES)
+							pmult = 7.0f * JK2O_WEAPONDAMAGESCALE;
 						else
 							pmult = 2000.0f;
 					}
@@ -545,7 +545,7 @@ void PM_VehicleImpact(bgEntity_t *pEnt, trace_t *trace)
 						}
 
 //JAPRO - Serverside - Remove otherkiller info from everything but g_damage (which will cover everything) if fixkillcredit is on - Start
-						if (!g_fixKillCredit.integer) {
+						if (!JK2O_FIXKILLCREDIT) {
 							hitEnt->client->ps.otherKiller = pEnt->s.number;
 							hitEnt->client->ps.otherKillerTime = pm->cmd.serverTime + 5000;
 							hitEnt->client->ps.otherKillerDebounceTime = pm->cmd.serverTime + 100;
@@ -854,7 +854,7 @@ qboolean	PM_SlideMove( qboolean gravity ) {
 
 #if _GAME
 			//Always in coop? what if somehow there is no playerstate? crash?
-			if (trace.entityNum < MAX_CLIENTS && (pm->ps->stats[STAT_RACEMODE] || g_fixPlayerCollision.integer) && g_entities[trace.entityNum].client && (g_entities[trace.entityNum].client->ps.velocity[0] || g_entities[trace.entityNum].client->ps.velocity[1])) {
+			if (trace.entityNum < MAX_CLIENTS && (pm->ps->stats[STAT_RACEMODE] || JK2O_FIXPLAYERCOLLISION) && g_entities[trace.entityNum].client && (g_entities[trace.entityNum].client->ps.velocity[0] || g_entities[trace.entityNum].client->ps.velocity[1])) {
 				if (clipVelocity[0] != pm->ps->velocity[0])
 					clipVelocity[0] = g_entities[trace.entityNum].client->ps.velocity[0] * 0.95f;
 				if (clipVelocity[1] != pm->ps->velocity[1])

@@ -3922,13 +3922,13 @@ static float saberHitFraction = 1.0f;
 //This is a large function. I feel sort of bad inlining it. But it does get called tons of times per frame.
 qboolean BG_SuperBreakWinAnim( int anim );
 
-#define JK2_DMGSYSTEM(ent) ((qboolean)(g_tweakSaber.integer & ST_JK2_DMGSYSTEM) || (ent->client && ent->client->sess.raceMode))
+#define JK2_DMGSYSTEM(ent) ((qboolean)(JK2O_TWEAKSABER & ST_JK2_DMGSYSTEM) || (ent->client && ent->client->sess.raceMode))
 static QINLINE int SaberSPStyle(gentity_t *self)
 {
 	if (JK2_DMGSYSTEM(self)) {
 		return 0;
 	}
-	if (g_tweakSaber.integer & ST_JAPLUS_DMG) {
+	if (JK2O_TWEAKSABER & ST_JAPLUS_DMG) {
 		return 0; //JA+ MP has one damage style for everyone (private duels included)
 	}
 
@@ -4041,7 +4041,7 @@ static QINLINE int SaberKickTweak(gentity_t *self)
 {
 	if (self->client && self->client->ps.duelInProgress) { //not sure how to go about this.. i guess only force saberkicktweak in saberonly SP duels?
 		if (dueltypes[self->client->ps.clientNum] == 0) {//nf duel
-			if (g_saberDuelSPDamage.integer && !(g_tweakSaber.integer & ST_JAPLUS_DMG))//sp dmgs
+			if (g_saberDuelSPDamage.integer && !(JK2O_TWEAKSABER & ST_JAPLUS_DMG))//sp dmgs
 				return 1;
 			else
 				return d_saberKickTweak.integer;
@@ -4076,7 +4076,7 @@ static QINLINE qboolean CheckSaberDamage(gentity_t *self, int rSaberNum, int rBl
 	qboolean tryDeflectAgain = qfalse;
 
 	const qboolean jk2Damage = JK2_DMGSYSTEM(self);
-	const qboolean japlusDamage = (qboolean)(!jk2Damage && (g_tweakSaber.integer & ST_JAPLUS_DMG));
+	const qboolean japlusDamage = (qboolean)(!jk2Damage && (JK2O_TWEAKSABER & ST_JAPLUS_DMG));
 
 	gentity_t *otherOwner;
 
@@ -4367,7 +4367,7 @@ static QINLINE qboolean CheckSaberDamage(gentity_t *self, int rSaberNum, int rBl
 			{//in faster-paced games, sabers do more damage
 				fDmg *= 2.0f;
 			}
-			if (fDmg && g_tweakSaber.integer & ST_DUNESABER) {
+			if (fDmg && JK2O_TWEAKSABER & ST_DUNESABER) {
 				//make fast moving sabers barely do damage if at all, force ppl to counter aim
 				//Todo, exclude katas and multi swing moves
 				float len3, traceLength = Distance(saberEnd, saberStart);
@@ -4383,7 +4383,7 @@ static QINLINE qboolean CheckSaberDamage(gentity_t *self, int rSaberNum, int rBl
 				dmg = G_GetAttackDamage(self, fDmg * 10 / (len3), fDmg * 40 / (len3), 0.5f);
 				//Com_Printf("NewDmg is %i\n", dmg);
 			}
-			else if (fDmg && g_tweakSaber.integer & ST_NEWSPSABERDMG) {
+			else if (fDmg && JK2O_TWEAKSABER & ST_NEWSPSABERDMG) {
 				//take saber vel out of dmg eq
 				//We want to get the most powerful part of swing which I guess is the middle? The alternative is to normalize trancelength for the players own mouse movement (so it just is speed of saber tip when not moving mouse)
 				//Todo, exclude katas and multi swing moves
@@ -4409,7 +4409,7 @@ static QINLINE qboolean CheckSaberDamage(gentity_t *self, int rSaberNum, int rBl
 				}
 				//com_Printf("NewDmg is %i\n", dmg);
 			}
-			else if (fDmg && g_tweakSaber.integer & ST_NEWSPSABERDMGCAP) {
+			else if (fDmg && JK2O_TWEAKSABER & ST_NEWSPSABERDMGCAP) {
 				float traceLength = Distance(saberEnd, saberStart);
 
 				if (traceLength > 30)
@@ -5397,7 +5397,7 @@ blockStuff:
 			}
 		}
 
-		if (!(g_tweakSaber.integer & ST_NO_REDCHAIN) && ((selfSaberLevel < FORCE_LEVEL_3 && ((tryDeflectAgain && Q_irand(1, 10) <= 3) || (!tryDeflectAgain && Q_irand(1, 10) <= 7))) || (Q_irand(1, 10) <= 1 && otherSaberLevel >= FORCE_LEVEL_3))
+		if (!(JK2O_TWEAKSABER & ST_NO_REDCHAIN) && ((selfSaberLevel < FORCE_LEVEL_3 && ((tryDeflectAgain && Q_irand(1, 10) <= 3) || (!tryDeflectAgain && Q_irand(1, 10) <= 7))) || (Q_irand(1, 10) <= 1 && otherSaberLevel >= FORCE_LEVEL_3))
 			&& !PM_SaberInBounce(self->client->ps.saberMove)
 
 			&& !PM_SaberInBrokenParry(otherOwner->client->ps.saberMove)
@@ -5444,7 +5444,7 @@ blockStuff:
 
 			didDefense = qtrue;
 		}
-		else if (!(g_tweakSaber.integer & ST_NO_REDCHAIN) && (selfSaberLevel > FORCE_LEVEL_2 || unblockable) && //if we're doing a special attack, we can send them into a broken parry too (MP only)
+		else if (!(JK2O_TWEAKSABER & ST_NO_REDCHAIN) && (selfSaberLevel > FORCE_LEVEL_2 || unblockable) && //if we're doing a special attack, we can send them into a broken parry too (MP only)
 				 ( otherOwner->client->ps.fd.forcePowerLevel[FP_SABER_DEFENSE] < selfSaberLevel || (otherOwner->client->ps.fd.forcePowerLevel[FP_SABER_DEFENSE] == selfSaberLevel && (Q_irand(1, 10) >= otherSaberLevel*1.5 || unblockable)) ) &&
 				 PM_SaberInParry(otherOwner->client->ps.saberMove) &&
 				 !PM_SaberInBrokenParry(otherOwner->client->ps.saberMove) &&
@@ -5543,7 +5543,7 @@ blockStuff:
 				}
 				attackAdv = (attackStr+attackBonus+self->client->ps.fd.forcePowerLevel[FP_SABER_OFFENSE])-(defendStr+otherOwner->client->ps.fd.forcePowerLevel[FP_SABER_OFFENSE]);
 
-				if (!(g_tweakSaber.integer & ST_NO_REDCHAIN)) {
+				if (!(JK2O_TWEAKSABER & ST_NO_REDCHAIN)) {
 					if (attackAdv > 1)
 					{//I won, he should knockaway
 						otherOwner->client->ps.saberMove = BG_BrokenParryForAttack(otherOwner->client->ps.saberMove);
@@ -5598,7 +5598,7 @@ blockStuff:
 			{
 				qboolean crushTheParry = qfalse;
 
-				if (unblockable && !(g_tweakSaber.integer & ST_NO_REDCHAIN))
+				if (unblockable && !(JK2O_TWEAKSABER & ST_NO_REDCHAIN))
 				{ //It's unblockable. So send us into a broken parry immediately.
 					crushTheParry = qtrue;
 				}
@@ -5616,7 +5616,7 @@ blockStuff:
 					otherOwner->client->ps.saberEventFlags |= SEF_PARRIED;
 					self->client->ps.saberEventFlags |= SEF_BLOCKED;
 
-					if (attackStr + self->client->ps.fd.forcePowerLevel[FP_SABER_OFFENSE] > otherIdleStr + otherOwner->client->ps.fd.forcePowerLevel[FP_SABER_DEFENSE] && !(g_tweakSaber.integer & ST_NO_REDCHAIN))
+					if (attackStr + self->client->ps.fd.forcePowerLevel[FP_SABER_OFFENSE] > otherIdleStr + otherOwner->client->ps.fd.forcePowerLevel[FP_SABER_DEFENSE] && !(JK2O_TWEAKSABER & ST_NO_REDCHAIN))
 					{
 						crushTheParry = qtrue;
 					}
@@ -5631,7 +5631,7 @@ blockStuff:
 					//Give them a parry, so we can later break it.
 					WP_SaberBlockNonRandom(otherOwner, tr.endpos, qfalse);
 
-					if (!(g_tweakSaber.integer & ST_NO_REDCHAIN))
+					if (!(JK2O_TWEAKSABER & ST_NO_REDCHAIN))
 						crushTheParry = qtrue;
 
 					if (otherOwner->client->ps.saberEntityNum) //make sure he has his saber still
@@ -5679,7 +5679,7 @@ blockStuff:
 							Com_Printf("Equal attack level bounce/deflection for clients %i and %i\n", self->s.number, otherOwner->s.number);
 						}
 #endif
-						if (!(g_tweakSaber.integer & ST_NO_REDCHAIN)) {
+						if (!(JK2O_TWEAKSABER & ST_NO_REDCHAIN)) {
 							self->client->ps.saberEventFlags |= SEF_DEFLECTED;
 							otherOwner->client->ps.saberEventFlags |= SEF_DEFLECTED;
 						}
@@ -5702,7 +5702,7 @@ blockStuff:
 						}
 #endif
 
-						if (!(g_tweakSaber.integer & ST_NO_REDCHAIN)) {
+						if (!(JK2O_TWEAKSABER & ST_NO_REDCHAIN)) {
 							otherOwner->client->ps.saberEventFlags &= ~SEF_BLOCKED;
 						}
 
@@ -5750,7 +5750,7 @@ void G_SPSaberDamageTraceLerped( gentity_t *self, int saberNum, int bladeNum, ve
 	vec3_t mp1, mp2;
 	vec3_t md1, md2;
 
-	if ( ((level.time-self->client->saber[saberNum].blade[bladeNum].trail.lastTime) > 100 ) && !(g_tweakSaber.integer & ST_SABERGUN))
+	if ( ((level.time-self->client->saber[saberNum].blade[bladeNum].trail.lastTime) > 100 ) && !(JK2O_TWEAKSABER & ST_SABERGUN))
 	{//no valid last pos, use current
 		VectorCopy(baseNew, baseOld);
 		VectorCopy(endNew, endOld);
@@ -7324,10 +7324,10 @@ qboolean saberCheckKnockdown_BrokenParry(gentity_t *saberent, gentity_t *saberOw
 		return qfalse;
 	}
 
-	if (!SaberSPStyle(saberOwner) && (g_tweakSaber.integer & ST_REDUCE_SABERBLOCK))
+	if (!SaberSPStyle(saberOwner) && (JK2O_TWEAKSABER & ST_REDUCE_SABERBLOCK))
 		return qfalse; //Dont do this shit in MP dmgs i guess...
 
-	if (g_tweakSaber.integer & ST_NO_REDCHAIN)
+	if (JK2O_TWEAKSABER & ST_NO_REDCHAIN)
 		return qfalse;
 
 	//Neither gets an advantage based on attack state, when it comes to knocking
@@ -7455,7 +7455,7 @@ qboolean saberCheckKnockdown_Thrown(gentity_t *saberent, gentity_t *saberOwner, 
 		return qfalse;
 	}
 
-	if (!SaberSPStyle(saberOwner) && (g_tweakSaber.integer & ST_REDUCE_SABERDROP)) //test..
+	if (!SaberSPStyle(saberOwner) && (JK2O_TWEAKSABER & ST_REDUCE_SABERDROP)) //test..
 		return qfalse; //Dont do saberdrops for idle STs either i guess..
 
 	defenLevel = other->client->ps.fd.forcePowerLevel[FP_SABER_DEFENSE];
@@ -8569,13 +8569,13 @@ static void G_GrabSomeMofos(gentity_t *self)
 		level.time, NULL, self->modelScale);
 	BG_GiveMeVectorFromMatrix(&boltMatrix, ORIGIN, pos);
 
-	if (g_tweakForce.integer & FT_BUFFMELEE)
+	if (JK2O_TWEAKFORCE & FT_BUFFMELEE)
 		range = 14;
 
 	VectorSet(grabMins, -range, -range, -range);
 	VectorSet(grabMaxs, range, range, range);
 
-	if (g_tweakForce.integer & FT_BUFFMELEE)
+	if (JK2O_TWEAKFORCE & FT_BUFFMELEE)
 	{
 		int	entityList[MAX_GENTITIES];
 		int numListedEntities;
@@ -8640,7 +8640,7 @@ static void G_GrabSomeMofos(gentity_t *self)
 	//but if its contents_body and high range then you can grab people through walls ..
 	//JP_Trace( &trace, self->client->ps.origin, grabMins, grabMaxs, pos, self->s.number, MASK_SHOT, qfalse, G2TRFLAG_DOGHOULTRACE|G2TRFLAG_GETSURFINDEX|G2TRFLAG_THICK|G2TRFLAG_HITCORPSES, g_g2TraceLod.integer );
 
-	if ((!(g_tweakForce.integer & FT_BUFFMELEE) && (trace.fraction != 1.0f && trace.entityNum < ENTITYNUM_WORLD)) || ((g_tweakForce.integer & FT_BUFFMELEE) && hit))
+	if ((!(JK2O_TWEAKFORCE & FT_BUFFMELEE) && (trace.fraction != 1.0f && trace.entityNum < ENTITYNUM_WORLD)) || ((JK2O_TWEAKFORCE & FT_BUFFMELEE) && hit))
 	{
 		gentity_t *grabbed = &g_entities[trace.entityNum];
 
@@ -8654,7 +8654,7 @@ static void G_GrabSomeMofos(gentity_t *self)
 			int tortureAnim = -1;
 			int correspondingAnim = -1;
 
-			if ((self->client->pers.cmd.forwardmove > 0) || (g_tweakForce.integer & FT_BUFFMELEE)) //This is the only non broken/OP one so... 
+			if ((self->client->pers.cmd.forwardmove > 0) || (JK2O_TWEAKFORCE & FT_BUFFMELEE)) //This is the only non broken/OP one so... 
 			{ //punch grab
 				tortureAnim = BOTH_KYLE_PA_1;
 				correspondingAnim = BOTH_PLAYER_PA_1;
@@ -9744,7 +9744,7 @@ nextStep:
 					}
 				}
 //[JAPRO - Serverside - Saber - Remove MP Ghosting by adding always Lerp - Start]
-				else if (SaberSPStyle(self) || !(g_tweakSaber.integer & ST_NO_MP_SABERLERP)) { //oops
+				else if (SaberSPStyle(self) || !(JK2O_TWEAKSABER & ST_NO_MP_SABERLERP)) { //oops
 					G_SPSaberDamageTraceLerped( self, rSaberNum, rBladeNum, boltOrigin, end, (MASK_PLAYERSOLID|CONTENTS_LIGHTSABER|MASK_SHOT) );
 				}
 				else {
@@ -10010,7 +10010,7 @@ static int G_SaberPierceLevelForStance( int stance ) {
 static QINLINE qboolean WP_SaberCanBlockSwing(int ourStr, int attackStr) //If this returns false, we dont block the saber during our swing? (default true)
 {
 	//JAPRO reduce saber block
-	if (g_tweakSaber.integer & ST_REDUCE_SABERBLOCK) {
+	if (JK2O_TWEAKSABER & ST_REDUCE_SABERBLOCK) {
 		const int ourLevel = G_SaberPierceLevelForStance( ourStr );
 		const int theirLevel = G_SaberPierceLevelForStance( attackStr );
 		const int diff = theirLevel - ourLevel; // range [0, 2]
@@ -10351,7 +10351,7 @@ int WP_SaberCanBlock(gentity_t* self, vec3_t point, int dflags, int mod, qboolea
 	if (self->client->ps.forceHandExtend != HANDEXTEND_NONE)
 		return 0;
 
-	if (g_tweakWeapons.integer & WT_TRIBES) {
+	if (JK2O_TWEAKWEAPONS & WT_TRIBES) {
 		blockFactor = 0.99f;
 	}
 	else if (self->client->ps.fd.forcePowerLevel[FP_SABER_DEFENSE] == FORCE_LEVEL_3) {
@@ -10422,7 +10422,7 @@ qboolean WP_SaberBlockLightning(gentity_t* self, gentity_t* attacker, int* damag
 	if (!self || !self->client || !attacker || !damage)
 		return qfalse;
 
-	if (!g_lightningBlockEnabled.integer)
+	if (!JK2O_LIGHTNINGBLOCK)
 		return qfalse;
 
 	// Must have saber active

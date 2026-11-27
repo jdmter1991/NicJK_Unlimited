@@ -302,7 +302,7 @@ void G_TimeShiftClient( gentity_t *ent, int time, qboolean timeshiftAnims ) {
 		}
 
 #if 1
-		if (g_unlagged.integer & (1<<3)) {
+		if (JK2O_UNLAGGED & (1<<3)) {
 			G_DrawPlayerStick(ent, 0x0000ff, 5000, level.time);
 			//Com_Printf("pre angle is %.2f\n", ent->s.apos.trBase[YAW]);
 		}
@@ -374,7 +374,7 @@ void G_TimeShiftClient( gentity_t *ent, int time, qboolean timeshiftAnims ) {
 		}
 
 #if 1
-		if (g_unlagged.integer & (1<<3)) {
+		if (JK2O_UNLAGGED & (1<<3)) {
 			G_DrawPlayerStick(ent, 0x00ff00, 5000, level.time);
 			//Com_Printf("post angle is %.2f\n", ent->s.apos.trBase[YAW]);
 		}
@@ -481,7 +481,7 @@ void G_UnTimeShiftAllClients( gentity_t *skip, qboolean timeshiftAnims ) {
 
 void G_UpdateTrailData( void ) {
 	frametime = level.time - level.previousTime;
-	historytime = g_unlagged.integer;
+	historytime = JK2O_UNLAGGED;
 	numTrails = NUM_CLIENT_TRAILS;
 }
 
@@ -1952,7 +1952,7 @@ void ClientEvents( gentity_t *ent, int oldEventSequence ) {
 
 //[JAPRO - Serverside - Fall damage Splat cap - Start]
 				if (knockDownage) {
-					if (g_maxFallDmg.integer && delta >= g_maxFallDmg.integer)
+					if (JK2O_MAXFALLDMG && delta >= JK2O_MAXFALLDMG)
 						damage = g_maxFallDmg.value; //knockdown splat damage gets capped
 					else damage = delta*1; 
 				}
@@ -1960,8 +1960,8 @@ void ClientEvents( gentity_t *ent, int oldEventSequence ) {
 					if (level.gametype == GT_SIEGE && delta > 60)
 						damage = delta*1; //good enough for now, I guess
 					else {
-						if (g_maxFallDmg.integer && delta * 0.16 >= g_maxFallDmg.integer)
-							damage = g_maxFallDmg.integer;
+						if (JK2O_MAXFALLDMG && delta * 0.16 >= JK2O_MAXFALLDMG)
+							damage = JK2O_MAXFALLDMG;
 						else damage = delta*0.16; //good enough for now, I guess
 					}
 				}
@@ -3421,7 +3421,7 @@ qboolean CanFireGrapple( gentity_t *ent ) { // Adapt for new hold-to-use jetpack
 		return qfalse;	
 	if (ent->client->sess.movementStyle == MV_TRIBES && ent->client->ps.fd.forcePower < 25)
 		return qfalse;
-	if (ent->client->sess.movementStyle == MV_TRIBES && (g_tweakWeapons.integer & WT_TRIBES) && (ent->client->ps.fd.forcePowersActive & (1 << FP_ABSORB)))
+	if (ent->client->sess.movementStyle == MV_TRIBES && (JK2O_TWEAKWEAPONS & WT_TRIBES) && (ent->client->ps.fd.forcePowersActive & (1 << FP_ABSORB)))
 		return qfalse;
 	return qtrue;
 }
@@ -3438,7 +3438,7 @@ static void G_GunDuelEndWeapon(gentity_t *ent)
 		return;
 
 	// pick like ClientSpawn: the saber if they have it, otherwise their highest weapon
-	if ((ent->client->ps.stats[STAT_WEAPONS] & (1 << WP_SABER)) && !(g_tweakWeapons.integer & WT_TRIBES)) {
+	if ((ent->client->ps.stats[STAT_WEAPONS] & (1 << WP_SABER)) && !(JK2O_TWEAKWEAPONS & WT_TRIBES)) {
 		weap = WP_SABER;
 	}
 	else {
@@ -3521,10 +3521,10 @@ void ClientThink_real( gentity_t *ent ) {
 		{ // JK2 1.02 saber system: one single-bladed saber, blue/yellow/red only
 			G_JK2SaberCheckSingle(ent);
 		}
-		if ((g_saberDisable.integer || (!client->sess.raceMode && g_tweakWeapons.integer & WT_TRIBES) || (client->sess.raceMode && client->sess.movementStyle == MV_COOP_JKA))
+		if ((g_saberDisable.integer || (!client->sess.raceMode && JK2O_TWEAKWEAPONS & WT_TRIBES) || (client->sess.raceMode && client->sess.movementStyle == MV_COOP_JKA))
 			&& ent->s.weapon == WP_SABER && ent->s.eType == ET_PLAYER && client->sess.sessionTeam != TEAM_SPECTATOR) {
 			//trap->Print("AnimLevel: %i, DrawLevel: %i, Baselevel: %i\n", ent->client->ps.fd.saberAnimLevel, ent->client->ps.fd.saberDrawAnimLevel, ent->client->ps.fd.saberAnimLevelBase);
-			if (!client->sess.raceMode && (g_tweakWeapons.integer & WT_TRIBES)) {
+			if (!client->sess.raceMode && (JK2O_TWEAKWEAPONS & WT_TRIBES)) {
 				if (client->pers.tribesClass == 3) {
 					if (client->ps.fd.saberAnimLevel == SS_DUAL || client->ps.fd.saberAnimLevel == SS_STAFF) {
 						forceSingle = qtrue;
@@ -3884,7 +3884,7 @@ void ClientThink_real( gentity_t *ent ) {
 				ent->flags &= ~FL_GODMODE;
 			ent->takedamage = qtrue;
 		}	
-		else if (g_godChat.integer && level.gametype == GT_FFA && (ent->client->ps.eFlags & EF_TALK) && (ent->client->pers.lastChatTime + 3000) < level.time) { //Only god chat them 3 seconds after their chatbox goes up to prevent some abuse :/
+		else if (JK2O_GODCHAT && level.gametype == GT_FFA && (ent->client->ps.eFlags & EF_TALK) && (ent->client->pers.lastChatTime + 3000) < level.time) { //Only god chat them 3 seconds after their chatbox goes up to prevent some abuse :/
 			if (!ent->client->ps.duelInProgress) {
 				if (!sv_cheats.integer)
 					ent->flags |= FL_GODMODE;
@@ -4341,7 +4341,7 @@ void ClientThink_real( gentity_t *ent ) {
 			if (client->pers.tribesClass == 3) {
 				client->ps.speed *= 0.78125f;
 			}
-			if (g_tweakWeapons.integer & WT_TRIBES && (ent->client->ps.fd.forcePowersActive&(1 << FP_ABSORB))) {
+			if (JK2O_TWEAKWEAPONS & WT_TRIBES && (ent->client->ps.fd.forcePowersActive&(1 << FP_ABSORB))) {
 				client->ps.speed *= 1.5f;
 			}
 		} //Tribesclass = 0 else?
@@ -4397,7 +4397,7 @@ void ClientThink_real( gentity_t *ent ) {
 						}
 						else client->ps.gravity = 750; //Match 125fps gravity here since we are using decimal precision for Zvel now
 					}
-					else if (g_tweakWeapons.integer & WT_TRIBES) {
+					else if (JK2O_TWEAKWEAPONS & WT_TRIBES) {
 						if (client->ps.stats[STAT_DEAD_YAW]) {
 							client->ps.gravity *= 0.25f;
 						}
@@ -4730,7 +4730,7 @@ void ClientThink_real( gentity_t *ent ) {
 					//Set the thrower as the "other killer", so if we die from fall/impact damage he is credited.
 					ent->client->ps.otherKiller = thrower->s.number;
 //JAPRO - Serverside - Change otherkiller time if fixkillcredit is on - Start
-					if (!g_fixKillCredit.integer)
+					if (!JK2O_FIXKILLCREDIT)
 						ent->client->ps.otherKillerTime = level.time + 8000;
 					else
 						ent->client->ps.otherKillerTime = level.time + 2000;
@@ -4865,7 +4865,7 @@ void ClientThink_real( gentity_t *ent ) {
 	}
 
 //JAPRO - Fixkillcredit stuff , im not sure actually - Start
-	if (!g_fixKillCredit.integer)
+	if (!JK2O_FIXKILLCREDIT)
 	{
 		if (ent->client->ps.otherKillerTime > level.time &&
 			ent->client->ps.groundEntityNum != ENTITYNUM_NONE &&
@@ -4981,7 +4981,7 @@ void ClientThink_real( gentity_t *ent ) {
 	//rww end bgghoul2
 
 	pmove.gametype = level.gametype;
-	pmove.debugMelee = g_debugMelee.integer;
+	pmove.debugMelee = JK2O_DEBUGMELEE;
 	pmove.stepSlideFix = g_stepSlideFix.integer;
 
 	pmove.noSpecMove = g_noSpecMove.integer;
@@ -5331,7 +5331,7 @@ void ClientThink_real( gentity_t *ent ) {
 			ForceRage(ent);
 			break;
 		case GENCMD_FORCE_PROTECT:
-			if (g_tweakWeapons.integer & WT_TRIBES) //only allow this to be done via redirect from +button_lightning in tribes
+			if (JK2O_TWEAKWEAPONS & WT_TRIBES) //only allow this to be done via redirect from +button_lightning in tribes
 				break;
 			if (ent->client->genCmdDebounce[GENCMD_DELAY_PROTECT] > level.time - 300)
 				break;
@@ -5339,7 +5339,7 @@ void ClientThink_real( gentity_t *ent ) {
 			ForceProtect(ent);
 			break;
 		case GENCMD_FORCE_ABSORB:
-			if (g_tweakWeapons.integer & WT_TRIBES) //only allow this to be done via redirect from +button_lightning in tribes
+			if (JK2O_TWEAKWEAPONS & WT_TRIBES) //only allow this to be done via redirect from +button_lightning in tribes
 				break;
 			if (ent->client->genCmdDebounce[GENCMD_DELAY_ABSORB] > level.time - 300)
 				break;
@@ -5509,7 +5509,7 @@ void ClientThink_real( gentity_t *ent ) {
 		case GENCMD_SABERATTACKCYCLE:
 			{
 				int delay = 300;
-				if (g_tweakSaber.integer & ST_FASTCYCLE) {
+				if (JK2O_TWEAKSABER & ST_FASTCYCLE) {
 					if (!(ent->client->saber[0].singleBladeStyle || (ent->client->saber[1].model[0])))//Single
 						delay = 100;
 				}
@@ -5648,7 +5648,7 @@ void ClientThink_real( gentity_t *ent ) {
 		if (faceKicked && faceKicked->client && (!OnSameTeam(ent, faceKicked) || g_friendlyFire.value) &&
 			(!faceKicked->client->ps.duelInProgress || faceKicked->client->ps.duelIndex == ent->s.number) &&
 			(!ent->client->ps.duelInProgress || ent->client->ps.duelIndex == faceKicked->s.number)
-			&& ((!ent->client->didGlitchKick || ent->client->ps.forceHandExtend != HANDEXTEND_CHOKE) || g_glitchKickDamage.integer < 0))
+			&& ((!ent->client->didGlitchKick || ent->client->ps.forceHandExtend != HANDEXTEND_CHOKE) || JK2O_GLITCHKICKDAMAGE < 0))
 		{
 			if (faceKicked && faceKicked->client && faceKicked->health && faceKicked->takedamage && !faceKicked->client->sess.raceMode && !faceKicked->client->noclip)
 			{//push them away and do pain
@@ -5663,27 +5663,27 @@ void ClientThink_real( gentity_t *ent ) {
 				if (faceKicked->client->sess.movementStyle != MV_WSW) //gross hack to use dashtime as lastKickedByTime for jka (flipkick) physics
 					faceKicked->client->ps.stats[STAT_DASHTIME] = 200;
 
-				if (ent->client->ps.forceHandExtend == HANDEXTEND_CHOKE && g_glitchKickDamage.integer >= 0) {
+				if (ent->client->ps.forceHandExtend == HANDEXTEND_CHOKE && JK2O_GLITCHKICKDAMAGE >= 0) {
 					ent->client->didGlitchKick = qtrue;
-					glitchKickBonus = g_glitchKickDamage.integer;
+					glitchKickBonus = JK2O_GLITCHKICKDAMAGE;
 				}
 				
 //JAPRO - Serverside - New flipkick damage options - Start
-				if (g_flipKick.integer < 2 && g_flipKickDamageScale.value)
-					G_Damage( faceKicked, ent, ent, oppDir, client->ps.origin, ((strength + glitchKickBonus) * g_flipKickDamageScale.value), DAMAGE_NO_ARMOR, MOD_MELEE );//default flipkick dmg
-				else if (g_flipKick.integer == 2 && g_flipKickDamageScale.value)
+				if (JK2O_FLIPKICK < 2 && JK2O_FLIPKICKDAMAGESCALE)
+					G_Damage( faceKicked, ent, ent, oppDir, client->ps.origin, ((strength + glitchKickBonus) * JK2O_FLIPKICKDAMAGESCALE), DAMAGE_NO_ARMOR, MOD_MELEE );//default flipkick dmg
+				else if (JK2O_FLIPKICK == 2 && JK2O_FLIPKICKDAMAGESCALE)
 				{
 					//int damageStrength = strength; //Revert this and use damageStrength here if we want to have flipkick knockback strength "random" i.e. give slight advantage to wait 2 kick scripters..
 					if (strength > 10)
 					{
 						strength = 20 + glitchKickBonus;
 					}
-					G_Damage( faceKicked, ent, ent, 0, 0, (strength * g_flipKickDamageScale.value), DAMAGE_NO_ARMOR, MOD_MELEE ); //new japro flipkick dmg
+					G_Damage( faceKicked, ent, ent, 0, 0, (strength * JK2O_FLIPKICKDAMAGESCALE), DAMAGE_NO_ARMOR, MOD_MELEE ); //new japro flipkick dmg
 				}
-				else if (g_flipKickDamageScale.value)
+				else if (JK2O_FLIPKICKDAMAGESCALE)
 					G_Damage( faceKicked, ent, ent, 0, 0, 20 + glitchKickBonus, DAMAGE_NO_ARMOR, MOD_MELEE ); //new japro flipkick dmg (20)
 
-				if (g_fixKillCredit.integer) {//JAPRO - Serverside - fix flipkick not giving killcredit..?
+				if (JK2O_FIXKILLCREDIT) {//JAPRO - Serverside - fix flipkick not giving killcredit..?
 					faceKicked->client->ps.otherKillerTime = level.time + 2000;
 					faceKicked->client->ps.otherKiller = ent->s.number;
 					faceKicked->client->ps.otherKillerDebounceTime = level.time + 100;
@@ -5701,21 +5701,21 @@ void ClientThink_real( gentity_t *ent ) {
 					{
 
 						if (BG_KnockDownable(&faceKicked->client->ps)) {
-							if (g_nonRandomKnockdown.integer < 1) { //Default, random knockdowns
+							if (JK2O_NONRANDOMKNOCKDOWN < 1) { //Default, random knockdowns
 								if (Q_irand(1, 10) <= 3) {
 									faceKicked->client->ps.forceHandExtend = HANDEXTEND_KNOCKDOWN;
 									faceKicked->client->ps.forceHandExtendTime = level.time + 1100;
 									faceKicked->client->ps.forceDodgeAnim = 0; //this toggles between 1 and 0, when it's 1 we should play the get up anim
 								}
 							}
-							else if (g_nonRandomKnockdown.integer == 1) { //forceDrainTime was unused technically, so hijack it for this.  forceHealTime is not accurate, its already 1000 ahead 
+							else if (JK2O_NONRANDOMKNOCKDOWN == 1) { //forceDrainTime was unused technically, so hijack it for this.  forceHealTime is not accurate, its already 1000 ahead 
 								if ((faceKicked->client->ps.fd.forceDrainTime > level.time - 2000) || (faceKicked->client->ps.fd.forceHealTime > level.time - 1000)) { //drained/ healed recently?? Fixme
 									faceKicked->client->ps.forceHandExtend = HANDEXTEND_KNOCKDOWN;
 									faceKicked->client->ps.forceHandExtendTime = level.time + 1100;
 									faceKicked->client->ps.forceDodgeAnim = 0;
 								}
 							}
-							else if (g_nonRandomKnockdown.integer == 2) { //semi random... where u cant get 2 in a row.. and kd chance is increased for each kick u do thats not a KD
+							else if (JK2O_NONRANDOMKNOCKDOWN == 2) { //semi random... where u cant get 2 in a row.. and kd chance is increased for each kick u do thats not a KD
 								if ((Q_irand(1, 10) * faceKicked->client->noKnockdownStreak) > 9) { //Average one knockdown every ~3 kicks.. same as before..?  but with less variance?
 									faceKicked->client->ps.forceHandExtend = HANDEXTEND_KNOCKDOWN;
 									faceKicked->client->ps.forceHandExtendTime = level.time + 1100;
@@ -5738,7 +5738,7 @@ void ClientThink_real( gentity_t *ent ) {
 								else
 									faceKicked->client->noKnockdownStreak++;
 							}
-							else if (g_nonRandomKnockdown.integer == 3) {
+							else if (JK2O_NONRANDOMKNOCKDOWN == 3) {
 									vec3_t diffOrigin;
 									float diffAngle;
 
@@ -5759,7 +5759,7 @@ void ClientThink_real( gentity_t *ent ) {
 										faceKicked->client->ps.forceDodgeAnim = 0;
 									}
 							}
-							else if (g_nonRandomKnockdown.integer == 4) {
+							else if (JK2O_NONRANDOMKNOCKDOWN == 4) {
 									vec3_t diffOrigin;
 									float diffAngleYaw, anglePitch, pitchScale;
 
@@ -5795,9 +5795,9 @@ void ClientThink_real( gentity_t *ent ) {
 										faceKicked->client->ps.forceDodgeAnim = 0; 
 									}
 							}
-							else if (g_nonRandomKnockdown.integer == 5) { //no KDs
+							else if (JK2O_NONRANDOMKNOCKDOWN == 5) { //no KDs
 							}
-							else if (g_nonRandomKnockdown.integer > 5) { //all KDs
+							else if (JK2O_NONRANDOMKNOCKDOWN > 5) { //all KDs
 								faceKicked->client->ps.forceHandExtend = HANDEXTEND_KNOCKDOWN;
 								faceKicked->client->ps.forceHandExtendTime = level.time + 1100;
 								faceKicked->client->ps.forceDodgeAnim = 0;
@@ -5805,7 +5805,7 @@ void ClientThink_real( gentity_t *ent ) {
 						}
 
 //JAPRO - Serverside - Fix killcredit stuff - Start
-						if (!g_fixKillCredit.integer)
+						if (!JK2O_FIXKILLCREDIT)
 						{
 							faceKicked->client->ps.otherKiller = ent->s.number;
 							faceKicked->client->ps.otherKillerTime = level.time + 5000;
@@ -5895,8 +5895,8 @@ void ClientThink_real( gentity_t *ent ) {
 			if (lostSpeed > 1200) {
 				int damage = lostSpeed * 0.1f;
 				//Com_Printf("lost Speed is %.0f damage is %i\n", lostSpeed, damage);
-				if (damage > g_maxFallDmg.integer)
-					damage = g_maxFallDmg.integer;
+				if (damage > JK2O_MAXFALLDMG)
+					damage = JK2O_MAXFALLDMG;
 				BG_AddPredictableEventToPlayerstate(EV_FALL, damage, &ent->client->ps);
 				G_Damage(ent, ent, ent, NULL, ent->client->ps.origin, damage, DAMAGE_NO_PROTECTION, MOD_FALLING);//why does this not happen from the event?
 			}

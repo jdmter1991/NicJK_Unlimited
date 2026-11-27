@@ -252,7 +252,7 @@ static int GetFlipkick(playerState_t *ps) {
 				return 0;
 			}
 		}
-		return g_flipKick.integer;
+		return JK2O_FLIPKICK;
 #else
 		if (cgs.serverMod == SVMOD_JAPRO) {
 			if (ps->duelInProgress) {
@@ -296,7 +296,7 @@ static int GetFixRoll(playerState_t *ps) {
 				return 3;
 			}
 		}
-		return g_fixRoll.integer;
+		return JK2O_FIXROLL;
 #else
 		if (cgs.serverMod == SVMOD_JAPRO) {
 			if (ps->stats[STAT_RACEMODE])
@@ -1298,7 +1298,7 @@ static void PM_Friction( void ) {
 	else if ( pm->ps->groundEntityNum < MAX_CLIENTS )
 	{
 #ifdef _GAME
-		if (g_slideOnPlayer.integer)
+		if (JK2O_SLIDEONPLAYER)
 #else
 		if ((cgs.serverMod == SVMOD_JAPRO && !(cgs.jcinfo & JAPRO_CINFO_HEADSLIDE)) || (cgs.serverMod == SVMOD_JAPLUS && !(cgs.cinfo & JAPLUS_CINFO_HEADSLIDE)) || cgs.serverMod == SVMOD_BASEENHANCED)
 		{//no headslide, so do nothing
@@ -1325,7 +1325,7 @@ static void PM_Friction( void ) {
 #ifdef _GAME
 	if (pm->ps->pm_type != PM_SPECTATOR && (pm->ps->powerups[PW_REDFLAG] || pm->ps->powerups[PW_BLUEFLAG] || pm->ps->powerups[PW_NEUTRALFLAG])) {
 		if ( !pml.groundTrace.contents )
-			drop = speed*g_flagDrag.value*0.1*pml.frametime;
+			drop = speed*JK2O_FLAGDRAG*0.1*pml.frametime;
 	}
 #endif
 
@@ -1333,7 +1333,7 @@ static void PM_Friction( void ) {
 #if 0
 	if (pm->ps->pm_type != PM_SPECTATOR && pm->ps->stats[STAT_MOVEMENTSTYLE] == MV_TRIBES) {
 		if (speed > pm->ps->speed * 1.44f)
-			drop = speed*g_flagDrag.value*0.1*pml.frametime;
+			drop = speed*JK2O_FLAGDRAG*0.1*pml.frametime;
 	}
 #endif
 
@@ -3889,18 +3889,18 @@ static qboolean PM_CheckJump( void )
 				else if ( pm->cmd.forwardmove == 0 )
 				{//wall-flip japro
 					#ifdef _GAME
-						if ((g_flipKick.integer < 2) && allowWallFlips)
+						if ((JK2O_FLIPKICK < 2) && allowWallFlips)
 						{
 							vertPush = forceJumpStrength[FORCE_LEVEL_2]/2.25f;
 							anim = BOTH_WALL_FLIP_RIGHT;
 						}
-						else if ((g_flipKick.integer == 2) && allowWallFlips && (client->lastKickTime + 50 < level.time))
+						else if ((JK2O_FLIPKICK == 2) && allowWallFlips && (client->lastKickTime + 50 < level.time))
 						{
 							vertPush = forceJumpStrength[FORCE_LEVEL_2]/2.25f;
 							anim = BOTH_WALL_FLIP_RIGHT;
 							client->lastKickTime = level.time;
 						}
-						else if ((g_flipKick.integer > 2) && allowWallFlips && pm->ps->legsAnim != BOTH_WALL_FLIP_RIGHT && pm->ps->legsAnim != BOTH_WALL_FLIP_LEFT)
+						else if ((JK2O_FLIPKICK > 2) && allowWallFlips && pm->ps->legsAnim != BOTH_WALL_FLIP_RIGHT && pm->ps->legsAnim != BOTH_WALL_FLIP_LEFT)
 						{
 							vertPush = forceJumpStrength[FORCE_LEVEL_2]/2.25f;
 							anim = BOTH_WALL_FLIP_RIGHT;
@@ -3934,18 +3934,18 @@ static qboolean PM_CheckJump( void )
 				else if ( pm->cmd.forwardmove == 0 )
 				{//wall-flip japro
 					#ifdef _GAME
-						if ((g_flipKick.integer < 2) && allowWallFlips)
+						if ((JK2O_FLIPKICK < 2) && allowWallFlips)
 						{
 							vertPush = forceJumpStrength[FORCE_LEVEL_2]/2.25f;
 							anim = BOTH_WALL_FLIP_LEFT;
 						}
-						else if ((g_flipKick.integer == 2) && allowWallFlips && (client->lastKickTime + 50 < level.time))
+						else if ((JK2O_FLIPKICK == 2) && allowWallFlips && (client->lastKickTime + 50 < level.time))
 						{
 							vertPush = forceJumpStrength[FORCE_LEVEL_2]/2.25f;
 							anim = BOTH_WALL_FLIP_LEFT;
 							client->lastKickTime = level.time;
 						}
-						else if ((g_flipKick.integer > 2) && allowWallFlips && pm->ps->legsAnim != BOTH_WALL_FLIP_LEFT && pm->ps->legsAnim != BOTH_WALL_FLIP_RIGHT)
+						else if ((JK2O_FLIPKICK > 2) && allowWallFlips && pm->ps->legsAnim != BOTH_WALL_FLIP_LEFT && pm->ps->legsAnim != BOTH_WALL_FLIP_RIGHT)
 						{
 							vertPush = forceJumpStrength[FORCE_LEVEL_2]/2.25f;
 							anim = BOTH_WALL_FLIP_LEFT;
@@ -3991,7 +3991,7 @@ static qboolean PM_CheckJump( void )
 					contents = MASK_SOLID;
 /*
 #ifdef _GAME
-				if (g_flipKick.integer > 0)
+				if (JK2O_FLIPKICK > 0)
 					contents = MASK_PLAYERSOLID;//MASK_PLAYERSOLID;
 				else
 					contents = MASK_SOLID;
@@ -4079,7 +4079,7 @@ static qboolean PM_CheckJump( void )
 							kickedEnt = PM_BGEntForNum(trace.entityNum);
 /*
 #ifdef _GAME
-							if ((trace.entityNum < MAX_CLIENTS) || (g_flipKick.integer && kickedEnt->s.eType == ET_NPC))
+							if ((trace.entityNum < MAX_CLIENTS) || (JK2O_FLIPKICK && kickedEnt->s.eType == ET_NPC))
 #else
 							if ((trace.entityNum < MAX_CLIENTS) || ((cgs.serverMod == SVMOD_JAPRO && cgs.jcinfo & JAPRO_CINFO_FLIPKICK) && kickedEnt->s.eType == ET_NPC))
 #endif
@@ -4290,7 +4290,7 @@ static qboolean PM_CheckJump( void )
 						PM_SetAnim( parts, BOTH_WALL_FLIP_BACK1, SETANIM_FLAG_OVERRIDE|SETANIM_FLAG_HOLD );
 
 #ifdef _GAME
-						if (g_flipKick.integer > 2)
+						if (JK2O_FLIPKICK > 2)
 							pm->ps->legsTimer = 0;
 						else
 #endif
@@ -4307,7 +4307,7 @@ static qboolean PM_CheckJump( void )
 
 /*
 #ifdef _GAME
-						if ((trace.entityNum < MAX_CLIENTS) || (g_flipKick.integer && kickedEnt->s.eType == ET_NPC))
+						if ((trace.entityNum < MAX_CLIENTS) || (JK2O_FLIPKICK && kickedEnt->s.eType == ET_NPC))
 #else
 						if ((trace.entityNum < MAX_CLIENTS) || ((cgs.serverMod == SVMOD_JAPRO && cgs.jcinfo & JAPRO_CINFO_FLIPKICK) && kickedEnt->s.eType == ET_NPC))
 #endif
@@ -4382,7 +4382,7 @@ static qboolean PM_CheckJump( void )
 						if (GetFlipkick(pm->ps) >= 1) {
 /*
 #ifdef _GAME
-						if (g_flipKick.integer >= 1) {
+						if (JK2O_FLIPKICK >= 1) {
 #else
 						if ((cgs.serverMod == SVMOD_JAPLUS && cgs.cinfo & JAPLUS_CINFO_FLIPKICK) || (cgs.serverMod == SVMOD_JAPRO && cgs.jcinfo & JAPRO_CINFO_FLIPKICK)) {
 #endif
@@ -4494,7 +4494,7 @@ static qboolean PM_CheckJump( void )
 	}
 	else
 #ifdef _GAME
-	if ((g_tweakSaber.integer & ST_JK2RDFA) && !pm->ps->stats[STAT_RACEMODE])
+	if ((JK2O_TWEAKSABER & ST_JK2RDFA) && !pm->ps->stats[STAT_RACEMODE])
 #else
 	if ((cgs.serverMod == SVMOD_JAPRO && !pm->ps->stats[STAT_RACEMODE] && (cgs.jcinfo & JAPRO_CINFO_JK2DFA)) || (cgs.serverMod == SVMOD_JAPLUS && (cgs.cinfo & JAPLUS_CINFO_JK2DFA)))
 #endif
@@ -6284,7 +6284,7 @@ static int PM_TryRoll( void )
 		}
 
 #ifdef _GAME
-	if ((!(g_tweakSaber.integer & ST_ALLOW_ROLLCANCEL) || pm->ps->stats[STAT_RACEMODE]) && !JK2SABER()) {
+	if ((!(JK2O_TWEAKSABER & ST_ALLOW_ROLLCANCEL) || pm->ps->stats[STAT_RACEMODE]) && !JK2SABER()) {
 #else
 	if ((!(cgs.jcinfo & JAPRO_CINFO_ROLLCANCEL) || IsRacemode(pm->ps)) && !JK2SABER()) {
 #endif
@@ -6310,7 +6310,7 @@ static int PM_TryRoll( void )
 	}
 
 #ifdef _GAME
-	if ((pm->ps->weapon != WP_SABER && pm->ps->weapon != WP_MELEE && (!(g_tweakWeapons.integer & WT_ALLOW_GUNROLL) || pm->ps->stats[STAT_RACEMODE]) && (pm->ps->weapon != WP_STUN_BATON || !pm->ps->stats[STAT_RACEMODE])) ||
+	if ((pm->ps->weapon != WP_SABER && pm->ps->weapon != WP_MELEE && (!(JK2O_TWEAKWEAPONS & WT_ALLOW_GUNROLL) || pm->ps->stats[STAT_RACEMODE]) && (pm->ps->weapon != WP_STUN_BATON || !pm->ps->stats[STAT_RACEMODE])) ||
 #else
 	if ((pm->ps->weapon != WP_SABER && pm->ps->weapon != WP_MELEE &&
 		(!(cgs.jcinfo & JAPRO_CINFO_GUNROLL) || IsRacemode(pm->ps)) &&
@@ -8172,7 +8172,7 @@ int PM_LegsSlopeBackTransition(int desiredAnim)
 			resultingAnim = anim;
 		}
 #ifdef _GAME
-		if (pm->ps->groundEntityNum != ENTITYNUM_WORLD && g_slideOnPlayer.integer)
+		if (pm->ps->groundEntityNum != ENTITYNUM_WORLD && JK2O_SLIDEONPLAYER)
 #elif _CGAME
 		if (cg_legstuck.integer)
 #endif
@@ -8367,11 +8367,11 @@ static void PM_Footsteps( void ) {
 
 /*
 #ifdef _GAME
-			if ((g_fixRoll.integer > 1) && (PM_RunningAnim(pm->ps->legsAnim) || PM_CanRollFromSoulCal(pm->ps)))
+			if ((JK2O_FIXROLL > 1) && (PM_RunningAnim(pm->ps->legsAnim) || PM_CanRollFromSoulCal(pm->ps)))
 			{
 				rolled = PM_TryRoll();
 			}
-			else if ((g_fixRoll.integer == 1) && (PM_RunningAnim(pm->ps->legsAnim) && VectorLengthSquared(pm->ps->velocity)>=30000))
+			else if ((JK2O_FIXROLL == 1) && (PM_RunningAnim(pm->ps->legsAnim) && VectorLengthSquared(pm->ps->velocity)>=30000))
 			{
 				rolled = PM_TryRoll();
 			}
@@ -9076,7 +9076,7 @@ void PM_BeginWeaponChange( int weapon ) {
 
 #if _GAME
 #if _SPECIFICWEAPONTIME
-	if ((g_tweakWeapons.integer & WT_TRIBES) && !pm->ps->stats[STAT_RACEMODE]) {
+	if ((JK2O_TWEAKWEAPONS & WT_TRIBES) && !pm->ps->stats[STAT_RACEMODE]) {
 		int i;
 		for (i = 0; i < MAX_WEAPONS; i++) {
 			((gentity_t *)pm_entSelf)->client->specificWeaponTime[i] += 50;
@@ -9124,12 +9124,12 @@ void PM_FinishWeaponChange( void ) {
 	pm->ps->weapon = weapon;
 	pm->ps->weaponstate = WEAPON_RAISING;
 #ifdef _GAME
-	if (!pm->ps->stats[STAT_RACEMODE] && (g_tweakSaber.integer & ST_FIXED_SABERSWITCH) && weapon == WP_SABER) {//fix saber switch glitch if we want
+	if (!pm->ps->stats[STAT_RACEMODE] && (JK2O_TWEAKSABER & ST_FIXED_SABERSWITCH) && weapon == WP_SABER) {//fix saber switch glitch if we want
 		pm->ps->weaponTime += 1250;
 		((gentity_t *)pm_entSelf)->client->saberDelayCount += 1000; //Ait.. this is the delay past 250 that is added, we wil subract this from weapontime later when checking forcepower use
 		//saberDelay can never be negative. Saber delay can never be more than weapontime-250.
 	}
-	else if (!pm->ps->stats[STAT_RACEMODE] && (g_tweakWeapons.integer & WT_FAST_WEAPONSWITCH))
+	else if (!pm->ps->stats[STAT_RACEMODE] && (JK2O_TWEAKWEAPONS & WT_FAST_WEAPONSWITCH))
 		pm->ps->weaponTime += 25;
 	else
 		pm->ps->weaponTime += 250;	// base JKA, and what the client predicts (an upstream change to 50 made every switch mispredict)
@@ -9139,7 +9139,7 @@ void PM_FinishWeaponChange( void ) {
 
 #if _GAME
 #if _SPECIFICWEAPONTIME
-		if ((g_tweakWeapons.integer & WT_TRIBES) && !pm->ps->stats[STAT_RACEMODE]) {
+		if ((JK2O_TWEAKWEAPONS & WT_TRIBES) && !pm->ps->stats[STAT_RACEMODE]) {
 			int i;
 			for (i = 0; i < MAX_WEAPONS; i++) {
 				((gentity_t *)pm_entSelf)->client->specificWeaponTime[i] += 100;
@@ -9483,7 +9483,7 @@ static qboolean PM_DoChargedWeapons( qboolean vehicleRocketLock, bgEntity_t *veh
 				if (pm->ps->weaponChargeSubtractTime < pm->cmd.serverTime)
 				{
 #ifdef _GAME
-					if (!pm->ps->stats[STAT_RACEMODE] && !(g_tweakWeapons.integer & WT_INFINITE_AMMO))
+					if (!pm->ps->stats[STAT_RACEMODE] && !(JK2O_TWEAKWEAPONS & WT_INFINITE_AMMO))
 #endif
 						pm->ps->ammo[weaponData[pm->ps->weapon].ammoIndex] -= weaponData[pm->ps->weapon].altChargeSub;
 					pm->ps->weaponChargeSubtractTime = pm->cmd.serverTime + weaponData[pm->ps->weapon].altChargeSubTime;
@@ -9524,7 +9524,7 @@ static qboolean PM_DoChargedWeapons( qboolean vehicleRocketLock, bgEntity_t *veh
 				if (pm->ps->weaponChargeSubtractTime < pm->cmd.serverTime)
 				{
 #ifdef _GAME
-					if (!pm->ps->stats[STAT_RACEMODE] && !(g_tweakWeapons.integer & WT_INFINITE_AMMO))
+					if (!pm->ps->stats[STAT_RACEMODE] && !(JK2O_TWEAKWEAPONS & WT_INFINITE_AMMO))
 #endif
 						pm->ps->ammo[weaponData[pm->ps->weapon].ammoIndex] -= weaponData[pm->ps->weapon].chargeSub;
 					pm->ps->weaponChargeSubtractTime = pm->cmd.serverTime + weaponData[pm->ps->weapon].chargeSubTime;
@@ -10138,7 +10138,7 @@ static void PM_Weapon( void )
 		//this is so that my holster-view-weapon-when-hand-extend stuff works.
 		pm->ps->weaponstate = WEAPON_RAISING;
 #ifdef _GAME
-	if (!pm->ps->stats[STAT_RACEMODE] && (g_tweakWeapons.integer & WT_FAST_WEAPONSWITCH))
+	if (!pm->ps->stats[STAT_RACEMODE] && (JK2O_TWEAKWEAPONS & WT_FAST_WEAPONSWITCH))
 		pm->ps->weaponTime += 25;
 	else
 		pm->ps->weaponTime += 250;
@@ -10532,7 +10532,7 @@ if (pm->ps->duelInProgress)
 	*/
 
 #if _GAME
-	if (g_tweakWeapons.integer & WT_TRIBES) { //Chaingun overheat
+	if (JK2O_TWEAKWEAPONS & WT_TRIBES) { //Chaingun overheat
 #else
 	if (cgs.jcinfo2 & JAPRO_CINFO2_WTTRIBES) {
 #endif
@@ -10552,7 +10552,7 @@ if (pm->ps->duelInProgress)
 	}
 #if _GAME
 #if _SPECIFICWEAPONTIME
-	if (g_tweakWeapons.integer & WT_TRIBES) { //Bug where this doesnt get called if wp_saber is out? but maybe thats fine to limit nades if holding saber?
+	if (JK2O_TWEAKWEAPONS & WT_TRIBES) { //Bug where this doesnt get called if wp_saber is out? but maybe thats fine to limit nades if holding saber?
 		int i;
 		for (i = 0; i < MAX_WEAPONS; i++) {
 			if (((gentity_t *)pm_entSelf)->client->specificWeaponTime[i] > 0)
@@ -10635,7 +10635,7 @@ if (pm->ps->duelInProgress)
 	if ( pm->ps->weapon != WP_NONE &&
 		pm->ps->weapon == pm->cmd.weapon &&
 #ifdef _GAME
-		!(g_tweakWeapons.integer & WT_INFINITE_AMMO) &&
+		!(JK2O_TWEAKWEAPONS & WT_INFINITE_AMMO) &&
 #endif
 		(pm->ps->weaponTime <= 0 || pm->ps->weaponstate != WEAPON_FIRING) )
 	{
@@ -10645,7 +10645,7 @@ if (pm->ps->duelInProgress)
 			if (pm->ps->ammo[weaponData[pm->ps->weapon].ammoIndex] < weaponData[pm->ps->weapon].energyPerShot &&
 				pm->ps->ammo[weaponData[pm->ps->weapon].ammoIndex] < weaponData[pm->ps->weapon].altEnergyPerShot
 #ifdef _GAME
-				&& (!(g_tweakWeapons.integer & WT_STAKE_GUN) || (pm->ps->weapon != WP_FLECHETTE)) //I guess we have to make the stake gun
+				&& (!(JK2O_TWEAKWEAPONS & WT_STAKE_GUN) || (pm->ps->weapon != WP_FLECHETTE)) //I guess we have to make the stake gun
 #endif
 				)
 			{ //the weapon is out of ammo essentially because it cannot fire primary or secondary, so do the switch
@@ -10677,7 +10677,7 @@ if (pm->ps->duelInProgress)
 	// again if lowering or raising
 #if _GAME
 #if _SPECIFICWEAPONTIME
-	if ((g_tweakWeapons.integer & WT_TRIBES) && !pm->ps->stats[STAT_RACEMODE]) {
+	if ((JK2O_TWEAKWEAPONS & WT_TRIBES) && !pm->ps->stats[STAT_RACEMODE]) {
 		if (pm->ps->weapon != pm->cmd.weapon) {
 			if (((gentity_t *)pm_entSelf)->client->specificWeaponTime[pm->ps->weapon] <= 0)
 			PM_BeginWeaponChange(pm->cmd.weapon);
@@ -10694,7 +10694,7 @@ if (pm->ps->duelInProgress)
 	
 #if _GAME
 #if _SPECIFICWEAPONTIME
-	if ((g_tweakWeapons.integer & WT_TRIBES) && !pm->ps->stats[STAT_RACEMODE])
+	if ((JK2O_TWEAKWEAPONS & WT_TRIBES) && !pm->ps->stats[STAT_RACEMODE])
 	{
 		if (((gentity_t *)pm_entSelf)->client->specificWeaponTime[pm->ps->weapon] > 0) {
 			if (pm->ps->weapon != pm->cmd.weapon) {
@@ -11101,11 +11101,11 @@ if (pm->ps->duelInProgress)
 				amount = 1;
 		}
 		else {
-			if (g_tweakWeapons.integer & WT_INFINITE_AMMO)
+			if (JK2O_TWEAKWEAPONS & WT_INFINITE_AMMO)
 				amount = 0;
-			else if (pm->ps->weapon == WP_ROCKET_LAUNCHER && (g_tweakWeapons.integer & WT_TRIBES))
+			else if (pm->ps->weapon == WP_ROCKET_LAUNCHER && (JK2O_TWEAKWEAPONS & WT_TRIBES))
 				amount = 1;
-			else if (pm->ps->weapon == WP_FLECHETTE && g_tweakWeapons.integer & WT_STAKE_GUN)
+			else if (pm->ps->weapon == WP_FLECHETTE && JK2O_TWEAKWEAPONS & WT_STAKE_GUN)
 				amount = 0;//Detonating stakes shouldnt take ammo
 		}
 #endif
@@ -11123,9 +11123,9 @@ if (pm->ps->duelInProgress)
 				amount = 1;
 		}
 		else {
-			if (g_tweakWeapons.integer & WT_INFINITE_AMMO)
+			if (JK2O_TWEAKWEAPONS & WT_INFINITE_AMMO)
 				amount = 0;
-			else if (pm->ps->weapon == WP_FLECHETTE && g_tweakWeapons.integer & WT_STAKE_GUN)
+			else if (pm->ps->weapon == WP_FLECHETTE && JK2O_TWEAKWEAPONS & WT_STAKE_GUN)
 				amount = 10;//5 ammo per stake? eh
 		}
 #endif
@@ -11144,7 +11144,7 @@ if (pm->ps->duelInProgress)
 		{
 			// Switch weapons
 #ifdef _GAME
-			if ((pm->ps->weapon != WP_DET_PACK || !pm->ps->hasDetPackPlanted) && (pm->ps->weapon != WP_FLECHETTE || !(g_tweakWeapons.integer & WT_STAKE_GUN)))
+			if ((pm->ps->weapon != WP_DET_PACK || !pm->ps->hasDetPackPlanted) && (pm->ps->weapon != WP_FLECHETTE || !(JK2O_TWEAKWEAPONS & WT_STAKE_GUN)))
 #else
 			if (pm->ps->weapon != WP_DET_PACK || !pm->ps->hasDetPackPlanted)
 #endif
@@ -11184,65 +11184,65 @@ if (pm->ps->duelInProgress)
 		case WP_STUN_BATON:
 			if ((pm->cmd.buttons & BUTTON_ALT_ATTACK) && pm->ps->stats[STAT_RACEMODE] && !pm->ps->duelInProgress)
 				addTime = 600;
-			else if (!(pm->cmd.buttons & BUTTON_ALT_ATTACK) && (g_tweakWeapons.integer & WT_STUN_SHOCKLANCE))
+			else if (!(pm->cmd.buttons & BUTTON_ALT_ATTACK) && (JK2O_TWEAKWEAPONS & WT_STUN_SHOCKLANCE))
 				addTime = 1500;
-			else if ((pm->cmd.buttons & BUTTON_ALT_ATTACK) && (g_tweakWeapons.integer & WT_STUN_LG))
+			else if ((pm->cmd.buttons & BUTTON_ALT_ATTACK) && (JK2O_TWEAKWEAPONS & WT_STUN_LG))
 				addTime = 50;
 			break;
 		case WP_BRYAR_OLD:
-			if ((pm->cmd.buttons & BUTTON_ALT_ATTACK) && !pm->ps->stats[STAT_RACEMODE] && (g_tweakWeapons.integer & WT_TRIBES))
+			if ((pm->cmd.buttons & BUTTON_ALT_ATTACK) && !pm->ps->stats[STAT_RACEMODE] && (JK2O_TWEAKWEAPONS & WT_TRIBES))
 				addTime = 800;
-			else if (!(pm->cmd.buttons & BUTTON_ALT_ATTACK) && !pm->ps->stats[STAT_RACEMODE] && (g_tweakWeapons.integer & WT_TRIBES))
+			else if (!(pm->cmd.buttons & BUTTON_ALT_ATTACK) && !pm->ps->stats[STAT_RACEMODE] && (JK2O_TWEAKWEAPONS & WT_TRIBES))
 				addTime = 100;
 			break;
 		case WP_BRYAR_PISTOL:
-			if ((pm->cmd.buttons & BUTTON_ALT_ATTACK) && !pm->ps->stats[STAT_RACEMODE] && (g_tweakWeapons.integer & WT_TRIBES))
+			if ((pm->cmd.buttons & BUTTON_ALT_ATTACK) && !pm->ps->stats[STAT_RACEMODE] && (JK2O_TWEAKWEAPONS & WT_TRIBES))
 				addTime = 1000;
-			else if (!(pm->cmd.buttons & BUTTON_ALT_ATTACK) && !pm->ps->stats[STAT_RACEMODE] && (g_tweakWeapons.integer & WT_TRIBES))
+			else if (!(pm->cmd.buttons & BUTTON_ALT_ATTACK) && !pm->ps->stats[STAT_RACEMODE] && (JK2O_TWEAKWEAPONS & WT_TRIBES))
 				addTime = 1000;
 			break;
 		case WP_BLASTER:
 			if ((pm->cmd.buttons & BUTTON_ALT_ATTACK) && pm->ps->stats[STAT_RACEMODE])
 				addTime = 100;
-			else if (!(pm->cmd.buttons & BUTTON_ALT_ATTACK) && (g_tweakWeapons.integer & WT_TRIBES))
+			else if (!(pm->cmd.buttons & BUTTON_ALT_ATTACK) && (JK2O_TWEAKWEAPONS & WT_TRIBES))
 				addTime = 125;
-			else if ((pm->cmd.buttons & BUTTON_ALT_ATTACK) && (g_tweakWeapons.integer & WT_TRIBES))
+			else if ((pm->cmd.buttons & BUTTON_ALT_ATTACK) && (JK2O_TWEAKWEAPONS & WT_TRIBES))
 				addTime = 75;
 			break;
 		case WP_DISRUPTOR:
 			if (pm->ps->stats[STAT_RACEMODE] && !pm->ps->duelInProgress)
 				addTime = 600;
-			else if (!(pm->cmd.buttons & BUTTON_ALT_ATTACK) && g_tweakWeapons.integer & WT_SLOW_SNIPER)//Sad hack to make instagib more playable
+			else if (!(pm->cmd.buttons & BUTTON_ALT_ATTACK) && JK2O_TWEAKWEAPONS & WT_SLOW_SNIPER)//Sad hack to make instagib more playable
 				addTime = 1500;
 			break;
 		case WP_BOWCASTER:
-			if ((pm->cmd.buttons & BUTTON_ALT_ATTACK) && !pm->ps->stats[STAT_RACEMODE] && (g_tweakWeapons.integer & WT_TRIBES))
+			if ((pm->cmd.buttons & BUTTON_ALT_ATTACK) && !pm->ps->stats[STAT_RACEMODE] && (JK2O_TWEAKWEAPONS & WT_TRIBES))
 				addTime = 1050;
-			else if (!(pm->cmd.buttons & BUTTON_ALT_ATTACK) && !pm->ps->stats[STAT_RACEMODE] && (g_tweakWeapons.integer & WT_TRIBES))
+			else if (!(pm->cmd.buttons & BUTTON_ALT_ATTACK) && !pm->ps->stats[STAT_RACEMODE] && (JK2O_TWEAKWEAPONS & WT_TRIBES))
 				addTime = 1050;
 			break;
 		case WP_REPEATER:
-			if ((pm->cmd.buttons & BUTTON_ALT_ATTACK) && !pm->ps->stats[STAT_RACEMODE] && (g_tweakWeapons.integer & WT_TRIBES))
+			if ((pm->cmd.buttons & BUTTON_ALT_ATTACK) && !pm->ps->stats[STAT_RACEMODE] && (JK2O_TWEAKWEAPONS & WT_TRIBES))
 				addTime = 2500;
-			else if (!(pm->cmd.buttons & BUTTON_ALT_ATTACK) && !pm->ps->stats[STAT_RACEMODE] && (g_tweakWeapons.integer & WT_TRIBES))
+			else if (!(pm->cmd.buttons & BUTTON_ALT_ATTACK) && !pm->ps->stats[STAT_RACEMODE] && (JK2O_TWEAKWEAPONS & WT_TRIBES))
 				addTime = 200;
 			break;
 		case WP_DEMP2:
-			if (!(pm->cmd.buttons & BUTTON_ALT_ATTACK) && !pm->ps->stats[STAT_RACEMODE] && (g_tweakWeapons.integer & WT_TRIBES))
+			if (!(pm->cmd.buttons & BUTTON_ALT_ATTACK) && !pm->ps->stats[STAT_RACEMODE] && (JK2O_TWEAKWEAPONS & WT_TRIBES))
 				addTime = 750;
 			break;
 		case WP_FLECHETTE:
-			if ((pm->cmd.buttons & BUTTON_ALT_ATTACK) && !pm->ps->stats[STAT_RACEMODE] && (g_tweakWeapons.integer & WT_TRIBES))
+			if ((pm->cmd.buttons & BUTTON_ALT_ATTACK) && !pm->ps->stats[STAT_RACEMODE] && (JK2O_TWEAKWEAPONS & WT_TRIBES))
 			addTime = 800;
 			break;
 		case WP_ROCKET_LAUNCHER:
-			if ((pm->cmd.buttons & BUTTON_ALT_ATTACK) && !pm->ps->stats[STAT_RACEMODE] && (g_tweakWeapons.integer & WT_TRIBES))
+			if ((pm->cmd.buttons & BUTTON_ALT_ATTACK) && !pm->ps->stats[STAT_RACEMODE] && (JK2O_TWEAKWEAPONS & WT_TRIBES))
 				addTime = 3500;
-			if (!(pm->cmd.buttons & BUTTON_ALT_ATTACK) && !pm->ps->stats[STAT_RACEMODE] && (g_tweakWeapons.integer & WT_TRIBES))
+			if (!(pm->cmd.buttons & BUTTON_ALT_ATTACK) && !pm->ps->stats[STAT_RACEMODE] && (JK2O_TWEAKWEAPONS & WT_TRIBES))
 				addTime = 1050;
 			break;
 		case WP_THERMAL:
-			if (!(pm->ps->stats[STAT_RACEMODE]) && ((g_tweakWeapons.integer & WT_IMPACT_NITRON) || (g_tweakWeapons.integer & WT_TRIBES)))
+			if (!(pm->ps->stats[STAT_RACEMODE]) && ((JK2O_TWEAKWEAPONS & WT_IMPACT_NITRON) || (JK2O_TWEAKWEAPONS & WT_TRIBES)))
 				addTime = 1500;
 			break;
 		case WP_DET_PACK:
@@ -11250,9 +11250,9 @@ if (pm->ps->duelInProgress)
 				addTime *= 2;
 			break;
 		case WP_CONCUSSION:
-			if ((pm->cmd.buttons & BUTTON_ALT_ATTACK) && !pm->ps->stats[STAT_RACEMODE] && (g_tweakWeapons.integer & WT_TRIBES))
+			if ((pm->cmd.buttons & BUTTON_ALT_ATTACK) && !pm->ps->stats[STAT_RACEMODE] && (JK2O_TWEAKWEAPONS & WT_TRIBES))
 				addTime = 1400;
-			else if (!(pm->cmd.buttons & BUTTON_ALT_ATTACK) && !pm->ps->stats[STAT_RACEMODE] && (g_tweakWeapons.integer & WT_TRIBES))
+			else if (!(pm->cmd.buttons & BUTTON_ALT_ATTACK) && !pm->ps->stats[STAT_RACEMODE] && (JK2O_TWEAKWEAPONS & WT_TRIBES))
 				addTime = 1200;
 			break;
 		default:
@@ -11287,7 +11287,7 @@ if (pm->ps->duelInProgress)
 	case WP_DISRUPTOR:
 		if (IsRacemode(pm->ps) && !pm->ps->duelInProgress)
 			addTime = 600;
-		//else if (!(pm->cmd.buttons & BUTTON_ALT_ATTACK) && g_tweakWeapons.integer & WT_SLOW_SNIPER)//Sad hack to make instagib more playable
+		//else if (!(pm->cmd.buttons & BUTTON_ALT_ATTACK) && JK2O_TWEAKWEAPONS & WT_SLOW_SNIPER)//Sad hack to make instagib more playable
 		//	addTime = 1500;
 		break;
 	case WP_BOWCASTER:
@@ -11317,7 +11317,7 @@ if (pm->ps->duelInProgress)
 			addTime = 1050;
 		break;
 	case WP_THERMAL:
-		if (!pm->ps->stats[STAT_RACEMODE] && /*(g_tweakWeapons.integer & WT_IMPACT_NITRON) ||*/ (cgs.jcinfo2 & JAPRO_CINFO2_WTTRIBES))
+		if (!pm->ps->stats[STAT_RACEMODE] && /*(JK2O_TWEAKWEAPONS & WT_IMPACT_NITRON) ||*/ (cgs.jcinfo2 & JAPRO_CINFO2_WTTRIBES))
 			addTime = 1500;
 		break;
 	case WP_DET_PACK:
@@ -11355,7 +11355,7 @@ if (pm->ps->duelInProgress)
 #if _GAME
 #if _SPECIFICWEAPONTIME
 
-	if ((g_tweakWeapons.integer & WT_TRIBES) && !pm->ps->stats[STAT_RACEMODE]) {
+	if ((JK2O_TWEAKWEAPONS & WT_TRIBES) && !pm->ps->stats[STAT_RACEMODE]) {
 		int i;
 		for (i = 0; i < MAX_WEAPONS; i++) {
 			((gentity_t *)pm_entSelf)->client->specificWeaponTime[i] = 800;
@@ -11486,7 +11486,7 @@ static void PM_DropTimers( void ) {
 	}
 
 #ifdef _GAME
-	if (g_tweakSaber.integer & ST_FIXED_SABERSWITCH) {
+	if (JK2O_TWEAKSABER & ST_FIXED_SABERSWITCH) {
 		if (((gentity_t *)pm_entSelf)->client->saberDelayCount > 0) {
 			((gentity_t *)pm_entSelf)->client->saberDelayCount -= pml.msec;
 			((gentity_t *)pm_entSelf)->client->saberDelay = 1000;
@@ -11938,7 +11938,7 @@ void BG_CmdForRoll( playerState_t *ps, int anim, usercmd_t *pCmd )
 
 		/*
 #ifdef _GAME
-		if (g_fixRoll.integer > 2 && pCmd->forwardmove < 0)
+		if (JK2O_FIXROLL > 2 && pCmd->forwardmove < 0)
 			break;
 		pCmd->forwardmove = 127;
 		pCmd->rightmove = 0;
@@ -12111,7 +12111,7 @@ void BG_AdjustClientSpeed(playerState_t *ps, usercmd_t *cmd, int svTime)
 	if ( cmd->forwardmove < 0 && !(cmd->buttons&BUTTON_WALKING) && pm->ps->groundEntityNum != ENTITYNUM_NONE && !JK2SWINGS(ps) && !JK2SABER() )
 	{//running backwards is slower than running forwards (like SP)
 #ifdef _GAME
-		if (!(g_tweakSaber.integer & ST_ALLOW_ROLLCANCEL) || pm->ps->stats[STAT_RACEMODE])
+		if (!(JK2O_TWEAKSABER & ST_ALLOW_ROLLCANCEL) || pm->ps->stats[STAT_RACEMODE])
 #else
 		if (!(cgs.jcinfo & JAPRO_CINFO_ROLLCANCEL) || IsRacemode(pm->ps))
 #endif
@@ -12126,7 +12126,7 @@ void BG_AdjustClientSpeed(playerState_t *ps, usercmd_t *cmd, int svTime)
 			//keep grip at normal runspeed if in racemode like jk2
 		}
 #ifdef _GAME
-		else if (g_tweakForce.integer & FT_FASTGRIP)
+		else if (JK2O_TWEAKFORCE & FT_FASTGRIP)
 #else
 		if (cgs.serverMod == SVMOD_JAPLUS || (cgs.serverMod == SVMOD_JAPRO && cgs.jcinfo & JAPRO_CINFO_FASTGRIP))
 #endif
@@ -12138,7 +12138,7 @@ void BG_AdjustClientSpeed(playerState_t *ps, usercmd_t *cmd, int svTime)
 
 //JAPRO - Serverside - Force Combo - Start
 #ifdef _GAME
- 	if ((g_tweakForce.integer & FT_FORCECOMBO) && ps->fd.forcePowersActive & (1 << FP_SPEED) && ps->fd.forcePowersActive & (1 << FP_RAGE))
+ 	if ((JK2O_TWEAKFORCE & FT_FORCECOMBO) && ps->fd.forcePowersActive & (1 << FP_SPEED) && ps->fd.forcePowersActive & (1 << FP_RAGE))
 #else
 	if (cgs.serverMod == SVMOD_JAPRO && (cgs.jcinfo & JAPRO_CINFO_FORCECOMBO) && ps->fd.forcePowersActive & (1 << FP_SPEED) && ps->fd.forcePowersActive & (1 << FP_RAGE))
 #endif
@@ -12236,7 +12236,7 @@ void BG_AdjustClientSpeed(playerState_t *ps, usercmd_t *cmd, int svTime)
 
 	/*
 #ifdef _GAME
-	if (g_fixRoll.integer > 2)//fixroll 3
+	if (JK2O_FIXROLL > 2)//fixroll 3
 #else
 	if ((cgs.serverMod == SVMOD_JAPLUS && cgs.cinfo & JAPLUS_CINFO_FIXROLL3) || (cgs.serverMod == SVMOD_JAPRO && cgs.jcinfo & JAPRO_CINFO_FIXROLL3))//fixroll3
 #endif
@@ -12283,7 +12283,7 @@ void BG_AdjustClientSpeed(playerState_t *ps, usercmd_t *cmd, int svTime)
 	}
 /*
 #ifdef _GAME
-	else if (g_fixRoll.integer == 2)//fixroll 2
+	else if (JK2O_FIXROLL == 2)//fixroll 2
 #else
 	else if ((cgs.serverMod == SVMOD_JAPLUS && cgs.cinfo & JAPLUS_CINFO_FIXROLL2) || (cgs.serverMod == SVMOD_JAPRO && cgs.jcinfo & JAPRO_CINFO_FIXROLL2))//fixroll2
 #endif
@@ -12325,7 +12325,7 @@ void BG_AdjustClientSpeed(playerState_t *ps, usercmd_t *cmd, int svTime)
 
 /*
 #ifdef _GAME
-	else if (g_fixRoll.integer == 1)//fixroll 1
+	else if (JK2O_FIXROLL == 1)//fixroll 1
 #else
 	else if ((cgs.serverMod == SVMOD_JAPLUS && cgs.cinfo & JAPLUS_CINFO_FIXROLL1) || (cgs.serverMod == SVMOD_JAPRO && cgs.jcinfo & JAPRO_CINFO_FIXROLL1))//fixroll1
 #endif
@@ -14317,7 +14317,7 @@ void PmoveSingle (pmove_t *pmove) {
 			{
 //[JAPRO - Serverside - Saber - Tweak yellow dfa - Start]
 #ifdef _GAME
-				if (!(g_tweakSaber.integer & ST_FIXYELLOWDFA))
+				if (!(JK2O_TWEAKSABER & ST_FIXYELLOWDFA))
 #else
 				if (!((cgs.cinfo & JAPLUS_CINFO_YELLOWDFA) || (cgs.jcinfo & JAPRO_CINFO_YELLOWDFA)))
 #endif
@@ -14375,7 +14375,7 @@ void PmoveSingle (pmove_t *pmove) {
 	{
 		stiffenedUp = qtrue;
 #ifdef _GAME
-		if (!(g_tweakForce.integer & FT_BUFFMELEE) || (BG_InGrappleMove(pm->ps->torsoAnim) == 3))
+		if (!(JK2O_TWEAKFORCE & FT_BUFFMELEE) || (BG_InGrappleMove(pm->ps->torsoAnim) == 3))
 #endif
 			PM_SetPMViewAngle(pm->ps, pm->ps->viewangles, &pm->cmd);
 #ifdef _CGAME
@@ -14763,13 +14763,13 @@ void PmoveSingle (pmove_t *pmove) {
 	}
 	else
 #ifdef _GAME
-	if (pm->ps->saberMove == LS_A_BACKSTAB && !(g_tweakSaber.integer & ST_SPINBACKSLASH))
+	if (pm->ps->saberMove == LS_A_BACKSTAB && !(JK2O_TWEAKSABER & ST_SPINBACKSLASH))
 		PM_SetPMViewAngle(pm->ps, pm->ps->viewangles, &pm->cmd);
-	else if (pm->ps->saberMove == LS_A_JUMP_T__B_ && !(g_tweakSaber.integer & ST_SPINREDDFA))
+	else if (pm->ps->saberMove == LS_A_JUMP_T__B_ && !(JK2O_TWEAKSABER & ST_SPINREDDFA))
 		PM_SetPMViewAngle(pm->ps, pm->ps->viewangles, &pm->cmd);
-	else if ((pm->ps->saberMove == LS_A_BACK_CR || pm->ps->saberMove == LS_A_BACK) && !(g_tweakSaber.integer & ST_SPINBACKSLASH))
+	else if ((pm->ps->saberMove == LS_A_BACK_CR || pm->ps->saberMove == LS_A_BACK) && !(JK2O_TWEAKSABER & ST_SPINBACKSLASH))
 		PM_SetPMViewAngle(pm->ps, pm->ps->viewangles, &pm->cmd);
-	else if (pm->ps->saberMove == LS_A_LUNGE && (!(g_tweakSaber.integer & ST_JK2LUNGE) || pm->ps->stats[STAT_RACEMODE]))
+	else if (pm->ps->saberMove == LS_A_LUNGE && (!(JK2O_TWEAKSABER & ST_JK2LUNGE) || pm->ps->stats[STAT_RACEMODE]))
 		PM_SetPMViewAngle(pm->ps, pm->ps->viewangles, &pm->cmd);
 #else
 	if (pm->ps->saberMove == LS_A_BACKSTAB && !(cgs.jcinfo & JAPRO_CINFO_BACKSLASH)) //should be its own thing but ran out of cinfo bits
@@ -14954,7 +14954,7 @@ void PmoveSingle (pmove_t *pmove) {
 		PM_ThrustMove();
 	else
 #if _GAME
-	if (!pm->ps->stats[STAT_RACEMODE] && g_tweakWeapons.integer & WT_TRIBES) { //Tribes special
+	if (!pm->ps->stats[STAT_RACEMODE] && JK2O_TWEAKWEAPONS & WT_TRIBES) { //Tribes special
 	#else
 	if (!pm->ps->stats[STAT_RACEMODE] && cgs.jcinfo2 & JAPRO_CINFO2_WTTRIBES) {
 #endif
@@ -15721,7 +15721,7 @@ void PmoveSingle (pmove_t *pmove) {
 	if (pm->cmd.forcesel != (byte)-1 && (pm->ps->fd.forcePowersKnown & (1 << pm->cmd.forcesel)))
 	{
 #if _GAME
-		if (!(g_tweakWeapons.integer & WT_TRIBES) || pm->ps->stats[STAT_RACEMODE])
+		if (!(JK2O_TWEAKWEAPONS & WT_TRIBES) || pm->ps->stats[STAT_RACEMODE])
 #endif
 			pm->ps->fd.forcePowerSelected = pm->cmd.forcesel;
 	}

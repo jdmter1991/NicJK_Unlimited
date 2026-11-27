@@ -2882,7 +2882,7 @@ void BG_SaberStartTransAnim( int clientNum, int saberAnimLevel, int weapon, int 
 	}
 
 #ifdef _GAME
-	if ((g_tweakSaber.integer & ST_NO_REDCHAIN) && !level.clients[clientNum].sess.raceMode)
+	if ((JK2O_TWEAKSABER & ST_NO_REDCHAIN) && !level.clients[clientNum].sess.raceMode)
 #elif _CGAME
 	if (pm && JK2SWINGS(pm->ps))
 #endif

@@ -81,7 +81,7 @@ void G_ReflectMissile( gentity_t *ent, gentity_t *missile, vec3_t forward )
 		VectorNormalize( bounce_dir );
 	}
 
-	if (g_tweakForce.integer & FT_FIX_PROJ_PUSH) { // feature from base_enhanced where missile reflects in direction you are a
+	if (JK2O_TWEAKFORCE & FT_FIX_PROJ_PUSH) { // feature from base_enhanced where missile reflects in direction you are a
 		VectorCopy(forward, bounce_dir);
 		for (i = 0; i < 3; i++)
 			bounce_dir[i] += RandFloat(-0.1f, 0.1f); 
@@ -187,9 +187,9 @@ void G_BounceMissile( gentity_t *ent, trace_t *trace ) {
 	}
 	else if ( ent->flags & FL_BOUNCE_HALF )
 	{
-		if (ent->s.weapon == WP_REPEATER && g_tweakWeapons.integer & WT_TRIBES)
+		if (ent->s.weapon == WP_REPEATER && JK2O_TWEAKWEAPONS & WT_TRIBES)
 			VectorScale( ent->s.pos.trDelta, 0.3f, ent->s.pos.trDelta );
-		else if(ent->s.weapon == WP_FLECHETTE && g_tweakWeapons.integer & WT_TRIBES)
+		else if(ent->s.weapon == WP_FLECHETTE && JK2O_TWEAKWEAPONS & WT_TRIBES)
 			VectorScale(ent->s.pos.trDelta, 0.4f, ent->s.pos.trDelta);
 		else
 			VectorScale( ent->s.pos.trDelta, 0.65f, ent->s.pos.trDelta );
@@ -377,7 +377,7 @@ gentity_t *CreateMissileNew( vec3_t org, vec3_t dir, float vel, int life, gentit
 	if (owner->client && owner->client->sess.raceMode) {
 		missile->s.pos.trTime = level.time - MISSILE_PRESTEP_TIME;//this be why rocketjump fucks up at high speed
 	}
-	else if (g_unlagged.integer & UNLAGGED_PROJ_NUDGE && owner->client) {
+	else if (JK2O_UNLAGGED & UNLAGGED_PROJ_NUDGE && owner->client) {
 		//int prestep = 1000 / sv_fps.integer;
 		//int amount = (owner->client->ps.ping + prestep) * 0.5f;
 		int amount = owner->client->ps.ping * 0.9;
@@ -409,11 +409,11 @@ gentity_t *CreateMissileNew( vec3_t org, vec3_t dir, float vel, int life, gentit
 		if (inheritance == 2) { //Forced
 			VectorMA(newDir, 1.0f / vel, owner->client->ps.velocity, newDir);
 		}
-		else if (g_fullInheritance.integer && !owner->client->sess.raceMode) {
-			VectorMA(newDir, g_projectileInheritance.value/vel, owner->client->ps.velocity, newDir);
+		else if (JK2O_FULLINHERITANCE && !owner->client->sess.raceMode) {
+			VectorMA(newDir, JK2O_PROJINHERITANCE/vel, owner->client->ps.velocity, newDir);
 		}
 		else {
-			newVel = newVel + DotProduct(newDir, owner->client->ps.velocity)*g_projectileInheritance.value;
+			newVel = newVel + DotProduct(newDir, owner->client->ps.velocity)*JK2O_PROJINHERITANCE;
 		}
 	}
 
@@ -473,8 +473,8 @@ void G_MissileImpact( gentity_t *ent, trace_t *trace ) {
 		(ent->bounceCount > 0 || ent->bounceCount == -5) &&
 		( ent->flags & ( FL_BOUNCE | FL_BOUNCE_HALF ) ) &&
 		(
-		((g_tweakWeapons.integer & WT_TRIBES) && ent->s.weapon == WP_REPEATER && ent->setTime && level.time - ent->setTime < 1000) ||
-		((g_tweakWeapons.integer & WT_TRIBES) && ent->s.weapon == WP_FLECHETTE && ent->setTime && level.time - ent->setTime < 1000)
+		((JK2O_TWEAKWEAPONS & WT_TRIBES) && ent->s.weapon == WP_REPEATER && ent->setTime && level.time - ent->setTime < 1000) ||
+		((JK2O_TWEAKWEAPONS & WT_TRIBES) && ent->s.weapon == WP_FLECHETTE && ent->setTime && level.time - ent->setTime < 1000)
 		)
 		)
 	{ //if its a direct hit and first 500ms of mortar, bounce off player.
@@ -488,7 +488,7 @@ void G_MissileImpact( gentity_t *ent, trace_t *trace ) {
 		(ent->bounceCount > 0 || ent->bounceCount == -5) &&
 		(ent->flags & (FL_BOUNCE | FL_BOUNCE_HALF))) {
 
-		if ((g_tweakWeapons.integer & WT_TRIBES) && (ent->s.weapon == WP_REPEATER || ent->s.weapon == WP_FLECHETTE)) {
+		if ((JK2O_TWEAKWEAPONS & WT_TRIBES) && (ent->s.weapon == WP_REPEATER || ent->s.weapon == WP_FLECHETTE)) {
 		}
 		else {
 
@@ -788,7 +788,7 @@ void G_MissileImpact( gentity_t *ent, trace_t *trace ) {
 
 			VectorNormalize(velocity);
 
-			if (g_tweakWeapons.integer & WT_TRIBES)
+			if (JK2O_TWEAKWEAPONS & WT_TRIBES)
 				VectorScale(velocity, 400, velocity);
 			else
 				VectorScale(velocity, 100, velocity);
@@ -796,7 +796,7 @@ void G_MissileImpact( gentity_t *ent, trace_t *trace ) {
 			VectorAdd(velocity, other->s.pos.trDelta, other->s.pos.trDelta);
 			VectorCopy(other->r.currentOrigin, other->s.pos.trBase);
 		}
-		else if (ent->s.weapon == WP_BOWCASTER && (g_tweakWeapons.integer & WT_TRIBES))
+		else if (ent->s.weapon == WP_BOWCASTER && (JK2O_TWEAKWEAPONS & WT_TRIBES))
 		{
 			other->s.pos.trType = TR_GRAVITY;
 			other->s.pos.trTime = level.time;
@@ -877,7 +877,7 @@ void G_MissileImpact( gentity_t *ent, trace_t *trace ) {
 
 #if 0
 			//damage falloff option, assumes bullet lifetime is 10,000 (default)
-			if ((g_tweakWeapons.integer & WT_TRIBES) &&
+			if ((JK2O_TWEAKWEAPONS & WT_TRIBES) &&
 				((ent->s.weapon == WP_BLASTER && (ent->s.eFlags & EF_ALT_FIRING)) ||
 				(ent->s.weapon == WP_REPEATER && !(ent->s.eFlags & EF_ALT_FIRING))	
 				))
@@ -1116,7 +1116,7 @@ killProj:
 		//With the tribes GL, for some reason if called via lasertrapexplode, v[0], v[1], v[2] are super high (basicaly the trdelta of the missile that lands on the ground) making it not render the FX properly.
 		//This is a seperate issue from the FX not even being told to render because for some reason the client has commented out that code in EV_MISSILE_MISS for the flechette alt fire.
 		//This needs to be actually fixed instead of whatever this sad hack is. "TRIBES GL"
-		if ((g_tweakWeapons.integer & WT_TRIBES) && ent->s.weapon == WP_FLECHETTE && ent->think == WP_flechette_alt_blow) {
+		if ((JK2O_TWEAKWEAPONS & WT_TRIBES) && ent->s.weapon == WP_FLECHETTE && ent->think == WP_flechette_alt_blow) {
 			vec3_t v = { 0 };
 			G_PlayEffect(EFFECT_EXPLOSION_FLECHETTE, ent->r.currentOrigin, v);
 		}
@@ -1173,14 +1173,14 @@ void G_RunMissile( gentity_t *ent ) {
 
 	// get current position
 	BG_EvaluateTrajectory( &ent->s.pos, level.time, origin );
-	if ((g_tweakWeapons.integer & WT_TRIBES) && ent->s.pos.trType == TR_GRAVITY) {
+	if ((JK2O_TWEAKWEAPONS & WT_TRIBES) && ent->s.pos.trType == TR_GRAVITY) {
 		float deltaTime = (level.time - ent->s.pos.trTime) * 0.001;
 		ent->s.pos.trBase[2] += (int)((5.0f * deltaTime)+0.5f);//Re add some Z height to the projectile to hack it having "lower gravity"
 	}
 
 
 	//If its a rocket, and older than 500ms, make it solid to the shooter.
-	if ((g_tweakWeapons.integer & WT_SOLID_ROCKET) && (ent->s.weapon == WP_ROCKET_LAUNCHER) && (!ent->raceModeShooter) && (ent->nextthink - level.time < 9500)) {
+	if ((JK2O_TWEAKWEAPONS & WT_SOLID_ROCKET) && (ent->s.weapon == WP_ROCKET_LAUNCHER) && (!ent->raceModeShooter) && (ent->nextthink - level.time < 9500)) {
 		ent->r.ownerNum = ENTITYNUM_WORLD;
 	}
 
@@ -1204,7 +1204,7 @@ void G_RunMissile( gentity_t *ent ) {
 
 #if 1
 	//feature to scale up hitbox as a function of lifetime
-	if (g_tweakWeapons.integer & WT_TRIBES) {
+	if (JK2O_TWEAKWEAPONS & WT_TRIBES) {
 		if (ent->r.maxs[2] < 48) {
 			gentity_t *shooter = &g_entities[passent];
 
@@ -1224,7 +1224,7 @@ void G_RunMissile( gentity_t *ent ) {
 
 
 	// trace a line from the previous position to the current position
-	if (d_projectileGhoul2Collision.integer == 1) //JAPRO - Serverside - Weapons - New Hitbox Option
+	if (JK2O_PROJG2COLLISION == 1) //JAPRO - Serverside - Weapons - New Hitbox Option
 	{
 		JP_Trace( &tr, ent->r.currentOrigin, ent->r.mins, ent->r.maxs, origin, passent, ent->clipmask, qfalse, G2TRFLAG_DOGHOULTRACE|G2TRFLAG_GETSURFINDEX|G2TRFLAG_THICK|G2TRFLAG_HITCORPSES, g_g2TraceLod.integer );
 
@@ -1432,7 +1432,7 @@ gentity_t *fire_grapple(gentity_t *self, vec3_t start, vec3_t dir) {
 
 	hook->s.pos.trType = TR_LINEAR;
 
-	if (g_unlagged.integer & UNLAGGED_PROJ_NUDGE && self->client) {
+	if (JK2O_UNLAGGED & UNLAGGED_PROJ_NUDGE && self->client) {
 		//int amount = (owner->client->ps.ping + (1000 / sv_fps.integer)) * 0.5f;
 		int amount = self->client->ps.ping * 0.9;
 

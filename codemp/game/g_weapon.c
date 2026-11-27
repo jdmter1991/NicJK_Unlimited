@@ -35,32 +35,32 @@ static vec3_t muzzle;
 
 // Bryar Pistol
 //--------
-#define BRYAR_PISTOL_VEL			1600 * g_projectileVelocityScale.value
-#define BRYAR_PISTOL_DAMAGE			10 * g_weaponDamageScale.value
+#define BRYAR_PISTOL_VEL			1600 * JK2O_PROJVELOCITYSCALE
+#define BRYAR_PISTOL_DAMAGE			10 * JK2O_WEAPONDAMAGESCALE
 #define BRYAR_CHARGE_UNIT			200.0f	// bryar charging gives us one more unit every 200ms--if you change this, you'll have to do the same in bg_pmove
 #define BRYAR_ALT_SIZE				1.0f
 
 // E11 Blaster
 //---------
 #define BLASTER_SPREAD				1.6f//1.2f
-#define BLASTER_VELOCITY			2300 * g_projectileVelocityScale.value
-#define BLASTER_DAMAGE				20 * g_weaponDamageScale.value
+#define BLASTER_VELOCITY			2300 * JK2O_PROJVELOCITYSCALE
+#define BLASTER_DAMAGE				20 * JK2O_WEAPONDAMAGESCALE
 
 // Tenloss Disruptor
 //----------
-#define DISRUPTOR_MAIN_DAMAGE			30  * g_weaponDamageScale.value//40
+#define DISRUPTOR_MAIN_DAMAGE			30  * JK2O_WEAPONDAMAGESCALE//40
 #define DISRUPTOR_MAIN_DAMAGE_SIEGE		50
 #define DISRUPTOR_NPC_MAIN_DAMAGE_CUT	0.25f
 
-#define DISRUPTOR_ALT_DAMAGE			100  * g_weaponDamageScale.value//125
+#define DISRUPTOR_ALT_DAMAGE			100  * JK2O_WEAPONDAMAGESCALE//125
 #define DISRUPTOR_NPC_ALT_DAMAGE_CUT	0.2f
 #define DISRUPTOR_ALT_TRACES			3		// can go through a max of 3 damageable(sp?) entities
 #define DISRUPTOR_CHARGE_UNIT			50.0f	// distruptor charging gives us one more unit every 50ms--if you change this, you'll have to do the same in bg_pmove
 
 // Wookiee Bowcaster
 //----------
-#define	BOWCASTER_DAMAGE			50 * g_weaponDamageScale.value
-#define	BOWCASTER_VELOCITY			1300 * g_projectileVelocityScale.value
+#define	BOWCASTER_DAMAGE			50 * JK2O_WEAPONDAMAGESCALE
+#define	BOWCASTER_VELOCITY			1300 * JK2O_PROJVELOCITYSCALE
 //#define BOWCASTER_SPLASH_DAMAGE		0 
 //#define BOWCASTER_SPLASH_RADIUS		0
 #define BOWCASTER_SIZE				2
@@ -72,23 +72,23 @@ static vec3_t muzzle;
 // Heavy Repeater
 //----------
 #define REPEATER_SPREAD				1.4f
-#define	REPEATER_DAMAGE				14 * g_weaponDamageScale.value
-#define	REPEATER_VELOCITY			1600 * g_projectileVelocityScale.value
+#define	REPEATER_DAMAGE				14 * JK2O_WEAPONDAMAGESCALE
+#define	REPEATER_VELOCITY			1600 * JK2O_PROJVELOCITYSCALE
 
 #define REPEATER_ALT_SIZE				3	// half of bbox size
-#define	REPEATER_ALT_DAMAGE				60 * g_weaponDamageScale.value
-#define REPEATER_ALT_SPLASH_DAMAGE		60 * g_splashDamageScale.value
+#define	REPEATER_ALT_DAMAGE				60 * JK2O_WEAPONDAMAGESCALE
+#define REPEATER_ALT_SPLASH_DAMAGE		60 * JK2O_SPLASHDAMAGESCALE
 #define REPEATER_ALT_SPLASH_RADIUS		128
 #define REPEATER_ALT_SPLASH_RAD_SIEGE	80
-#define	REPEATER_ALT_VELOCITY			1100 * g_projectileVelocityScale.value
+#define	REPEATER_ALT_VELOCITY			1100 * JK2O_PROJVELOCITYSCALE
 
 // DEMP2
 //----------
-#define	DEMP2_DAMAGE				35 * g_weaponDamageScale.value
-#define	DEMP2_VELOCITY				1800 * g_projectileVelocityScale.value
+#define	DEMP2_DAMAGE				35 * JK2O_WEAPONDAMAGESCALE
+#define	DEMP2_VELOCITY				1800 * JK2O_PROJVELOCITYSCALE
 #define	DEMP2_SIZE					2		// half of bbox size
 
-#define DEMP2_ALT_DAMAGE			8  * g_weaponDamageScale.value//12		// does 12, 36, 84 at each of the 3 charge levels.
+#define DEMP2_ALT_DAMAGE			8  * JK2O_WEAPONDAMAGESCALE//12		// does 12, 36, 84 at each of the 3 charge levels.
 #define DEMP2_CHARGE_UNIT			700.0f	// demp2 charging gives us one more unit every 700ms--if you change this, you'll have to do the same in bg_weapons
 #define DEMP2_ALT_RANGE				4096
 #define DEMP2_ALT_SPLASHRADIUS		256
@@ -97,19 +97,19 @@ static vec3_t muzzle;
 //---------
 #define FLECHETTE_SHOTS				5
 #define FLECHETTE_SPREAD			4.0f
-#define FLECHETTE_DAMAGE			12 * g_weaponDamageScale.value//15
-#define FLECHETTE_VEL				3500 * g_projectileVelocityScale.value
+#define FLECHETTE_DAMAGE			12 * JK2O_WEAPONDAMAGESCALE//15
+#define FLECHETTE_VEL				3500 * JK2O_PROJVELOCITYSCALE
 #define FLECHETTE_SIZE				1
 #define FLECHETTE_MINE_RADIUS_CHECK	256
-#define FLECHETTE_ALT_DAMAGE		60 * g_weaponDamageScale.value
-#define FLECHETTE_ALT_SPLASH_DAM	60 * g_splashDamageScale.value
+#define FLECHETTE_ALT_DAMAGE		60 * JK2O_WEAPONDAMAGESCALE
+#define FLECHETTE_ALT_SPLASH_DAM	60 * JK2O_SPLASHDAMAGESCALE
 #define FLECHETTE_ALT_SPLASH_RAD	128
 
 // Personal Rocket Launcher
 //---------
-#define	ROCKET_VELOCITY				900 * g_projectileVelocityScale.value
-#define	ROCKET_DAMAGE				100 * g_weaponDamageScale.value
-#define	ROCKET_SPLASH_DAMAGE		100 * g_splashDamageScale.value
+#define	ROCKET_VELOCITY				900 * JK2O_PROJVELOCITYSCALE
+#define	ROCKET_DAMAGE				100 * JK2O_WEAPONDAMAGESCALE
+#define	ROCKET_SPLASH_DAMAGE		100 * JK2O_SPLASHDAMAGESCALE
 #define	ROCKET_SPLASH_RADIUS		160
 #define ROCKET_SIZE					3
 #define ROCKET_ALT_THINK_TIME		100
@@ -119,15 +119,15 @@ static vec3_t muzzle;
 //primary
 //man, this thing is too absurdly powerful. having to
 //slash the values way down from sp.
-#define	CONC_VELOCITY				3000 * g_projectileVelocityScale.value
-#define	CONC_DAMAGE					75  * g_weaponDamageScale.value//150
+#define	CONC_VELOCITY				3000 * JK2O_PROJVELOCITYSCALE
+#define	CONC_DAMAGE					75  * JK2O_WEAPONDAMAGESCALE//150
 #define	CONC_NPC_DAMAGE_EASY		40
 #define	CONC_NPC_DAMAGE_NORMAL		80
 #define	CONC_NPC_DAMAGE_HARD		100
-#define	CONC_SPLASH_DAMAGE			40  * g_splashDamageScale.value//50
+#define	CONC_SPLASH_DAMAGE			40  * JK2O_SPLASHDAMAGESCALE//50
 #define	CONC_SPLASH_RADIUS			200 //300
 //alt
-#define CONC_ALT_DAMAGE				25  * g_weaponDamageScale.value//100
+#define CONC_ALT_DAMAGE				25  * JK2O_WEAPONDAMAGESCALE//100
 #define CONC_ALT_NPC_DAMAGE_EASY	20
 #define CONC_ALT_NPC_DAMAGE_MEDIUM	35
 #define CONC_ALT_NPC_DAMAGE_HARD	50
@@ -140,20 +140,20 @@ static vec3_t muzzle;
 
 // Melee
 //--------------
-#define MELEE_SWING1_DAMAGE			10 * g_weaponDamageScale.value
-#define MELEE_SWING2_DAMAGE			12 * g_weaponDamageScale.value
+#define MELEE_SWING1_DAMAGE			10 * JK2O_WEAPONDAMAGESCALE
+#define MELEE_SWING2_DAMAGE			12 * JK2O_WEAPONDAMAGESCALE
 #define MELEE_RANGE					8
 
 // ATST Main Gun
 //--------------
-#define ATST_MAIN_VEL				4000 * g_projectileVelocityScale.value// 
-#define ATST_MAIN_DAMAGE			25 * g_weaponDamageScale.value// 
+#define ATST_MAIN_VEL				4000 * JK2O_PROJVELOCITYSCALE// 
+#define ATST_MAIN_DAMAGE			25 * JK2O_WEAPONDAMAGESCALE// 
 #define ATST_MAIN_SIZE				3		// make it easier to hit things
 
 // ATST Side Gun
 //---------------
-#define ATST_SIDE_MAIN_DAMAGE				75 * g_weaponDamageScale.value
-#define ATST_SIDE_MAIN_VELOCITY				1300 * g_projectileVelocityScale.value
+#define ATST_SIDE_MAIN_DAMAGE				75 * JK2O_WEAPONDAMAGESCALE
+#define ATST_SIDE_MAIN_VELOCITY				1300 * JK2O_PROJVELOCITYSCALE
 #define ATST_SIDE_MAIN_NPC_DAMAGE_EASY		30
 #define ATST_SIDE_MAIN_NPC_DAMAGE_NORMAL	40
 #define ATST_SIDE_MAIN_NPC_DAMAGE_HARD		50
@@ -161,15 +161,15 @@ static vec3_t muzzle;
 #define ATST_SIDE_MAIN_SPLASH_DAMAGE		10	// yeah, pretty small, either zero out or make it worth having?
 #define ATST_SIDE_MAIN_SPLASH_RADIUS		16	// yeah, pretty small, either zero out or make it worth having?
 
-#define ATST_SIDE_ALT_VELOCITY				1100 * g_projectileVelocityScale.value
+#define ATST_SIDE_ALT_VELOCITY				1100 * JK2O_PROJVELOCITYSCALE
 #define ATST_SIDE_ALT_NPC_VELOCITY			600
-#define ATST_SIDE_ALT_DAMAGE				130 * g_weaponDamageScale.value
+#define ATST_SIDE_ALT_DAMAGE				130 * JK2O_WEAPONDAMAGESCALE
 
 #define ATST_SIDE_ROCKET_NPC_DAMAGE_EASY	30
 #define ATST_SIDE_ROCKET_NPC_DAMAGE_NORMAL	50
 #define ATST_SIDE_ROCKET_NPC_DAMAGE_HARD	90
 
-#define	ATST_SIDE_ALT_SPLASH_DAMAGE			130 * g_weaponDamageScale.value
+#define	ATST_SIDE_ALT_SPLASH_DAMAGE			130 * JK2O_WEAPONDAMAGESCALE
 #define	ATST_SIDE_ALT_SPLASH_RADIUS			200
 #define ATST_SIDE_ALT_ROCKET_SIZE			5
 #define ATST_SIDE_ALT_ROCKET_SPLASH_SCALE	0.5f	// scales splash for NPC's
@@ -193,7 +193,7 @@ void RocketDie(gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int d
 //We should really organize weapon data into tables or parse from the ext data so we have accurate info for this,
 float WP_SpeedOfMissileForWeapon( int wp, qboolean alt_fire )
 {
-	if (g_tweakWeapons.integer & WT_TRIBES) {
+	if (JK2O_TWEAKWEAPONS & WT_TRIBES) {
 		if (wp == WP_CONCUSSION)
 			return 2000 * g_projectileVelocityScale.integer;
 		if (wp == WP_BLASTER)
@@ -275,7 +275,7 @@ static void WP_FireColt(gentity_t *ent, qboolean altFire)
 	VectorMA(start, shotRange, forward, end);
 	VectorMA(start, 1, vright, start);
 
-	if (g_unlagged.integer & UNLAGGED_HITSCAN)
+	if (JK2O_UNLAGGED & UNLAGGED_HITSCAN)
 		G_TimeShiftAllClients(ent->client->pers.cmd.serverTime, ent, qfalse);
 
 	ignore = ent->s.number;
@@ -284,21 +284,21 @@ static void WP_FireColt(gentity_t *ent, qboolean altFire)
 
 	if (tr.entityNum == ENTITYNUM_NONE)
 	{
-		if (g_unlagged.integer & UNLAGGED_HITSCAN)
+		if (JK2O_UNLAGGED & UNLAGGED_HITSCAN)
 			G_UnTimeShiftAllClients(ent, qfalse);
 		return;
 	}
 	//fix: shooting ourselves shouldn't be allowed
 	if (tr.entityNum == ent->s.number)
 	{
-		if (g_unlagged.integer & UNLAGGED_HITSCAN)
+		if (JK2O_UNLAGGED & UNLAGGED_HITSCAN)
 			G_UnTimeShiftAllClients(ent, qfalse);
 		return;
 	}
 
 	traceEnt = &g_entities[tr.entityNum];
 
-	if (g_unlagged.integer & UNLAGGED_HITSCAN)
+	if (JK2O_UNLAGGED & UNLAGGED_HITSCAN)
 		G_UnTimeShiftAllClients(ent, qfalse);
 
 	/*
@@ -320,7 +320,7 @@ static void WP_FireColt(gentity_t *ent, qboolean altFire)
 		else
 			damage = 15;
 
-		damage *= g_weaponDamageScale.value;
+		damage *= JK2O_WEAPONDAMAGESCALE;
 
 		if (traceEnt->client && LogAccuracyHit(traceEnt, ent))
 		{
@@ -357,10 +357,10 @@ static void WP_FireBryarPistol( gentity_t *ent, qboolean altFire, int seed )
 
 	VectorCopy(forward, dir);
 
-	if (ent && ent->client && g_tweakWeapons.integer & WT_TRIBES) { //Chaingun Overheat mechanic
-		damage = 6*g_weaponDamageScale.value;
+	if (ent && ent->client && JK2O_TWEAKWEAPONS & WT_TRIBES) { //Chaingun Overheat mechanic
+		damage = 6*JK2O_WEAPONDAMAGESCALE;
 		charge = 400;
-		vel = 10440 * g_projectileVelocityScale.value;
+		vel = 10440 * JK2O_PROJVELOCITYSCALE;
 		if (ent->client->ps.jetpackFuel > 0)
 			ent->client->ps.jetpackFuel -= 10;
 		if (ent->client->ps.jetpackFuel < 0)
@@ -368,13 +368,13 @@ static void WP_FireBryarPistol( gentity_t *ent, qboolean altFire, int seed )
 		ent->client->overheatDebReduce = level.time + 200;
 	}
 	else {
-		vel = BRYAR_PISTOL_VEL * g_projectileVelocityScale.value;
-		damage = BRYAR_PISTOL_DAMAGE * g_projectileVelocityScale.value;
+		vel = BRYAR_PISTOL_VEL * JK2O_PROJVELOCITYSCALE;
+		damage = BRYAR_PISTOL_DAMAGE * JK2O_PROJVELOCITYSCALE;
 		charge = BRYAR_CHARGE_UNIT;
 	}
 
 
-	if (!altFire && (g_tweakWeapons.integer & WT_TRIBES))
+	if (!altFire && (JK2O_TWEAKWEAPONS & WT_TRIBES))
 	{
 		float slop = 0.4f;
 		vec3_t angs;
@@ -382,7 +382,7 @@ static void WP_FireBryarPistol( gentity_t *ent, qboolean altFire, int seed )
 		vectoangles(forward, angs);
 
 		// add some slop to the alt-fire direction
-		if (g_tweakWeapons.integer & WT_PSEUDORANDOM_FIRE)
+		if (JK2O_TWEAKWEAPONS & WT_PSEUDORANDOM_FIRE)
 		{
 			float theta = M_PI * Q_crandom(&seed); //Lets use circular spread instead of the shitty box spread?
 			float r = Q_random(&seed);
@@ -419,13 +419,13 @@ static void WP_FireBryarPistol( gentity_t *ent, qboolean altFire, int seed )
 			count = 5;
 		}
 
-		if (ent && ent->client && g_tweakWeapons.integer & WT_TRIBES) { //Chaingun Overheat mechanic
+		if (ent && ent->client && JK2O_TWEAKWEAPONS & WT_TRIBES) { //Chaingun Overheat mechanic
 			ent->client->ps.jetpackFuel -= count * 6;
 		}
 
 		if (count > 1)
 		{
-			if (count > 4 && (g_tweakWeapons.integer & WT_NERFED_PISTOL)) {
+			if (count > 4 && (JK2O_TWEAKWEAPONS & WT_NERFED_PISTOL)) {
 				damage *= 7; //70 dmg
 			}
 			else {
@@ -460,7 +460,7 @@ static void WP_FireBryarPistol( gentity_t *ent, qboolean altFire, int seed )
 	// we don't want it to bounce forever
 	missile->bounceCount = 8;
 
-	if (g_tweakWeapons.integer & WT_PROJECTILE_GRAVITY) //JAPRO - Serverside - Give bullets gravity!
+	if (JK2O_TWEAKWEAPONS & WT_PROJECTILE_GRAVITY) //JAPRO - Serverside - Give bullets gravity!
 		missile->s.pos.trType = TR_GRAVITY;
 }
 
@@ -590,19 +590,19 @@ void WP_FireBlasterMissile( gentity_t *ent, vec3_t start, vec3_t dir, qboolean a
 
 	if (ent->s.eType == ET_NPC)
 	{ //animent
-		if (g_tweakWeapons.integer & WT_TRIBES) {
-			velocity = 10440 * g_projectileVelocityScale.value;//10440 but thats too fast?
-			damage = 7 * g_weaponDamageScale.value;
+		if (JK2O_TWEAKWEAPONS & WT_TRIBES) {
+			velocity = 10440 * JK2O_PROJVELOCITYSCALE;//10440 but thats too fast?
+			damage = 7 * JK2O_WEAPONDAMAGESCALE;
 		}
-		else damage = 10 * g_weaponDamageScale.value;
+		else damage = 10 * JK2O_WEAPONDAMAGESCALE;
 	}
 	else if (ent->client && ent->client->sess.movementStyle == MV_COOP_JKA) {//JAPRO - Serverside - Allow plasmaclimbing plasmagun
 		velocity = 2000;
 		damage = 20;
 	}
-	else if (g_tweakWeapons.integer & WT_TRIBES) {
-		velocity = 10440 * g_projectileVelocityScale.value;//10440 but thats too fast?
-		damage = 6 * g_weaponDamageScale.value;
+	else if (JK2O_TWEAKWEAPONS & WT_TRIBES) {
+		velocity = 10440 * JK2O_PROJVELOCITYSCALE;//10440 but thats too fast?
+		damage = 6 * JK2O_WEAPONDAMAGESCALE;
 	}
 	missile = CreateMissileNew( start, dir, velocity, 10000, ent, altFire, qtrue, qtrue );
 
@@ -617,7 +617,7 @@ void WP_FireBlasterMissile( gentity_t *ent, vec3_t start, vec3_t dir, qboolean a
 	// we don't want it to bounce forever
 	missile->bounceCount = 8;
 
-	if (ent->client && !ent->client->sess.raceMode && (g_tweakWeapons.integer & WT_PROJECTILE_GRAVITY)) //JAPRO - Serverside - Give bullets gravity!
+	if (ent->client && !ent->client->sess.raceMode && (JK2O_TWEAKWEAPONS & WT_PROJECTILE_GRAVITY)) //JAPRO - Serverside - Give bullets gravity!
 		missile->s.pos.trType = TR_GRAVITY;
 
 	if (ent->client && ent->client->sess.movementStyle == MV_COOP_JKA) {//JAPRO - Serverside - Allow plasmaclimbing plasmagun
@@ -644,8 +644,8 @@ void WP_FireTurboLaserMissile( gentity_t *ent, vec3_t start, vec3_t dir )
 	missile->classname = "turbo_proj";
 	missile->s.weapon = WP_TURRET;
 
-	missile->damage = ent->damage * g_weaponDamageScale.value;		//FIXME: externalize
-	missile->splashDamage = ent->splashDamage * g_splashDamageScale.value;	//FIXME: externalize
+	missile->damage = ent->damage * JK2O_WEAPONDAMAGESCALE;		//FIXME: externalize
+	missile->splashDamage = ent->splashDamage * JK2O_SPLASHDAMAGESCALE;	//FIXME: externalize
 	missile->splashRadius = ent->splashRadius;	//FIXME: externalize
 	missile->dflags = DAMAGE_DEATH_KNOCKBACK;
 	missile->methodOfDeath = MOD_TURBLAST; //count as a heavy weap
@@ -700,7 +700,7 @@ static void WP_FireBlaster( gentity_t *ent, qboolean altFire, int seed )
 
 	vectoangles( forward, angs );
 
-	if (ent && ent->client && g_tweakWeapons.integer & WT_TRIBES) { //Chaingun Overheat mechanic
+	if (ent && ent->client && JK2O_TWEAKWEAPONS & WT_TRIBES) { //Chaingun Overheat mechanic
 		if (ent->client->ps.jetpackFuel > 0) {
 			if (altFire)
 				ent->client->ps.jetpackFuel -= 12;
@@ -712,19 +712,19 @@ static void WP_FireBlaster( gentity_t *ent, qboolean altFire, int seed )
 		ent->client->overheatDebReduce = level.time + 200;
 	}
 
-	if ( altFire || (g_tweakWeapons.integer & WT_TRIBES))
+	if ( altFire || (JK2O_TWEAKWEAPONS & WT_TRIBES))
 	{
 		float slop = 0.15f;
-		if (altFire && (g_tweakWeapons.integer & WT_TRIBES)) {
+		if (altFire && (JK2O_TWEAKWEAPONS & WT_TRIBES)) {
 			slop = 1.0f;
 		}
 		// add some slop to the alt-fire direction
-		if (g_tweakWeapons.integer & WT_PSEUDORANDOM_FIRE)
+		if (JK2O_TWEAKWEAPONS & WT_PSEUDORANDOM_FIRE)
 		{
 			float theta = M_PI * Q_crandom(&seed); //Lets use circular spread instead of the shitty box spread?
 			float r = Q_random(&seed) * BLASTER_SPREAD;
 
-			if (g_tweakWeapons.integer & WT_TRIBES) {
+			if (JK2O_TWEAKWEAPONS & WT_TRIBES) {
 				angs[PITCH] += r*slop * sin(theta); //r should be squared? r*r
 				angs[YAW] += r*slop * cos(theta);
 			}
@@ -735,7 +735,7 @@ static void WP_FireBlaster( gentity_t *ent, qboolean altFire, int seed )
 		}
 		else
 		{
-			if (g_tweakWeapons.integer & WT_TRIBES) {
+			if (JK2O_TWEAKWEAPONS & WT_TRIBES) {
 				angs[PITCH] += Q_flrand(-1.0f, 1.0f) * BLASTER_SPREAD * slop;
 				angs[YAW] += Q_flrand(-1.0f, 1.0f) * BLASTER_SPREAD * slop;
 			}
@@ -780,12 +780,12 @@ static void WP_DisruptorMainFire( gentity_t *ent )
 		damage = DISRUPTOR_MAIN_DAMAGE_SIEGE;
 	}
 
-	if (d_projectileGhoul2Collision.integer) {
+	if (JK2O_PROJG2COLLISION) {
 		ghoul2 = qtrue;
 	}
 
-	if (g_tweakWeapons.integer & WT_TRIBES)
-		damage = 15 * g_weaponDamageScale.value;
+	if (JK2O_TWEAKWEAPONS & WT_TRIBES)
+		damage = 15 * JK2O_WEAPONDAMAGESCALE;
 
 	memset(&tr, 0, sizeof(tr)); //to shut the compiler up
 
@@ -794,7 +794,7 @@ static void WP_DisruptorMainFire( gentity_t *ent )
 
 	VectorMA( start, shotRange, forward, end );
 
-	if ( g_unlagged.integer & UNLAGGED_HITSCAN )
+	if ( JK2O_UNLAGGED & UNLAGGED_HITSCAN )
 		G_TimeShiftAllClients( ent->client->pers.cmd.serverTime, ent, ghoul2 );
 
 	ignore = ent->s.number;
@@ -870,7 +870,7 @@ static void WP_DisruptorMainFire( gentity_t *ent )
 		break;
 	}
 
-	if ( g_unlagged.integer & UNLAGGED_HITSCAN )
+	if ( JK2O_UNLAGGED & UNLAGGED_HITSCAN )
 		G_UnTimeShiftAllClients( ent, ghoul2 );
 
 	if ( tr.surfaceFlags & SURF_NOIMPACT ) 
@@ -938,18 +938,18 @@ void WP_DisruptorProjectileFire(gentity_t* ent, qboolean altFire)
 	float count;
 	float vel = 9000;
 
-	if (g_tweakWeapons.integer & WT_TRIBES)
+	if (JK2O_TWEAKWEAPONS & WT_TRIBES)
 		vel = 32000;
 
 	VectorMA( muzzle, -6, vright, muzzle );//temp fix but we should rewrite calcmuzzlepoint since this actually affects all weapons but is only really noticible with sniper
 	VectorMA(muzzle, 6, up, muzzle);
 
-	missile = CreateMissileNew(muzzle, forward, vel * g_projectileVelocityScale.value, 10000, ent, altFire, qtrue, qtrue);
+	missile = CreateMissileNew(muzzle, forward, vel * JK2O_PROJVELOCITYSCALE, 10000, ent, altFire, qtrue, qtrue);
 
 	if (altFire) {
 		count = (level.time - ent->client->ps.weaponChargeTime) / 50.0f;
 
-		if (g_tweakWeapons.integer & WT_TRIBES)
+		if (JK2O_TWEAKWEAPONS & WT_TRIBES)
 			damage = 20;
 		else
 			damage = 50;
@@ -959,11 +959,11 @@ void WP_DisruptorProjectileFire(gentity_t* ent, qboolean altFire)
 		else if (count > 30)
 			count = 30;
 
-		if (g_tweakWeapons.integer & WT_TRIBES)
+		if (JK2O_TWEAKWEAPONS & WT_TRIBES)
 			damage += count * 1.5f;
 		else
 			damage += count * 2.5f;
-		damage *= g_weaponDamageScale.value;
+		damage *= JK2O_WEAPONDAMAGESCALE;
 
 		count = ((count - 1.0f) / (30.0f - 1.0f)) * (20.0f - 1.0f) + 1.0f;//scale count back down to the 1-5 range for bullet size
 		if (count < 2)
@@ -972,15 +972,15 @@ void WP_DisruptorProjectileFire(gentity_t* ent, qboolean altFire)
 		missile->s.generic1 = (int)(count + 0.5f); // The missile will then render according to the charge level.
 	}
 	else {
-		if (g_tweakWeapons.integer & WT_TRIBES)
-			damage = 15 * g_weaponDamageScale.value;
+		if (JK2O_TWEAKWEAPONS & WT_TRIBES)
+			damage = 15 * JK2O_WEAPONDAMAGESCALE;
 		else
-			damage = 30 * g_weaponDamageScale.value;
+			damage = 30 * JK2O_WEAPONDAMAGESCALE;
 		missile->s.generic1 = 2;//always make the bullet a little bigger
 		missile->s.eFlags |= EF_ALT_FIRING; //have client render it right
 	}
 
-	if (!d_projectileGhoul2Collision.integer) {
+	if (!JK2O_PROJG2COLLISION) {
 		VectorSet(missile->r.maxs, 2, 2, 2); //constant hitbox
 		VectorSet(missile->r.mins, -2, -2, -2);
 	}
@@ -999,7 +999,7 @@ void WP_DisruptorProjectileFire(gentity_t* ent, qboolean altFire)
 	//missile->flags |= FL_BOUNCE;
 	missile->bounceCount = 8;//was 3
 
-	if (g_tweakWeapons.integer & WT_PROJECTILE_GRAVITY) //JAPRO - Serverside - Give bullets gravity!
+	if (JK2O_TWEAKWEAPONS & WT_PROJECTILE_GRAVITY) //JAPRO - Serverside - Give bullets gravity!
 		missile->s.pos.trType = TR_GRAVITY;
 }
 
@@ -1021,7 +1021,7 @@ void WP_DisruptorAltFire(gentity_t *ent)
 	qboolean	ghoul2 = qfalse;
 
 
-	if (d_projectileGhoul2Collision.integer)
+	if (JK2O_PROJG2COLLISION)
 		ghoul2 = qtrue;
 
 	//VectorCopy( muzzle, muzzle2 ); // making a backup copy
@@ -1038,11 +1038,11 @@ void WP_DisruptorAltFire(gentity_t *ent)
 			maxCount = 200;//the previous line ALWAYS evaluated to 135 - was that on purpose?
 		}
 //[JAPRO - Serverside - Weapons - Tweak weapons Nerf Sniper Max Scope Dmg - Start]
-		if (g_tweakWeapons.integer & WT_TRIBES) {
-			damage = 15 * g_weaponDamageScale.value;//30
+		if (JK2O_TWEAKWEAPONS & WT_TRIBES) {
+			damage = 15 * JK2O_WEAPONDAMAGESCALE;//30
 			maxCount = 50;
 		}
-		else if (g_tweakWeapons.integer & WT_DISRUPTOR_DAM) {
+		else if (JK2O_TWEAKWEAPONS & WT_DISRUPTOR_DAM) {
 			damage = DISRUPTOR_ALT_DAMAGE - 40;//60
 			maxCount = 40;
 		}
@@ -1084,7 +1084,7 @@ void WP_DisruptorAltFire(gentity_t *ent)
 
 	skip = ent->s.number;
 
-	if ( g_unlagged.integer & UNLAGGED_HITSCAN )
+	if ( JK2O_UNLAGGED & UNLAGGED_HITSCAN )
 		G_TimeShiftAllClients( ent->client->pers.cmd.serverTime, ent, ghoul2 );
 
 	for (i = 0; i < traces; i++ )
@@ -1097,7 +1097,7 @@ void WP_DisruptorAltFire(gentity_t *ent)
 			JP_Trace( &tr, start, NULL, NULL, end, skip, MASK_SHOT, qfalse, 0, 0 );
 
 		if ( tr.entityNum == ENTITYNUM_NONE ) {
-			if ( g_unlagged.integer & UNLAGGED_HITSCAN  )
+			if ( JK2O_UNLAGGED & UNLAGGED_HITSCAN  )
 				G_UnTimeShiftAllClients( ent, ghoul2 );
 			return;
 		}
@@ -1282,7 +1282,7 @@ void WP_DisruptorAltFire(gentity_t *ent)
 		skip = tr.entityNum;
 	}
 
-	if ( g_unlagged.integer & UNLAGGED_HITSCAN )
+	if ( JK2O_UNLAGGED & UNLAGGED_HITSCAN )
 		G_UnTimeShiftAllClients( ent, ghoul2 ); //--ok, this resets their angles..
 }
 
@@ -1304,7 +1304,7 @@ static void WP_FireDisruptor( gentity_t *ent, qboolean altFire )
 
 	if ( altFire )
 	{
-		if ((g_tweakWeapons.integer & WT_PROJ_SNIPER) && !ent->client->sess.raceMode) {
+		if ((JK2O_TWEAKWEAPONS & WT_PROJ_SNIPER) && !ent->client->sess.raceMode) {
 			WP_DisruptorProjectileFire(ent, qtrue);
 		}
 		else {
@@ -1313,7 +1313,7 @@ static void WP_FireDisruptor( gentity_t *ent, qboolean altFire )
 	}
 	else
 	{
-		if ((g_tweakWeapons.integer & WT_PROJ_SNIPER) && !ent->client->sess.raceMode) {
+		if ((JK2O_TWEAKWEAPONS & WT_PROJ_SNIPER) && !ent->client->sess.raceMode) {
 			WP_DisruptorProjectileFire(ent, qfalse);
 		}
 		else {
@@ -1325,7 +1325,7 @@ static void WP_FireDisruptor( gentity_t *ent, qboolean altFire )
 
 static void WP_BoltLauncherAltFire(gentity_t *ent)
 {
-	float vel = vel = 3040 * g_projectileVelocityScale.value;
+	float vel = vel = 3040 * JK2O_PROJVELOCITYSCALE;
 
 	//Think up an alt fire?
 
@@ -1337,8 +1337,8 @@ static void WP_BoltLauncherAltFire(gentity_t *ent)
 	VectorSet(missile->r.maxs, BOWCASTER_SIZE, BOWCASTER_SIZE, BOWCASTER_SIZE);
 	VectorScale(missile->r.maxs, -1, missile->r.mins);
 
-	missile->damage = 60 * g_weaponDamageScale.value;
-	missile->splashDamage = 60 * g_splashDamageScale.value;
+	missile->damage = 60 * JK2O_WEAPONDAMAGESCALE;
+	missile->splashDamage = 60 * JK2O_SPLASHDAMAGESCALE;
 	missile->splashRadius = 128;
 	missile->dflags = DAMAGE_DEATH_KNOCKBACK;
 
@@ -1363,7 +1363,7 @@ static void WP_BoltLauncherFire (gentity_t *ent)
 //---------------------------------------------------------
 {
 	int			damage, count, i;
-	float		vel = 3040 * g_projectileVelocityScale.value;
+	float		vel = 3040 * JK2O_PROJVELOCITYSCALE;
 	vec3_t		angs, dir;
 	gentity_t	*missile;
 
@@ -1413,7 +1413,7 @@ static void WP_BoltLauncherFire (gentity_t *ent)
 		damage = 24;
 	}
 
-	damage *= g_weaponDamageScale.value;
+	damage *= JK2O_WEAPONDAMAGESCALE;
 
 	for (i = 0; i < count; i++)
 	{
@@ -1503,7 +1503,7 @@ static void WP_BowcasterAltFire(gentity_t *ent)
 	missile->flags |= FL_BOUNCE;
 	missile->bounceCount = 3;
 
-	if (!ent->client->sess.raceMode && g_tweakWeapons.integer & WT_PROJECTILE_GRAVITY) //JAPRO - Serverside - Give bullets gravity!
+	if (!ent->client->sess.raceMode && JK2O_TWEAKWEAPONS & WT_PROJECTILE_GRAVITY) //JAPRO - Serverside - Give bullets gravity!
 		missile->s.pos.trType = TR_GRAVITY;
 }
 
@@ -1518,9 +1518,9 @@ static void WP_BowcasterMainFire( gentity_t *ent, int seed )
 	gentity_t	*missile;
 	int i;
 
-	if ((g_tweakWeapons.integer & WT_TRIBES) || (ent->client->sess.raceMode && ent->client->sess.movementStyle == MV_TRIBES)) {
-		vel = 3040 * g_projectileVelocityScale.value;
-		damage = 70 * g_weaponDamageScale.value;
+	if ((JK2O_TWEAKWEAPONS & WT_TRIBES) || (ent->client->sess.raceMode && ent->client->sess.movementStyle == MV_TRIBES)) {
+		vel = 3040 * JK2O_PROJVELOCITYSCALE;
+		damage = 70 * JK2O_WEAPONDAMAGESCALE;
 	}
 
 	if (!ent->client)
@@ -1581,7 +1581,7 @@ static void WP_BowcasterMainFire( gentity_t *ent, int seed )
 
 		// add some slop to the alt-fire direction
 //[JAPRO - Serverside - Weapons - Tweak weapons Remove Bowcaster Randomness - Start]
-		if (g_tweakWeapons.integer & WT_BOWCASTER_SPRD) {
+		if (JK2O_TWEAKWEAPONS & WT_BOWCASTER_SPRD) {
 			if (i == 1) {
 				angs[PITCH] += 0.65f * BOWCASTER_ALT_SPREAD;
 				angs[YAW]	+= 0.65f * BOWCASTER_ALT_SPREAD;
@@ -1600,7 +1600,7 @@ static void WP_BowcasterMainFire( gentity_t *ent, int seed )
 			}
 		}
 		else {
-			if (g_tweakWeapons.integer & WT_PSEUDORANDOM_FIRE) {
+			if (JK2O_TWEAKWEAPONS & WT_PSEUDORANDOM_FIRE) {
 				angs[PITCH] += Q_crandom(&seed) * BOWCASTER_ALT_SPREAD * 0.2f;
 				angs[YAW]	+= ((i+0.5f) * BOWCASTER_ALT_SPREAD - count * 0.5f * BOWCASTER_ALT_SPREAD );
 			}
@@ -1631,7 +1631,7 @@ static void WP_BowcasterMainFire( gentity_t *ent, int seed )
 		// we don't want it to bounce
 		missile->bounceCount = 0;
 
-		if ((g_tweakWeapons.integer & WT_TRIBES) || (g_tweakWeapons.integer & WT_PROJECTILE_GRAVITY)) //JAPRO - Serverside - Give bullets gravity!
+		if ((JK2O_TWEAKWEAPONS & WT_TRIBES) || (JK2O_TWEAKWEAPONS & WT_PROJECTILE_GRAVITY)) //JAPRO - Serverside - Give bullets gravity!
 			missile->s.pos.trType = TR_GRAVITY;
 	}
 }
@@ -1642,14 +1642,14 @@ static void WP_FireBowcaster( gentity_t *ent, qboolean altFire, int seed )
 {
 	if ( altFire )
 	{
-		if (g_tweakWeapons.integer & WT_TRIBES)
+		if (JK2O_TWEAKWEAPONS & WT_TRIBES)
 			WP_BoltLauncherAltFire(ent);
 		else
 			WP_BowcasterAltFire( ent );
 	}
 	else
 	{
-		if (g_tweakWeapons.integer & WT_TRIBES)
+		if (JK2O_TWEAKWEAPONS & WT_TRIBES)
 			WP_BoltLauncherFire(ent);
 		else
 			WP_BowcasterMainFire( ent, seed );
@@ -1676,9 +1676,9 @@ static void WP_RepeaterMainFire( gentity_t *ent, vec3_t dir )
 
 //[JAPRO - Serverside - Weapons - Add inheritance to repeater main fire]
 
-	if (g_tweakWeapons.integer & WT_TRIBES) {
-		vel = 10440 * g_projectileVelocityScale.value;//10440 but thats too fast?
-		damage = 10 * g_weaponDamageScale.value;
+	if (JK2O_TWEAKWEAPONS & WT_TRIBES) {
+		vel = 10440 * JK2O_PROJVELOCITYSCALE;//10440 but thats too fast?
+		damage = 10 * JK2O_WEAPONDAMAGESCALE;
 	}
 
 	missile = CreateMissileNew( muzzle, dir, vel, 10000, ent, qfalse, qtrue, qtrue );
@@ -1694,7 +1694,7 @@ static void WP_RepeaterMainFire( gentity_t *ent, vec3_t dir )
 	// we don't want it to bounce forever
 	missile->bounceCount = 8;
 
-	if (g_tweakWeapons.integer & WT_PROJECTILE_GRAVITY) //JAPRO - Serverside - Give bullets gravity!
+	if (JK2O_TWEAKWEAPONS & WT_PROJECTILE_GRAVITY) //JAPRO - Serverside - Give bullets gravity!
 		missile->s.pos.trType = TR_GRAVITY;
 }
 
@@ -1707,8 +1707,8 @@ static void WP_RepeaterAltFire( gentity_t *ent )
 
 	float vel = REPEATER_ALT_VELOCITY;
 
-	if (g_tweakWeapons.integer & WT_TRIBES) {
-		vel = 1400 * g_projectileVelocityScale.value;
+	if (JK2O_TWEAKWEAPONS & WT_TRIBES) {
+		vel = 1400 * JK2O_PROJVELOCITYSCALE;
 	}
 
 	missile = CreateMissileNew(muzzle, forward, vel, 10000, ent, qtrue, qtrue, qtrue);
@@ -1717,7 +1717,7 @@ static void WP_RepeaterAltFire( gentity_t *ent )
 	missile->splashDamage = REPEATER_ALT_SPLASH_DAMAGE;
 
 //[JAPRO - Serverside - Weapons - Tweak weapons Buff Repeater Orb Dmg - Start]
-	if (g_tweakWeapons.integer & WT_REPEATER_ALT_DAM) {
+	if (JK2O_TWEAKWEAPONS & WT_REPEATER_ALT_DAM) {
 		missile->damage *= (7.0f/6.0f);
 		missile->splashDamage *= (7.0f/6.0f);
 	}
@@ -1766,9 +1766,9 @@ static void WP_DEMP2_MainFire( gentity_t *ent )
 	//[JAPRO - Serverside - Weapons - Add inheritance to demp2 primary fire]
 	gentity_t *missile;
 
-	if (g_tweakWeapons.integer & WT_TRIBES) {
-		vel = 2240 * g_projectileVelocityScale.value;
-		damage = 60 * g_weaponDamageScale.value;
+	if (JK2O_TWEAKWEAPONS & WT_TRIBES) {
+		vel = 2240 * JK2O_PROJVELOCITYSCALE;
+		damage = 60 * JK2O_WEAPONDAMAGESCALE;
 		size = 5.0f;
 	}
 
@@ -1777,8 +1777,8 @@ static void WP_DEMP2_MainFire( gentity_t *ent )
 	missile->classname = "demp2_proj";
 	missile->s.weapon = WP_DEMP2;
 
-	if (g_tweakWeapons.integer & WT_TRIBES) {
-		missile->splashDamage = 30 * g_splashDamageScale.value;
+	if (JK2O_TWEAKWEAPONS & WT_TRIBES) {
+		missile->splashDamage = 30 * JK2O_SPLASHDAMAGESCALE;
 		missile->splashRadius = 40;
 	}
 
@@ -1792,7 +1792,7 @@ static void WP_DEMP2_MainFire( gentity_t *ent )
 	// we don't want it to ever bounce
 	missile->bounceCount = 0;
 
-	if (g_tweakWeapons.integer & WT_PROJECTILE_GRAVITY) //JAPRO - Serverside - Give bullets gravity!
+	if (JK2O_TWEAKWEAPONS & WT_PROJECTILE_GRAVITY) //JAPRO - Serverside - Give bullets gravity!
 		missile->s.pos.trType = TR_GRAVITY;
 }
 
@@ -1907,7 +1907,7 @@ void DEMP2_AltRadiusDamage( gentity_t *ent )
 		if (gent != myOwner)
 		{
 			G_Damage( gent, myOwner, myOwner, dir, ent->r.currentOrigin, ent->damage, DAMAGE_DEATH_KNOCKBACK, ent->splashMethodOfDeath );
-			if ( gent->takedamage && gent->client && !(g_tweakWeapons.integer & WT_TRIBES))
+			if ( gent->takedamage && gent->client && !(JK2O_TWEAKWEAPONS & WT_TRIBES))
 			{
 				if ( gent->client->ps.electrifyTime < level.time )
 				{//electrocution effect
@@ -1920,7 +1920,7 @@ void DEMP2_AltRadiusDamage( gentity_t *ent )
 						|| (gent->m_pVehicle && gent->m_pVehicle->m_pVehicleInfo->type != VH_FIGHTER) )
 					{//don't do this to fighters
 //[JAPRO - Serverside - Weapons - Tweak weapons Remove Demp2 Randomness - Start]
-						if (g_tweakWeapons.integer & WT_DEMP2_RANDOM)
+						if (JK2O_TWEAKWEAPONS & WT_DEMP2_RANDOM)
 							gent->client->ps.electrifyTime = level.time + 550;
 						else
 							gent->client->ps.electrifyTime = level.time + Q_irand( 300, 800 );
@@ -1990,8 +1990,8 @@ static void WP_DEMP2_AltFire( gentity_t *ent )
 
 	VectorCopy( muzzle, start );
 
-	if (g_tweakWeapons.integer & WT_TRIBES)
-		damage = 5 * g_weaponDamageScale.value;
+	if (JK2O_TWEAKWEAPONS & WT_TRIBES)
+		damage = 5 * JK2O_WEAPONDAMAGESCALE;
 
 	if (ent->client->sess.movementStyle == MV_COOP_JKA) {
 		damage = 6;
@@ -2088,7 +2088,7 @@ static void WP_FlechetteMainFire( gentity_t *ent, int seed )
 	int i;
 	float spread = 0.65f;
 
-	if (g_tweakWeapons.integer & WT_TRIBES) {
+	if (JK2O_TWEAKWEAPONS & WT_TRIBES) {
 		spread = 0.25f;
 	}
 
@@ -2097,9 +2097,9 @@ static void WP_FlechetteMainFire( gentity_t *ent, int seed )
 		vectoangles( forward, angs );
 
 //[JAPRO - Serverside - Weapons - Tweak weapons Remove Flechette Randomness - Start]
-		if (!(g_tweakWeapons.integer & WT_FLECHETTE_SPRD)) {
+		if (!(JK2O_TWEAKWEAPONS & WT_FLECHETTE_SPRD)) {
 			if (i != 0) { //do nothing on the first shot, it will hit the crosshairs
-				if (g_tweakWeapons.integer & WT_PSEUDORANDOM_FIRE) {
+				if (JK2O_TWEAKWEAPONS & WT_PSEUDORANDOM_FIRE) {
 					angs[PITCH] += Q_crandom(&seed) * FLECHETTE_SPREAD;
 					angs[YAW]	+= Q_crandom(&seed) * FLECHETTE_SPREAD;
 				}
@@ -2140,8 +2140,8 @@ static void WP_FlechetteMainFire( gentity_t *ent, int seed )
 		VectorSet( missile->r.maxs, FLECHETTE_SIZE, FLECHETTE_SIZE, FLECHETTE_SIZE );
 		VectorScale( missile->r.maxs, -1, missile->r.mins );
 
-		if (g_tweakWeapons.integer & WT_TRIBES) {
-			missile->damage = 8 * g_weaponDamageScale.value;
+		if (JK2O_TWEAKWEAPONS & WT_TRIBES) {
+			missile->damage = 8 * JK2O_WEAPONDAMAGESCALE;
 		}
 		else {
 			missile->damage = FLECHETTE_DAMAGE;
@@ -2155,7 +2155,7 @@ static void WP_FlechetteMainFire( gentity_t *ent, int seed )
 
 		missile->flags |= FL_BOUNCE_SHRAPNEL;
 
-		if (g_tweakWeapons.integer & WT_PROJECTILE_GRAVITY) //JAPRO - Serverside - Give bullets gravity!
+		if (JK2O_TWEAKWEAPONS & WT_PROJECTILE_GRAVITY) //JAPRO - Serverside - Give bullets gravity!
 			missile->s.pos.trType = TR_GRAVITY;
 	}
 }
@@ -2262,7 +2262,7 @@ void CreateStake( gentity_t *stake, vec3_t start, gentity_t *owner )
 	stake->r.svFlags = SVF_USE_CURRENT_ORIGIN;
 	stake->s.weapon = WP_TRIP_MINE;
 	//stake->s.pos.trType = TR_LINEAR;
-	//if (g_tweakWeapons.integer & PROJECTILE_GRAVITY) //JAPRO - Serverside - Give bullets gravity!
+	//if (JK2O_TWEAKWEAPONS & PROJECTILE_GRAVITY) //JAPRO - Serverside - Give bullets gravity!
 		stake->s.pos.trType = TR_GRAVITY;
 	stake->r.contents = MASK_SHOT;
 	//if (g_raceMode.integer) //Sad hack.. quickfix to stop tripmine abuse
@@ -2329,7 +2329,7 @@ static void WP_FireHitscanShotgun( gentity_t *ent )
 		//Get range of hit, spread angle of hit
 		//Apply damage
 
-	int			damage = 60 * g_weaponDamageScale.value;
+	int			damage = 60 * JK2O_WEAPONDAMAGESCALE;
 	qboolean	render_impact = qtrue;
 	vec3_t		start, end;
 	trace_t		tr;
@@ -2344,7 +2344,7 @@ static void WP_FireHitscanShotgun( gentity_t *ent )
 	VectorMA( start, shotRange, forward, end );
 	VectorMA( start, 1, vright, start );
 
-	if ( g_unlagged.integer & UNLAGGED_HITSCAN )
+	if ( JK2O_UNLAGGED & UNLAGGED_HITSCAN )
 		G_TimeShiftAllClients( ent->client->pers.cmd.serverTime, ent, qfalse );
 
 	ignore = ent->s.number;
@@ -2353,21 +2353,21 @@ static void WP_FireHitscanShotgun( gentity_t *ent )
 
 	if ( tr.entityNum == ENTITYNUM_NONE )
 	{
-		if ( g_unlagged.integer & UNLAGGED_HITSCAN )
+		if ( JK2O_UNLAGGED & UNLAGGED_HITSCAN )
 			G_UnTimeShiftAllClients( ent, qfalse );
 		return;
 	}
 	//fix: shooting ourselves shouldn't be allowed 
 	if (tr.entityNum == ent->s.number)
 	{
-		if ( g_unlagged.integer & UNLAGGED_HITSCAN )
+		if ( JK2O_UNLAGGED & UNLAGGED_HITSCAN )
 			G_UnTimeShiftAllClients( ent, qfalse );
 		return;
 	}
 
 	traceEnt = &g_entities[tr.entityNum];
 
-	if ( g_unlagged.integer & UNLAGGED_HITSCAN )
+	if ( JK2O_UNLAGGED & UNLAGGED_HITSCAN )
 		G_UnTimeShiftAllClients( ent, qfalse );
 
 	if ( tr.surfaceFlags & SURF_NOIMPACT ) 
@@ -2490,7 +2490,7 @@ static void WP_FireStakeGun( gentity_t *ent )
 	stake->setTime = level.time;//remember when we placed it
 
 	//move it
-	VectorScale( forward, 3000*g_projectileVelocityScale.value, stake->s.pos.trDelta );
+	VectorScale( forward, 3000*JK2O_PROJVELOCITYSCALE, stake->s.pos.trDelta );
 
 	trap->LinkEntity((sharedEntity_t *)stake);
 }
@@ -2609,13 +2609,13 @@ static void WP_CreateFlechetteBouncyThing( vec3_t start, vec3_t fwd, gentity_t *
 	gentity_t	*missile;
 	float vel = 1000;
 
-	if (g_tweakWeapons.integer & WT_TRIBES) {
+	if (JK2O_TWEAKWEAPONS & WT_TRIBES) {
 		vel = 2400;
-		missile = CreateMissileNew(start, fwd, (vel * g_projectileVelocityScale.value), 4000, self, qtrue, qtrue, qtrue);
+		missile = CreateMissileNew(start, fwd, (vel * JK2O_PROJVELOCITYSCALE), 4000, self, qtrue, qtrue, qtrue);
 		missile->setTime = level.time;
 	}
 	else {
-		missile = CreateMissileNew(start, fwd, (700 * g_projectileVelocityScale.value) + Q_flrand(0.0f, 1.0f) * 700,
+		missile = CreateMissileNew(start, fwd, (700 * JK2O_PROJVELOCITYSCALE) + Q_flrand(0.0f, 1.0f) * 700,
 								   1500 + Q_flrand(0.0f, 1.0f) * 2000, self, qtrue, qtrue, qtrue);
 	}
 	missile->think = WP_flechette_alt_blow;
@@ -2628,7 +2628,7 @@ static void WP_CreateFlechetteBouncyThing( vec3_t start, vec3_t fwd, gentity_t *
 
 	// How 'bout we give this thing a size...
 //[JAPRO - Serverside - Weapons - New Hitbox Option - Start]
-	if (d_projectileGhoul2Collision.integer > 1)
+	if (JK2O_PROJG2COLLISION > 1)
 	{
 		VectorSet( missile->r.mins, -1.0f, -1.0f, -1.0f );
 		VectorSet( missile->r.maxs, 1.0f, 1.0f, 1.0f );
@@ -2652,12 +2652,12 @@ static void WP_CreateFlechetteBouncyThing( vec3_t start, vec3_t fwd, gentity_t *
 	missile->bounceCount = 50;
 
 //[JAPRO - Serverside - Weapons - Tweak weapons Nerf Alt Flechette Dmg - Start]
-	if (g_tweakWeapons.integer & WT_TRIBES) {
-		missile->damage = 60 * g_weaponDamageScale.value;
-		missile->splashDamage = 60 * g_splashDamageScale.value;
+	if (JK2O_TWEAKWEAPONS & WT_TRIBES) {
+		missile->damage = 60 * JK2O_WEAPONDAMAGESCALE;
+		missile->splashDamage = 60 * JK2O_SPLASHDAMAGESCALE;
 		missile->splashRadius = 140;
 	}
-	else if (g_tweakWeapons.integer & WT_FLECHETTE_ALT_DAM) {
+	else if (JK2O_TWEAKWEAPONS & WT_FLECHETTE_ALT_DAM) {
 		missile->damage = FLECHETTE_ALT_DAMAGE * 0.85f;
 		missile->splashDamage = FLECHETTE_ALT_DAMAGE * 0.85f;
 		missile->splashRadius = FLECHETTE_ALT_SPLASH_RAD;
@@ -2691,7 +2691,7 @@ static void WP_FlechetteAltFire( gentity_t *self, int seed )
 
 	WP_TraceSetStart( self, start, vec3_origin, vec3_origin );//make sure our start point isn't on the other side of a wall
 
-	if (g_tweakWeapons.integer & WT_TRIBES) {
+	if (JK2O_TWEAKWEAPONS & WT_TRIBES) {
 		VectorCopy(angs, dir);
 		AngleVectors(dir, fwd, NULL, NULL);
 		WP_CreateFlechetteBouncyThing(start, fwd, self, 1);
@@ -2701,11 +2701,11 @@ static void WP_FlechetteAltFire( gentity_t *self, int seed )
 		VectorCopy( angs, dir );
 
 //[JAPRO - Serverside - Weapons - Tweak weapons Remove Flechette Alt Randomness - Start]
-		if (g_tweakWeapons.integer & WT_FLECHETTE_ALT_SPRD) {
+		if (JK2O_TWEAKWEAPONS & WT_FLECHETTE_ALT_SPRD) {
 				dir[PITCH] -= 10;
 		}
 		else {
-			if (g_tweakWeapons.integer & WT_PSEUDORANDOM_FIRE) {
+			if (JK2O_TWEAKWEAPONS & WT_PSEUDORANDOM_FIRE) {
 				dir[PITCH] -= Q_random(&seed) * 4 + 8; // make it fly upwards
 				dir[YAW] += Q_crandom(&seed) * 2;
 			}
@@ -2728,14 +2728,14 @@ static void WP_FireFlechette( gentity_t *ent, qboolean altFire, int seed )
 {
 	if ( altFire )
 	{
-		if ((g_tweakWeapons.integer & WT_STAKE_GUN) || ent->client->sess.raceMode)
+		if ((JK2O_TWEAKWEAPONS & WT_STAKE_GUN) || ent->client->sess.raceMode)
 			WP_ExplodeStakes( ent );
 		else
 			WP_FlechetteAltFire(ent, seed);
 	}
 	else
 	{
-		if ((g_tweakWeapons.integer & WT_STAKE_GUN) || ent->client->sess.raceMode)
+		if ((JK2O_TWEAKWEAPONS & WT_STAKE_GUN) || ent->client->sess.raceMode)
 			WP_FireStakeGun( ent );
 		//else if (0)
 			//WP_FireHitscanShotgun(ent);
@@ -2781,7 +2781,7 @@ void rocketThink( gentity_t *ent )
 		}
 		return;
 	}
-	if ((!(g_tweakWeapons.integer & WT_ROCKET_REDEEMER) || !redeemerAllowed) && ( !ent->enemy 
+	if ((!(JK2O_TWEAKWEAPONS & WT_ROCKET_REDEEMER) || !redeemerAllowed) && ( !ent->enemy 
 		|| !ent->enemy->client 
 		|| ent->enemy->health <= 0 
 		|| ent->enemy->client->ps.powerups[PW_CLOAKED] ))
@@ -2805,7 +2805,7 @@ void rocketThink( gentity_t *ent )
 		}
 	}
 
-	if ((!(g_tweakWeapons.integer & WT_ROCKET_REDEEMER) || !redeemerAllowed) && ent->enemy && ent->enemy->inuse )
+	if ((!(JK2O_TWEAKWEAPONS & WT_ROCKET_REDEEMER) || !redeemerAllowed) && ent->enemy && ent->enemy->inuse )
 	{	
 		float newDirMult = ent->angle?ent->angle*2.0f:1.0f;
 		float oldDirMult = ent->angle?(1.0f-ent->angle)*2.0f:1.0f;
@@ -2917,7 +2917,7 @@ void rocketThink( gentity_t *ent )
 		ent->nextthink = level.time + ROCKET_ALT_THINK_TIME;	// Nothing at all spectacular happened, continue.
 		ent->s.pos.trTime = level.time;
 	}
-	else if ((g_tweakWeapons.integer & WT_ROCKET_REDEEMER) && redeemerAllowed) //Todo, make this require a lock on.  Then fix the close range hit detection.  Proximity explode maybe?
+	else if ((JK2O_TWEAKWEAPONS & WT_ROCKET_REDEEMER) && redeemerAllowed) //Todo, make this require a lock on.  Then fix the close range hit detection.  Proximity explode maybe?
 	{
 		vec3_t fwd, traceFrom, traceTo, dir, destination;
 		trace_t tr;
@@ -2994,14 +2994,14 @@ void rocketThink( gentity_t *ent )
 		if (g_entities[ent->r.ownerNum].client->ps.weapon != WP_ROCKET_LAUNCHER)
 			ent->think = G_ExplodeMissile;
 
-		//if ((g_tweakWeapons.integer & WT_TRIBES) && ((dist < 64*64)) {
+		//if ((JK2O_TWEAKWEAPONS & WT_TRIBES) && ((dist < 64*64)) {
 			//If its close blow it up.
 			//ent->think = G_ExplodeMissile;
 		//}
 		/*else*/
 		dist = VectorLengthSquared(dir);
 
-		if (g_tweakWeapons.integer & WT_TRIBES)
+		if (JK2O_TWEAKWEAPONS & WT_TRIBES)
 			speedCap = 1800;
 		if (currentVel > speedCap)
 			currentVel = speedCap;
@@ -3133,21 +3133,21 @@ static void WP_FireRocket( gentity_t *ent, qboolean altFire )
 			damage = splashDamage = 100; //force default dmg/vel for racers
 			vel = 900;
 		}
-		else if (g_tweakWeapons.integer & WT_TRIBES) {
-			damage = 75 * g_weaponDamageScale.value;
-			splashDamage = 75 * g_splashDamageScale.value;
-			vel = 3040 * g_projectileVelocityScale.value;
+		else if (JK2O_TWEAKWEAPONS & WT_TRIBES) {
+			damage = 75 * JK2O_WEAPONDAMAGESCALE;
+			splashDamage = 75 * JK2O_SPLASHDAMAGESCALE;
+			vel = 3040 * JK2O_PROJVELOCITYSCALE;
 		}
 	}
 
 	if (altFire) {
-		if (!ent->client->sess.raceMode && (g_tweakWeapons.integer & WT_TRIBES))
-			vel = 125 * g_projectileVelocityScale.value;
+		if (!ent->client->sess.raceMode && (JK2O_TWEAKWEAPONS & WT_TRIBES))
+			vel = 125 * JK2O_PROJVELOCITYSCALE;
 		else
 			vel *= 0.5f;
 	}
 
-	if (altFire && g_tweakWeapons.integer & WT_ROCKET_REDEEMER && !ent->client->sess.raceMode)
+	if (altFire && JK2O_TWEAKWEAPONS & WT_ROCKET_REDEEMER && !ent->client->sess.raceMode)
 		damage *= 1.25f;
 
 	if (q3style && ent->client->pers.backwardsRocket) {
@@ -3159,7 +3159,7 @@ static void WP_FireRocket( gentity_t *ent, qboolean altFire )
 	else if (q3style) {
 		missile = CreateMissileNew( muzzle, forward, vel, 15000, ent, altFire, qfalse, qfalse );
 	}
-	else if (altFire && g_tweakWeapons.integer & WT_ROCKET_REDEEMER)//No inheritance for redeemer thats op
+	else if (altFire && JK2O_TWEAKWEAPONS & WT_ROCKET_REDEEMER)//No inheritance for redeemer thats op
 		missile = CreateMissileNew(muzzle, forward, vel, 10000, ent, altFire, qfalse, qtrue);
 	else
 		missile = CreateMissileNew( muzzle, forward, vel, 10000, ent, altFire, qtrue, qtrue );
@@ -3195,7 +3195,7 @@ static void WP_FireRocket( gentity_t *ent, qboolean altFire )
 		ent->client->ps.rocketLockTime = 0;
 		ent->client->ps.rocketTargetTime = 0;
 	}
-	else if (altFire && (g_tweakWeapons.integer & WT_ROCKET_REDEEMER) && ent->client && !ent->client->sess.raceMode)
+	else if (altFire && (JK2O_TWEAKWEAPONS & WT_ROCKET_REDEEMER) && ent->client && !ent->client->sess.raceMode)
 	{
 		missile->angle = 0.5f;
 		missile->think = rocketThink;
@@ -3211,7 +3211,7 @@ static void WP_FireRocket( gentity_t *ent, qboolean altFire )
 		missile->raceModeShooter = qtrue;
 	}
 	else {
-		if ((g_tweakWeapons.integer & WT_TRIBES) && altFire) {
+		if ((JK2O_TWEAKWEAPONS & WT_TRIBES) && altFire) {
 			VectorSet(missile->r.maxs, ROCKET_SIZE*2, ROCKET_SIZE*2, ROCKET_SIZE*2);
 		}
 		else {
@@ -3220,7 +3220,7 @@ static void WP_FireRocket( gentity_t *ent, qboolean altFire )
 	}
 	VectorScale( missile->r.maxs, -1, missile->r.mins );
 
-	if (g_tweakWeapons.integer & WT_TRIBES && ent->client && !ent->client->sess.raceMode && !altFire)
+	if (JK2O_TWEAKWEAPONS & WT_TRIBES && ent->client && !ent->client->sess.raceMode && !altFire)
 		missile->s.pos.trType = TR_GRAVITY;
 
 	missile->damage = damage;
@@ -3240,7 +3240,7 @@ static void WP_FireRocket( gentity_t *ent, qboolean altFire )
 		missile->health = 10;
 		missile->takedamage = qtrue;
 		missile->r.contents = MASK_SHOT;
-		if (g_tweakWeapons.integer & WT_TRIBES) {
+		if (JK2O_TWEAKWEAPONS & WT_TRIBES) {
 			missile->health = 3;
 		}
 		else {
@@ -3282,8 +3282,8 @@ static void WP_CreateMortar( vec3_t start, vec3_t fwd, gentity_t *self)
 //------------------------------------------------------------------------------
 {
 	gentity_t	*missile;
-	float velocity = 2366 * g_projectileVelocityScale.value;
-	int damage = 140 * g_weaponDamageScale.value, splashdamage = 140 * g_splashDamageScale.value, splashradius = 384;
+	float velocity = 2366 * JK2O_PROJVELOCITYSCALE;
+	int damage = 140 * JK2O_WEAPONDAMAGESCALE, splashdamage = 140 * JK2O_SPLASHDAMAGESCALE, splashradius = 384;
 
 	missile = CreateMissileNew( start, fwd, velocity, 10000, self, qtrue, qtrue, qtrue );
 
@@ -3371,7 +3371,7 @@ static void WP_FireRepeater(gentity_t *ent, qboolean altFire, int seed)
 
 	if (altFire)
 	{
-		if (g_tweakWeapons.integer & WT_TRIBES)
+		if (JK2O_TWEAKWEAPONS & WT_TRIBES)
 			WP_FireMortar(ent);
 		else
 			WP_RepeaterAltFire(ent);
@@ -3379,11 +3379,11 @@ static void WP_FireRepeater(gentity_t *ent, qboolean altFire, int seed)
 	else
 	{
 		// add some slop to the alt-fire direction
-		if (g_tweakWeapons.integer & WT_PSEUDORANDOM_FIRE) {
+		if (JK2O_TWEAKWEAPONS & WT_PSEUDORANDOM_FIRE) {
 			float theta = M_PI * Q_crandom(&seed); //Lets use circular spread instead of the shitty box spread?
 			float r = Q_random(&seed) * REPEATER_SPREAD;
 
-			if (g_tweakWeapons.integer & WT_TRIBES) {
+			if (JK2O_TWEAKWEAPONS & WT_TRIBES) {
 				angs[PITCH] += r*0.15f * sin(theta);
 				angs[YAW] += r *0.15f * cos(theta);
 			}
@@ -3393,7 +3393,7 @@ static void WP_FireRepeater(gentity_t *ent, qboolean altFire, int seed)
 			}
 		}
 		else {
-			if (g_tweakWeapons.integer & WT_TRIBES) {
+			if (JK2O_TWEAKWEAPONS & WT_TRIBES) {
 				angs[PITCH] += Q_flrand(-1.0f, 1.0f) * REPEATER_SPREAD * 0.15f;
 				angs[YAW] += Q_flrand(-1.0f, 1.0f) * REPEATER_SPREAD * 0.15f;
 			}
@@ -3419,17 +3419,17 @@ THERMAL DETONATOR
 ======================================================================
 */
 
-#define TD_DAMAGE			70 * g_weaponDamageScale.value;//JAPRO - Weapons - Scalers //only do 70 on a direct impact
+#define TD_DAMAGE			70 * JK2O_WEAPONDAMAGESCALE;//JAPRO - Weapons - Scalers //only do 70 on a direct impact
 #define TD_SPLASH_RAD		128
-#define TD_SPLASH_DAM		90 * g_splashDamageScale.value;//JAPRO - Weapons - Scalers
+#define TD_SPLASH_DAM		90 * JK2O_SPLASHDAMAGESCALE;//JAPRO - Weapons - Scalers
 #define TD_VELOCITY			900
 #define TD_MIN_CHARGE		0.15f
 #define TD_TIME				3000//6000
 #define TD_ALT_TIME			3000
 
-#define TD_ALT_DAMAGE		60 * g_weaponDamageScale.value;//JAPRO - Weapons - Scalers//100
+#define TD_ALT_DAMAGE		60 * JK2O_WEAPONDAMAGESCALE;//JAPRO - Weapons - Scalers//100
 #define TD_ALT_SPLASH_RAD	128
-#define TD_ALT_SPLASH_DAM	50 * g_splashDamageScale.value;//JAPRO - Weapons - Scalers//90
+#define TD_ALT_SPLASH_DAM	50 * JK2O_SPLASHDAMAGESCALE;//JAPRO - Weapons - Scalers//90
 #define TD_ALT_VELOCITY		600
 #define TD_ALT_MIN_CHARGE	0.15f
 #define TD_ALT_TIME			3000
@@ -3482,12 +3482,12 @@ void thermalThinkStandard(gentity_t *ent)
 		return;
 	}
 
-	if (((g_tweakWeapons.integer & WT_IMPACT_NITRON) || (g_tweakWeapons.integer & WT_TRIBES)) && ent->bounceCount == 1) {
+	if (((JK2O_TWEAKWEAPONS & WT_IMPACT_NITRON) || (JK2O_TWEAKWEAPONS & WT_TRIBES)) && ent->bounceCount == 1) {
 		VectorClear(ent->s.pos.trDelta);
 		ent->s.pos.trType = TR_STATIONARY;
 	}
 
-	if (!(g_tweakWeapons.integer & WT_IMPACT_NITRON) && !(g_tweakWeapons.integer & WT_TRIBES))
+	if (!(JK2O_TWEAKWEAPONS & WT_IMPACT_NITRON) && !(JK2O_TWEAKWEAPONS & WT_TRIBES))
 		G_RunObject(ent);
 	ent->nextthink = level.time;
 }
@@ -3501,8 +3501,8 @@ gentity_t *WP_FireThermalDetonator( gentity_t *ent, qboolean altFire )
 	float chargeAmount = 1.0f; // default of full charge
 	float vel = TD_VELOCITY;
 
-	if (g_tweakWeapons.integer & WT_TRIBES) {
-		vel = 1800 * g_projectileVelocityScale.value;
+	if (JK2O_TWEAKWEAPONS & WT_TRIBES) {
+		vel = 1800 * JK2O_PROJVELOCITYSCALE;
 	}
 
 	VectorCopy( forward, dir );
@@ -3524,10 +3524,10 @@ gentity_t *WP_FireThermalDetonator( gentity_t *ent, qboolean altFire )
 
 	W_TraceSetStart( ent, start, bolt->r.mins, bolt->r.maxs );//make sure our start point isn't on the other side of a wall
 
-	if (g_tweakWeapons.integer & WT_TRIBES) {
+	if (JK2O_TWEAKWEAPONS & WT_TRIBES) {
 		chargeAmount = 1.0f;
 	}
-	else if (g_tweakWeapons.integer & WT_IMPACT_NITRON) {
+	else if (JK2O_TWEAKWEAPONS & WT_IMPACT_NITRON) {
 		chargeAmount = 1.0f;
 		altFire = qfalse;
 	}
@@ -3543,7 +3543,7 @@ gentity_t *WP_FireThermalDetonator( gentity_t *ent, qboolean altFire )
 	}
 
 	// normal ones bounce, alt ones explode on impact
-	if (g_tweakWeapons.integer & WT_IMPACT_NITRON)
+	if (JK2O_TWEAKWEAPONS & WT_IMPACT_NITRON)
 		bolt->genericValue5 = level.time + 2000; // How long 'til she blows
 	else
 		bolt->genericValue5 = level.time + TD_TIME; // How long 'til she blows
@@ -3571,12 +3571,12 @@ gentity_t *WP_FireThermalDetonator( gentity_t *ent, qboolean altFire )
 		bolt->splashDamage = 140;
 		bolt->splashRadius = 192;
 	}
-	else if (g_tweakWeapons.integer & WT_TRIBES) {
+	else if (JK2O_TWEAKWEAPONS & WT_TRIBES) {
 		bolt->damage = 40 * g_weaponDamageScale.integer;
 		bolt->splashDamage = 20 * g_splashDamageScale.integer;
 		bolt->splashRadius = 96;//128
 	}
-	else if (g_tweakWeapons.integer & WT_IMPACT_NITRON) {
+	else if (JK2O_TWEAKWEAPONS & WT_IMPACT_NITRON) {
 		bolt->damage = 60 * g_weaponDamageScale.integer;
 		bolt->splashDamage = 20 * g_splashDamageScale.integer;
 		bolt->splashRadius = 96;//128
@@ -3604,7 +3604,7 @@ gentity_t *WP_FireThermalDetonator( gentity_t *ent, qboolean altFire )
 	VectorCopy( start, bolt->pos2 );
 
 	bolt->bounceCount = -5;
-	if ((g_tweakWeapons.integer & WT_IMPACT_NITRON) || (g_tweakWeapons.integer & WT_TRIBES))
+	if ((JK2O_TWEAKWEAPONS & WT_IMPACT_NITRON) || (JK2O_TWEAKWEAPONS & WT_TRIBES))
 		bolt->bounceCount = 2;
 
 	return bolt;
@@ -3764,9 +3764,9 @@ LASER TRAP / TRIP MINE
 
 ======================================================================
 */
-#define LT_DAMAGE			100 * g_weaponDamageScale.value;//JAPRO - Weapons - Scalers
+#define LT_DAMAGE			100 * JK2O_WEAPONDAMAGESCALE;//JAPRO - Weapons - Scalers
 #define LT_SPLASH_RAD		256.0f
-#define LT_SPLASH_DAM		105 * g_weaponDamageScale.value;//JAPRO - Weapons - Scalers
+#define LT_SPLASH_DAM		105 * JK2O_WEAPONDAMAGESCALE;//JAPRO - Weapons - Scalers
 #define LT_VELOCITY			900.0f
 #define LT_SIZE				1.5f
 #define LT_ALT_TIME			2000
@@ -3983,7 +3983,7 @@ void laserTrapStick( gentity_t *ent, vec3_t endpos, vec3_t normal )
 		ent->touch = touchLaserTrap;
 		ent->think = proxMineThink;//laserTrapExplode;
 
-		if (!(g_tweakWeapons.integer & WT_JK2_STYLE_ALT_TRIPMINE))
+		if (!(JK2O_TWEAKWEAPONS & WT_JK2_STYLE_ALT_TRIPMINE))
 			ent->genericValue15 = level.time + 30000; //auto-explode after 30 seconds.
 		ent->nextthink = level.time + LT_ALT_TIME; // How long 'til she blows
 
@@ -4032,12 +4032,12 @@ void CreateLaserTrap( gentity_t *laserTrap, vec3_t start, gentity_t *owner )
 	laserTrap->activator = owner;
 	laserTrap->r.ownerNum = owner->s.number;
 
-	if (g_tweakWeapons.integer & WT_TRIBES) {
-		laserTrap->splashDamage = 70 * g_splashDamageScale.value;
-		laserTrap->damage = 70 * g_weaponDamageScale.value;
+	if (JK2O_TWEAKWEAPONS & WT_TRIBES) {
+		laserTrap->splashDamage = 70 * JK2O_SPLASHDAMAGESCALE;
+		laserTrap->damage = 70 * JK2O_WEAPONDAMAGESCALE;
 	}
 
-	if (g_tweakWeapons.integer & WT_EXPLOSIVE_HITBOX) {
+	if (JK2O_TWEAKWEAPONS & WT_EXPLOSIVE_HITBOX) {
 		VectorSet(laserTrap->r.mins, -LT_SIZE, -LT_SIZE, 0);
 		VectorSet(laserTrap->r.maxs, LT_SIZE, LT_SIZE, LT_SIZE * 2);
 	}
@@ -4095,7 +4095,7 @@ void WP_PlaceLaserTrap( gentity_t *ent, qboolean alt_fire )
 	int			i;
 	int			maxTrips = 9;
 
-	if (g_tweakWeapons.integer & WT_TRIBES)
+	if (JK2O_TWEAKWEAPONS & WT_TRIBES)
 		maxTrips = 2;
 
 	foundLaserTraps[0] = ENTITYNUM_NONE;
@@ -4386,7 +4386,7 @@ void drop_charge (gentity_t *self, vec3_t start, vec3_t dir)
 	bolt->s.genericenemyindex = self->s.number+MAX_GENTITIES;
 	//rww - so client prediction knows we own this and won't hit it
 
-	if (g_tweakWeapons.integer & WT_EXPLOSIVE_HITBOX) {
+	if (JK2O_TWEAKWEAPONS & WT_EXPLOSIVE_HITBOX) {
 		VectorSet(bolt->r.mins, -2, -2, 0);
 		VectorSet(bolt->r.maxs, 2, 2, 4);
 	}
@@ -4415,8 +4415,8 @@ void drop_charge (gentity_t *self, vec3_t start, vec3_t dir)
 	else {
 		bolt->health = 1;
 		bolt->takedamage = qtrue;
-		bolt->damage = 100 * g_weaponDamageScale.value;//JAPRO - Weapons - Scalers
-		bolt->splashDamage = 200 * g_splashDamageScale.value;//JAPRO - Weapons - Scalers
+		bolt->damage = 100 * JK2O_WEAPONDAMAGESCALE;//JAPRO - Weapons - Scalers
+		bolt->splashDamage = 200 * JK2O_SPLASHDAMAGESCALE;//JAPRO - Weapons - Scalers
 		VectorScale(dir, 300, bolt->s.pos.trDelta );
 	}
 	bolt->s.pos.trTime = level.time;
@@ -4617,7 +4617,7 @@ void WP_FireSpinfusorAlt(gentity_t* ent)
 	VectorMA(muzzle, -6, vright, muzzle);//temp fix but we should rewrite calcmuzzlepoint since this actually affects all weapons but is only really noticible with sniper
 	VectorMA(muzzle, 6, up, muzzle);
 
-	missile = CreateMissileNew(muzzle, forward, vel * g_projectileVelocityScale.value, 10000, ent, qtrue, qtrue, qtrue);
+	missile = CreateMissileNew(muzzle, forward, vel * JK2O_PROJVELOCITYSCALE, 10000, ent, qtrue, qtrue, qtrue);
 
 
 
@@ -4629,14 +4629,14 @@ void WP_FireSpinfusorAlt(gentity_t* ent)
 	if (missile->s.generic1 < 2) {
 		missile->s.generic1 = 2;
 	}
-	damage *= g_weaponDamageScale.value;
+	damage *= JK2O_WEAPONDAMAGESCALE;
 
 	ent->client->ps.fd.forcePower = 0;
 
 
 	Com_Printf("Generic 1 %i\n", missile->s.generic1);
 
-	if (!d_projectileGhoul2Collision.integer) {
+	if (!JK2O_PROJG2COLLISION) {
 		VectorSet(missile->r.maxs, 2, 2, 2); //constant hitbox
 		VectorSet(missile->r.mins, -2, -2, -2);
 	}
@@ -4661,7 +4661,7 @@ void WP_FireSpinfusorAlt(gentity_t* ent)
 								  //missile->flags |= FL_BOUNCE;
 	missile->bounceCount = 8;//was 3
 
-	if (g_tweakWeapons.integer & WT_PROJECTILE_GRAVITY) //JAPRO - Serverside - Give bullets gravity!
+	if (JK2O_TWEAKWEAPONS & WT_PROJECTILE_GRAVITY) //JAPRO - Serverside - Give bullets gravity!
 		missile->s.pos.trType = TR_GRAVITY;
 }
 
@@ -4677,28 +4677,28 @@ static void WP_FireConcussionAlt( gentity_t *ent )
 	qboolean	hitDodged = qfalse;
 	vec3_t shot_mins, shot_maxs;
 	int			i;
-	int   shove = -400 * g_selfDamageScale.value; //this seems like a dumb idea though?
+	int   shove = -400 * JK2O_SELFDAMAGESCALE; //this seems like a dumb idea though?
 	qboolean	ghoul2 = qfalse;
 
 //[JAPRO - Serverside - Weapons - Tweak weapons Buff Conc alt - Start]
-	if (g_tweakWeapons.integer & WT_TRIBES) {
+	if (JK2O_TWEAKWEAPONS & WT_TRIBES) {
 		if (ent->client) {
-			damage = ent->client->ps.fd.forcePower * 0.5f * g_weaponDamageScale.value;
+			damage = ent->client->ps.fd.forcePower * 0.5f * JK2O_WEAPONDAMAGESCALE;
 			ent->client->jetPackDebReduce = level.time + 300;
 			if (damage < 10)
 				damage = 10;
 			ent->client->ps.fd.forcePower = 0;
 		}
 		else {
-			damage = 30 * g_weaponDamageScale.value;
+			damage = 30 * JK2O_WEAPONDAMAGESCALE;
 		}
 	}
-	else if (g_tweakWeapons.integer & WT_CONC_ALT_DAM)
+	else if (JK2O_TWEAKWEAPONS & WT_CONC_ALT_DAM)
 		damage *= 2.0f;
 
 //[JAPRO - Serverside - Weapons - Tweak weapons Buff Conc alt - End]
 
-	if (d_projectileGhoul2Collision.integer)
+	if (JK2O_PROJG2COLLISION)
 		ghoul2 = qtrue;
 
 	//Shove us backwards for half a second
@@ -4708,7 +4708,7 @@ static void WP_FireConcussionAlt( gentity_t *ent )
 
 	if (ent->client->sess.raceMode)
 		shove = 200;
-	else if (g_tweakWeapons.integer & WT_TRIBES)
+	else if (JK2O_TWEAKWEAPONS & WT_TRIBES)
 		shove = 0;
 
 	if (shove) {
@@ -4753,7 +4753,7 @@ static void WP_FireConcussionAlt( gentity_t *ent )
 	VectorSet( shot_mins, -1, -1, -1 );
 	VectorSet( shot_maxs, 1, 1, 1 );
 
-	if ( g_unlagged.integer & UNLAGGED_HITSCAN )
+	if ( JK2O_UNLAGGED & UNLAGGED_HITSCAN )
 		G_TimeShiftAllClients( ent->client->pers.cmd.serverTime, ent, ghoul2 );
 
 	for ( i = 0; i < traces; i++ )
@@ -4769,7 +4769,7 @@ static void WP_FireConcussionAlt( gentity_t *ent )
 			JP_Trace( &tr, start, shot_mins, shot_maxs, end, skip, MASK_SHOT, qfalse, 0, 0 );
 
 		if ( tr.entityNum == ENTITYNUM_NONE ) {
-			if ( g_unlagged.integer & UNLAGGED_HITSCAN )
+			if ( JK2O_UNLAGGED & UNLAGGED_HITSCAN )
 				G_UnTimeShiftAllClients( ent, ghoul2 );
 			return;
 		}
@@ -4853,7 +4853,7 @@ static void WP_FireConcussionAlt( gentity_t *ent )
 					G_Damage( traceEnt, ent, ent, forward, tr.endpos, damage, DAMAGE_NO_KNOCKBACK|DAMAGE_NO_HIT_LOC, MOD_CONC_ALT );
 
 					//do knockback and knockdown manually
-					if ( traceEnt->client && !(g_tweakWeapons.integer & WT_TRIBES))
+					if ( traceEnt->client && !(JK2O_TWEAKWEAPONS & WT_TRIBES))
 					{//only if we hit a client
 						vec3_t pushDir;
 						VectorCopy( forward, pushDir );
@@ -4893,7 +4893,7 @@ static void WP_FireConcussionAlt( gentity_t *ent )
 								}
 								traceEnt->client->ps.otherKiller = ent->s.number;
 //JAPRO - Serverside - fixkillcredit - Start
-								if (g_fixKillCredit.integer)
+								if (JK2O_FIXKILLCREDIT)
 									traceEnt->client->ps.otherKillerTime = level.time + 2000;
 								else
 									traceEnt->client->ps.otherKillerTime = level.time + 5000;
@@ -4945,7 +4945,7 @@ static void WP_FireConcussionAlt( gentity_t *ent )
 		hitDodged = qfalse;
 	}
 
-	if ( g_unlagged.integer & UNLAGGED_HITSCAN )
+	if ( JK2O_UNLAGGED & UNLAGGED_HITSCAN )
 		G_UnTimeShiftAllClients( ent, ghoul2 );
 
 	//just draw one beam all the way to the end
@@ -5008,10 +5008,10 @@ static void WP_FireConcussion( gentity_t *ent )
 			splashDamage = 40;
 		}
 	}
-	else if (!ent->client->sess.raceMode && (g_tweakWeapons.integer & WT_TRIBES)) {
-		vel = 3040 * g_projectileVelocityScale.value;
-		damage = 75 * g_weaponDamageScale.value;
-		splashDamage = 75 * g_splashDamageScale.value;
+	else if (!ent->client->sess.raceMode && (JK2O_TWEAKWEAPONS & WT_TRIBES)) {
+		vel = 3040 * JK2O_PROJVELOCITYSCALE;
+		damage = 75 * JK2O_WEAPONDAMAGESCALE;
+		splashDamage = 75 * JK2O_SPLASHDAMAGESCALE;
 	}
 
 	//hold us still for a bit
@@ -5052,7 +5052,7 @@ static void WP_FireConcussion( gentity_t *ent )
 	// we don't want it to ever bounce
 	missile->bounceCount = 0;
 
-	if (g_tweakWeapons.integer & WT_PROJECTILE_GRAVITY) //JAPRO - Serverside - Give bullets gravity!
+	if (JK2O_TWEAKWEAPONS & WT_PROJECTILE_GRAVITY) //JAPRO - Serverside - Give bullets gravity!
 		missile->s.pos.trType = TR_GRAVITY;
 }
 
@@ -5177,7 +5177,7 @@ void WP_FireMelee( gentity_t *ent, qboolean alt_fire )
 	VectorMA(muzzlePunch, 20.0f, forward, muzzlePunch);
 	VectorMA(muzzlePunch, 4.0f, vright, muzzlePunch);
 
-	if (g_tweakForce.integer & FT_BUFFMELEE)
+	if (JK2O_TWEAKFORCE & FT_BUFFMELEE)
 		VectorMA(muzzlePunch, MELEE_RANGE+6, forward, end);
 	else
 		VectorMA( muzzlePunch, MELEE_RANGE, forward, end );
@@ -5212,12 +5212,12 @@ void WP_FireMelee( gentity_t *ent, qboolean alt_fire )
 		if ( tr_ent->takedamage )
 		{ //damage them, do more damage if we're in the second right hook
 			int dmg = MELEE_SWING1_DAMAGE;
-			if (g_tweakForce.integer & FT_BUFFMELEE)
+			if (JK2O_TWEAKFORCE & FT_BUFFMELEE)
 				dmg = 18 * g_weaponDamageScale.integer;
 
 			if (ent->client && ent->client->ps.torsoAnim == BOTH_MELEE2)
 			{ //do a tad bit more damage on the second swing
-				if (g_tweakForce.integer & FT_BUFFMELEE)
+				if (JK2O_TWEAKFORCE & FT_BUFFMELEE)
 					dmg = 20 * g_weaponDamageScale.integer;
 				else
 					dmg = MELEE_SWING2_DAMAGE;
@@ -5237,7 +5237,7 @@ void WP_FireMelee( gentity_t *ent, qboolean alt_fire )
 static void WP_FireLightningGun( gentity_t *ent )
 //---------------------------------------------------------
 {
-	int			damage = 4 * g_weaponDamageScale.value; // LG nerf even though it didnt nead it vs good players.. woop
+	int			damage = 4 * JK2O_WEAPONDAMAGESCALE; // LG nerf even though it didnt nead it vs good players.. woop
 	qboolean	render_impact = qtrue;
 	vec3_t		start, end;
 	trace_t		tr;
@@ -5246,13 +5246,13 @@ static void WP_FireLightningGun( gentity_t *ent )
 	int			ignore;
 	qboolean	ghoul2 = qfalse;
 
-	if (d_projectileGhoul2Collision.integer)
+	if (JK2O_PROJG2COLLISION)
 		ghoul2 = qtrue;
 
-	if (g_tweakWeapons.integer & WT_TRIBES) {
+	if (JK2O_TWEAKWEAPONS & WT_TRIBES) {
 		shotRange = 1024;
 
-		//damage = ent->client->ps.fd.forcePower * 0.5f * g_weaponDamageScale.value;
+		//damage = ent->client->ps.fd.forcePower * 0.5f * JK2O_WEAPONDAMAGESCALE;
 		//if (damage < 10)
 			//damage = 10;
 		//ent->client->ps.fd.forcePower -= 1;
@@ -5268,7 +5268,7 @@ static void WP_FireLightningGun( gentity_t *ent )
 
 	VectorMA( start, 1, vright, start );
 
-	if ( g_unlagged.integer & UNLAGGED_HITSCAN )
+	if ( JK2O_UNLAGGED & UNLAGGED_HITSCAN )
 		G_TimeShiftAllClients( ent->client->pers.cmd.serverTime, ent, ghoul2 );
 
 	ignore = ent->s.number;
@@ -5280,19 +5280,19 @@ static void WP_FireLightningGun( gentity_t *ent )
 
 	if ( tr.entityNum == ENTITYNUM_NONE )
 	{
-		if ( g_unlagged.integer & UNLAGGED_HITSCAN )
+		if ( JK2O_UNLAGGED & UNLAGGED_HITSCAN )
 			G_UnTimeShiftAllClients( ent, ghoul2 );
 		return;
 	}
 	//fix: shooting ourselves shouldn't be allowed 
 	if (tr.entityNum == ent->s.number)
 	{
-		if ( g_unlagged.integer & UNLAGGED_HITSCAN )
+		if ( JK2O_UNLAGGED & UNLAGGED_HITSCAN )
 			G_UnTimeShiftAllClients( ent, ghoul2 );
 		return;
 	}
 
-	if (ent->client && g_tweakWeapons.integer & WT_TRIBES) {
+	if (ent->client && JK2O_TWEAKWEAPONS & WT_TRIBES) {
 		ent->client->jetPackDebReduce = level.time + 200;
 	}
 
@@ -5312,7 +5312,7 @@ static void WP_FireLightningGun( gentity_t *ent )
 		}
 	}
 
-	if ( g_unlagged.integer & UNLAGGED_HITSCAN )
+	if ( JK2O_UNLAGGED & UNLAGGED_HITSCAN )
 		G_UnTimeShiftAllClients( ent, ghoul2 );
 
 	if ( tr.surfaceFlags & SURF_NOIMPACT ) 
@@ -5336,7 +5336,7 @@ static void WP_FireLightningGun( gentity_t *ent )
 				ent->client->accuracy_hits++;
 			} 
 
-			if ((g_tweakWeapons.integer & WT_STUN_HEAL) && !ent->client->ps.duelInProgress)
+			if ((JK2O_TWEAKWEAPONS & WT_STUN_HEAL) && !ent->client->ps.duelInProgress)
 				G_Damage( traceEnt, ent, ent, forward, tr.endpos, -damage*0.25, DAMAGE_NO_ARMOR|DAMAGE_NO_KNOCKBACK, MOD_STUN_BATON );
 			else
 				G_Damage( traceEnt, ent, ent, forward, tr.endpos, damage, DAMAGE_NORMAL, MOD_STUN_BATON );
@@ -5363,7 +5363,7 @@ static void WP_FireLightningGun( gentity_t *ent )
 static void WP_FireShockLance( gentity_t *ent )
 //---------------------------------------------------------
 {
-	int			damage = 55 * 3 * g_weaponDamageScale.value;
+	int			damage = 55 * 3 * JK2O_WEAPONDAMAGESCALE;
 	qboolean	render_impact = qtrue;
 	vec3_t		start, end;
 	trace_t		tr;
@@ -5371,7 +5371,7 @@ static void WP_FireShockLance( gentity_t *ent )
 	float		shotRange = 240;
 	int			ignore;
 
-	if (g_tweakWeapons.integer & WT_TRIBES)
+	if (JK2O_TWEAKWEAPONS & WT_TRIBES)
 		shotRange = 384;
 
 	memset(&tr, 0, sizeof(tr)); //to shut the compiler up
@@ -5381,7 +5381,7 @@ static void WP_FireShockLance( gentity_t *ent )
 	VectorMA( start, shotRange, forward, end );
 	VectorMA( start, 1, vright, start );
 
-	if ( g_unlagged.integer & UNLAGGED_HITSCAN )
+	if ( JK2O_UNLAGGED & UNLAGGED_HITSCAN )
 		G_TimeShiftAllClients( ent->client->pers.cmd.serverTime, ent, qfalse );
 
 	ignore = ent->s.number;
@@ -5390,21 +5390,21 @@ static void WP_FireShockLance( gentity_t *ent )
 
 	if ( tr.entityNum == ENTITYNUM_NONE )
 	{
-		if ( g_unlagged.integer & UNLAGGED_HITSCAN )
+		if ( JK2O_UNLAGGED & UNLAGGED_HITSCAN )
 			G_UnTimeShiftAllClients( ent, qfalse );
 		return;
 	}
 	//fix: shooting ourselves shouldn't be allowed 
 	if (tr.entityNum == ent->s.number)
 	{
-		if ( g_unlagged.integer & UNLAGGED_HITSCAN )
+		if ( JK2O_UNLAGGED & UNLAGGED_HITSCAN )
 			G_UnTimeShiftAllClients( ent, qfalse );
 		return;
 	}
 
 	traceEnt = &g_entities[tr.entityNum];
 
-	if ( g_unlagged.integer & UNLAGGED_HITSCAN )
+	if ( JK2O_UNLAGGED & UNLAGGED_HITSCAN )
 		G_UnTimeShiftAllClients( ent, qfalse );
 
 	if ( tr.surfaceFlags & SURF_NOIMPACT ) 
@@ -5625,7 +5625,7 @@ void CalcMuzzlePoint ( gentity_t *ent, const vec3_t inForward, const vec3_t inRi
 
 	if (weapontype > WP_NONE && weapontype < WP_NUM_WEAPONS)
 	{	// Use the table to generate the muzzlepoint;
-		if (g_tweakWeapons.integer & WT_CENTER_MUZZLEPOINT && (ent->client->pers.centerMuzzle || ent->client->sess.raceMode)) //Also centerMuzzle for racemode rocketjump styles
+		if (JK2O_TWEAKWEAPONS & WT_CENTER_MUZZLEPOINT && (ent->client->pers.centerMuzzle || ent->client->sess.raceMode)) //Also centerMuzzle for racemode rocketjump styles
 		{
 			switch (weapontype)
 			{
@@ -5749,7 +5749,7 @@ gentity_t *WP_FireVehicleWeapon( gentity_t *ent, vec3_t start, vec3_t dir, vehWe
 
 		//FIXME: CUSTOM MODEL?
 		//QUERY: alt_fire true or not?  Does it matter?
-		if (g_tweakWeapons.integer & WT_TRIBES) {
+		if (JK2O_TWEAKWEAPONS & WT_TRIBES) {
 			missile = CreateMissileNew(start, dir, vehWeapon->fSpeed, 10000, ent, qfalse, 2, qfalse); //Forced inheritance here? loda fixme unlagged
 		}
 		else {
@@ -5759,8 +5759,8 @@ gentity_t *WP_FireVehicleWeapon( gentity_t *ent, vec3_t start, vec3_t dir, vehWe
 		missile->classname = "vehicle_proj";
 
 		missile->s.genericenemyindex = ent->s.number+MAX_GENTITIES;
-		missile->damage = vehWeapon->iDamage * g_weaponDamageScale.value;
-		missile->splashDamage = vehWeapon->iSplashDamage * g_splashDamageScale.value;
+		missile->damage = vehWeapon->iDamage * JK2O_WEAPONDAMAGESCALE;
+		missile->splashDamage = vehWeapon->iSplashDamage * JK2O_SPLASHDAMAGESCALE;
 		missile->splashRadius = vehWeapon->fSplashRadius;
 
 		//FIXME: externalize some of these properties?
@@ -6513,7 +6513,7 @@ void FireWeapon( gentity_t *ent, qboolean altFire ) {
 	}
 
 	// track shots taken for accuracy tracking.  Grapple is not a weapon and gauntet is just not tracked
-	if( ent->s.weapon != WP_SABER && (ent->s.weapon != WP_STUN_BATON || ((g_tweakWeapons.integer & WT_STUN_LG) || (g_tweakWeapons.integer & WT_STUN_SHOCKLANCE))) && ent->s.weapon != WP_MELEE )
+	if( ent->s.weapon != WP_SABER && (ent->s.weapon != WP_STUN_BATON || ((JK2O_TWEAKWEAPONS & WT_STUN_LG) || (JK2O_TWEAKWEAPONS & WT_STUN_SHOCKLANCE))) && ent->s.weapon != WP_MELEE )
 	{
 		if( ent->s.weapon == WP_FLECHETTE ) {
 			ent->client->accuracy_shots += FLECHETTE_SHOTS;
@@ -6602,9 +6602,9 @@ void FireWeapon( gentity_t *ent, qboolean altFire ) {
 		// fire the specific weapon
 		switch (ent->s.weapon) {
 		case WP_STUN_BATON:
-			if (g_tweakWeapons.integer & WT_STUN_LG && altFire)//JAPRO - Lightning Gun
+			if (JK2O_TWEAKWEAPONS & WT_STUN_LG && altFire)//JAPRO - Lightning Gun
 				WP_FireLightningGun(ent);
-			else if (g_tweakWeapons.integer & WT_STUN_SHOCKLANCE && !altFire)//JAPRO - Shocklance
+			else if (JK2O_TWEAKWEAPONS & WT_STUN_SHOCKLANCE && !altFire)//JAPRO - Shocklance
 				WP_FireShockLance(ent);
 			else
 				WP_FireStunBaton(ent, altFire);
@@ -6618,7 +6618,7 @@ void FireWeapon( gentity_t *ent, qboolean altFire ) {
 			break;
 
 		case WP_BRYAR_PISTOL:
-			if (g_tweakWeapons.integer & WT_TRIBES)
+			if (JK2O_TWEAKWEAPONS & WT_TRIBES)
 				WP_FireColt(ent, altFire);
 			else
 				WP_FireBryarPistol( ent, altFire, seed );
@@ -6626,7 +6626,7 @@ void FireWeapon( gentity_t *ent, qboolean altFire ) {
 
 		case WP_CONCUSSION:
 			if (altFire) {
-				if (g_tweakWeapons.integer & WT_TRIBES)
+				if (JK2O_TWEAKWEAPONS & WT_TRIBES)
 					WP_FireSpinfusorAlt(ent);
 				else
 					WP_FireConcussionAlt(ent);

@@ -3851,7 +3851,7 @@ void G_RunFrame( int levelTime ) {
 			continue;
 		}
 
-		/*if ( !(g_unlagged.integer & UNLAGGED_PROJ_REC) && (ent->s.eType == ET_MISSILE) ) {//loda fixme?
+		/*if ( !(JK2O_UNLAGGED & UNLAGGED_PROJ_REC) && (ent->s.eType == ET_MISSILE) ) {//loda fixme?
 			G_RunMissile( ent );
 			continue;
 		}*/
@@ -4052,7 +4052,7 @@ void G_RunFrame( int levelTime ) {
 			{ //recharge jetpack
 				if (ent->client->jetPackDebRecharge < level.time)
 				{
-					if (g_tweakWeapons.integer & WT_TRIBES)
+					if (JK2O_TWEAKWEAPONS & WT_TRIBES)
 						ent->client->ps.jetpackFuel += 4;
 					else
 						ent->client->ps.jetpackFuel += 3;
@@ -4328,7 +4328,7 @@ void G_RunFrame( int levelTime ) {
 	// of the last server frame
 
 	/*
-	if (g_unlagged.integer & UNLAGGED_PROJ_REC)
+	if (JK2O_UNLAGGED & UNLAGGED_PROJ_REC)
 	{
 		G_TimeShiftAllClients( level.previousTime, NULL );
 

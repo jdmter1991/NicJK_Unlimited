@@ -7641,7 +7641,7 @@ float BotWeaponCanLead(bot_state_t* bs)
 	case WP_FLECHETTE:
 		return 0.3f;
 	case WP_DISRUPTOR:
-		if (g_tweakWeapons.integer & WT_PROJ_SNIPER)
+		if (JK2O_TWEAKWEAPONS & WT_PROJ_SNIPER)
 			return 0.08f;
 		else
 			return 0.03f;
@@ -7655,50 +7655,50 @@ float G_NewBotAIGetProjectileSpeed(int weapon, qboolean altFire) {
 
 	if (weapon == WP_BRYAR_OLD || weapon == WP_BRYAR_PISTOL || (weapon == WP_REPEATER && !altFire))
 		projectileSpeed = 1600;
-	else if (weapon == WP_BLASTER && (g_tweakWeapons.integer & WT_TRIBES))
+	else if (weapon == WP_BLASTER && (JK2O_TWEAKWEAPONS & WT_TRIBES))
 		projectileSpeed = 10440;
 	else if (weapon == WP_BLASTER)
 		projectileSpeed = 2300;
-	else if (weapon == WP_DISRUPTOR && (g_tweakWeapons.integer & WT_PROJ_SNIPER))
+	else if (weapon == WP_DISRUPTOR && (JK2O_TWEAKWEAPONS & WT_PROJ_SNIPER))
 		projectileSpeed = 9000;
 	else if (weapon == WP_BOWCASTER)
 		projectileSpeed = 1300;
 	else if (weapon == WP_DEMP2 && !altFire) {
-		if (g_tweakWeapons.integer & WT_TRIBES)
+		if (JK2O_TWEAKWEAPONS & WT_TRIBES)
 			projectileSpeed = 2200;
 		else
 			projectileSpeed = 1800;
 	}
 	else if (weapon == WP_REPEATER && altFire) {
-		if (g_tweakWeapons.integer & WT_TRIBES)
+		if (JK2O_TWEAKWEAPONS & WT_TRIBES)
 			projectileSpeed = 1400;
 		else
 			projectileSpeed = 1100;
 	}
-	else if (weapon == WP_FLECHETTE && (g_tweakWeapons.integer & WT_STAKE_GUN))
+	else if (weapon == WP_FLECHETTE && (JK2O_TWEAKWEAPONS & WT_STAKE_GUN))
 		projectileSpeed = 3000;
 	else if ((weapon == WP_FLECHETTE) && altFire)
 		projectileSpeed = 1150;
 	else if (weapon == WP_FLECHETTE && !altFire)
 		projectileSpeed = 3500;
-	else if (weapon == WP_REPEATER && (g_tweakWeapons.integer & WT_TRIBES) && altFire)
+	else if (weapon == WP_REPEATER && (JK2O_TWEAKWEAPONS & WT_TRIBES) && altFire)
 		projectileSpeed = 2000;
 	else if (weapon == WP_ROCKET_LAUNCHER && !altFire) {
-		if (g_tweakWeapons.integer & WT_TRIBES)
+		if (JK2O_TWEAKWEAPONS & WT_TRIBES)
 			projectileSpeed = 2040;
 		else
 			projectileSpeed = 900;
 	}
 	else if (weapon == WP_ROCKET_LAUNCHER && altFire)
 		projectileSpeed = 450;
-	else if (weapon == WP_CONCUSSION && !altFire && (g_tweakWeapons.integer & WT_TRIBES))
+	else if (weapon == WP_CONCUSSION && !altFire && (JK2O_TWEAKWEAPONS & WT_TRIBES))
 		projectileSpeed = 2275;
 	else if (weapon == WP_CONCUSSION && !altFire)
 		projectileSpeed = 3000;
 	else if (weapon == WP_THERMAL)
 		projectileSpeed = 900;
 
-	return projectileSpeed * g_projectileVelocityScale.value;
+	return projectileSpeed * JK2O_PROJVELOCITYSCALE;
 }
 
 /*
@@ -7775,21 +7775,21 @@ void G_NewBotAIAimLeading(bot_state_t* bs, vec3_t headlevel) {
 	projectileSpeed = G_NewBotAIGetProjectileSpeed(bs->cur_ps.weapon, bs->doAltAttack);
 
 	if (projectileSpeed) { //this should be done after playr movement
-		if (g_projectileInheritance.value) { //todo still have to teach brodie full inheritence projectiles
+		if (JK2O_PROJINHERITANCE) { //todo still have to teach brodie full inheritence projectiles
 			vec3_t botforward;
 			AngleVectors(bs->viewangles, botforward, NULL, NULL);
-			projectileSpeed += DotProduct(botforward, g_entities[bs->client].client->ps.velocity) * g_projectileInheritance.value;
+			projectileSpeed += DotProduct(botforward, g_entities[bs->client].client->ps.velocity) * JK2O_PROJINHERITANCE;
 		}
 
 		eta = (bs->frame_Enemy_Len / projectileSpeed); //TODO: Adjust if its a curved projectile arc
 		VectorMA(headlevel, eta, bs->currentEnemy->client->ps.velocity, predictedSpot); //Multiple vel by eta, and add it to their origin to get predicted spot
 		if (((bs->cur_ps.weapon == WP_REPEATER) && bs->doAltAttack) ||
-			((bs->cur_ps.weapon == WP_DISRUPTOR) && (g_tweakWeapons.integer & WT_PROJ_SNIPER)) ||
-			((bs->cur_ps.weapon == WP_ROCKET_LAUNCHER) && !bs->doAltAttack && (g_tweakWeapons.integer & WT_TRIBES)) ||
-			((bs->cur_ps.weapon == WP_FLECHETTE) && (g_tweakWeapons.integer & WT_STAKE_GUN)) ||
-			((bs->cur_ps.weapon == WP_FLECHETTE) && !(g_tweakWeapons.integer & WT_STAKE_GUN) && bs->doAltAttack) ||
+			((bs->cur_ps.weapon == WP_DISRUPTOR) && (JK2O_TWEAKWEAPONS & WT_PROJ_SNIPER)) ||
+			((bs->cur_ps.weapon == WP_ROCKET_LAUNCHER) && !bs->doAltAttack && (JK2O_TWEAKWEAPONS & WT_TRIBES)) ||
+			((bs->cur_ps.weapon == WP_FLECHETTE) && (JK2O_TWEAKWEAPONS & WT_STAKE_GUN)) ||
+			((bs->cur_ps.weapon == WP_FLECHETTE) && !(JK2O_TWEAKWEAPONS & WT_STAKE_GUN) && bs->doAltAttack) ||
 			(bs->cur_ps.weapon == WP_THERMAL) ||
-			(g_tweakWeapons.integer & WT_PROJECTILE_GRAVITY)) {
+			(JK2O_TWEAKWEAPONS & WT_PROJECTILE_GRAVITY)) {
 			projectileDrop = (0.5) * (800) * (eta * eta); //If weapon has gravity, compensate to aim higher
 			predictedSpot[2] += projectileDrop;
 		}
@@ -11248,7 +11248,7 @@ int NewBotAI_GetWeapon(bot_state_t* bs)
 				bestWeapon = WP_REPEATER;
 				bs->doAltAttack = 1;
 			}
-			else if (distance < 768 && BotWeaponSelectableAltFire(bs, WP_STUN_BATON) && (g_tweakWeapons.integer & WT_STUN_LG) && !(g_tweakWeapons.integer & WT_STUN_HEAL)) {
+			else if (distance < 768 && BotWeaponSelectableAltFire(bs, WP_STUN_BATON) && (JK2O_TWEAKWEAPONS & WT_STUN_LG) && !(JK2O_TWEAKWEAPONS & WT_STUN_HEAL)) {
 				bestWeapon = WP_STUN_BATON;
 			}
 			else if (BotWeaponSelectable(bs, WP_DISRUPTOR))
@@ -11286,7 +11286,7 @@ int NewBotAI_GetWeapon(bot_state_t* bs)
 		else if (distance < 200) {
 			if (BotWeaponSelectableAltFire(bs, WP_FLECHETTE)) {
 				bestWeapon = WP_FLECHETTE;
-				if (!(g_tweakWeapons.integer & WT_STAKE_GUN))
+				if (!(JK2O_TWEAKWEAPONS & WT_STAKE_GUN))
 					bs->doAltAttack = 1;
 			}
 			else if (BotWeaponSelectable(bs, WP_ROCKET_LAUNCHER) && forcedFireMode != 2)
@@ -11297,7 +11297,7 @@ int NewBotAI_GetWeapon(bot_state_t* bs)
 			}
 			else if (BotWeaponSelectable(bs, WP_CONCUSSION) && forcedFireMode != 2)
 				bestWeapon = WP_CONCUSSION;
-			else if (BotWeaponSelectableAltFire(bs, WP_STUN_BATON) && (g_tweakWeapons.integer & WT_STUN_SHOCKLANCE)) {
+			else if (BotWeaponSelectableAltFire(bs, WP_STUN_BATON) && (JK2O_TWEAKWEAPONS & WT_STUN_SHOCKLANCE)) {
 				bestWeapon = WP_STUN_BATON;
 				bs->doAltAttack = 1;
 			}
@@ -11356,7 +11356,7 @@ int NewBotAI_GetWeapon(bot_state_t* bs)
 				bestWeapon = WP_REPEATER;
 			else if (BotWeaponSelectable(bs, WP_DISRUPTOR))
 				bestWeapon = WP_DISRUPTOR;
-			else if (distance < 768 && BotWeaponSelectableAltFire(bs, WP_STUN_BATON) && (g_tweakWeapons.integer & WT_STUN_LG) && !(g_tweakWeapons.integer & WT_STUN_HEAL)) {
+			else if (distance < 768 && BotWeaponSelectableAltFire(bs, WP_STUN_BATON) && (JK2O_TWEAKWEAPONS & WT_STUN_LG) && !(JK2O_TWEAKWEAPONS & WT_STUN_HEAL)) {
 				bestWeapon = WP_STUN_BATON;
 			}
 			else if (BotWeaponSelectableAltFire(bs, WP_BOWCASTER)) {
@@ -11404,7 +11404,7 @@ int NewBotAI_GetWeapon(bot_state_t* bs)
 				bestWeapon = WP_BOWCASTER;
 				bs->doAltAttack = 1;
 			}
-			else if (BotWeaponSelectableAltFire(bs, WP_STUN_BATON) && (g_tweakWeapons.integer & WT_STUN_SHOCKLANCE)) {
+			else if (BotWeaponSelectableAltFire(bs, WP_STUN_BATON) && (JK2O_TWEAKWEAPONS & WT_STUN_SHOCKLANCE)) {
 				bestWeapon = WP_STUN_BATON;
 				bs->doAltAttack = 1;
 			}
@@ -11470,7 +11470,7 @@ int NewBotAI_GetWeapon(bot_state_t* bs)
 				bestWeapon = WP_REPEATER;
 			else if (BotWeaponSelectable(bs, WP_DISRUPTOR))
 				bestWeapon = WP_DISRUPTOR;
-			else if (BotWeaponSelectableAltFire(bs, WP_STUN_BATON) && (g_tweakWeapons.integer & WT_STUN_LG) && !(g_tweakWeapons.integer & WT_STUN_HEAL)) {
+			else if (BotWeaponSelectableAltFire(bs, WP_STUN_BATON) && (JK2O_TWEAKWEAPONS & WT_STUN_LG) && !(JK2O_TWEAKWEAPONS & WT_STUN_HEAL)) {
 				bestWeapon = WP_STUN_BATON;
 			}
 			else if (bs->cur_ps.stats[STAT_WEAPONS] & (1 << WP_SABER))
@@ -11510,10 +11510,10 @@ int NewBotAI_GetWeapon(bot_state_t* bs)
 				bestWeapon = WP_CONCUSSION;
 			else if (BotWeaponSelectable(bs, WP_DISRUPTOR))
 				bestWeapon = WP_DISRUPTOR;
-			else if (BotWeaponSelectableAltFire(bs, WP_STUN_BATON) && (g_tweakWeapons.integer & WT_STUN_LG) && !(g_tweakWeapons.integer & WT_STUN_HEAL)) {
+			else if (BotWeaponSelectableAltFire(bs, WP_STUN_BATON) && (JK2O_TWEAKWEAPONS & WT_STUN_LG) && !(JK2O_TWEAKWEAPONS & WT_STUN_HEAL)) {
 				bestWeapon = WP_STUN_BATON;
 			}
-			else if (BotWeaponSelectableAltFire(bs, WP_STUN_BATON) && (g_tweakWeapons.integer & WT_STUN_SHOCKLANCE)) {
+			else if (BotWeaponSelectableAltFire(bs, WP_STUN_BATON) && (JK2O_TWEAKWEAPONS & WT_STUN_SHOCKLANCE)) {
 				bestWeapon = WP_STUN_BATON;
 				bs->doAltAttack = 1;
 			}
@@ -14677,7 +14677,7 @@ void NewBotAI_GetAttack(bot_state_t* bs) // Niksata Edit
 	if (!bs->client || !bs->currentEnemy || !bs->currentEnemy->client)
 		return;
 
-	if (g_tweakWeapons.integer & WT_TRIBES)
+	if (JK2O_TWEAKWEAPONS & WT_TRIBES)
 		weapon = NewBotAI_GetTribesWeapon(bs);
 	else
 		weapon = NewBotAI_GetWeapon(bs);
@@ -14719,7 +14719,7 @@ void NewBotAI_GetAttack(bot_state_t* bs) // Niksata Edit
 
 		if (bs->doAltAttack) {
 			const int altCharge = NewBotAI_GetAltCharge(bs);
-			if (weapon == WP_STUN_BATON && bs->frame_Enemy_Len > 240 && (g_tweakWeapons.integer & WT_STUN_SHOCKLANCE)) { //Weird case for stun baton since low range and low firerate, dont bother until they are in range
+			if (weapon == WP_STUN_BATON && bs->frame_Enemy_Len > 240 && (JK2O_TWEAKWEAPONS & WT_STUN_SHOCKLANCE)) { //Weird case for stun baton since low range and low firerate, dont bother until they are in range
 			}
 			else if (altCharge == 1) {
 				trap->EA_Alt_Attack(bs->client);
@@ -15461,7 +15461,7 @@ int NewBotAI_GetPull(bot_state_t* bs) {
 			return 100;
 	}
 
-	if (NewBotAI_IsEnemyPullable(bs) && (bs->cur_ps.weapon == WP_SABER || bs->cur_ps.weapon == WP_MELEE) && g_flipKick.integer) {
+	if (NewBotAI_IsEnemyPullable(bs) && (bs->cur_ps.weapon == WP_SABER || bs->cur_ps.weapon == WP_MELEE) && JK2O_FLIPKICK) {
 		if (hisHealth <= 20 && bs->frame_Enemy_Len < 250) {//Check for the insta kill, this should be better maybe... on ground pullablable should be a diff range than in air pullable
 			//Com_Printf("pullable 2\n");
 			return 100;
@@ -16381,7 +16381,7 @@ void NewBotAI_NF(bot_state_t* bs)
 			}
 			trap->EA_MoveForward(bs->client);
 		}
-		else if ((g_tweakSaber.integer & ST_EASYBACKSLASH) && (bs->frame_Enemy_Len < 128) && (g_backslashDamageScale.value >= 5 || (g_backslashDamageScale.value >= 3 && (g_tweakSaber.integer & ST_SPINBACKSLASH)))) {
+		else if ((JK2O_TWEAKSABER & ST_EASYBACKSLASH) && (bs->frame_Enemy_Len < 128) && (g_backslashDamageScale.value >= 5 || (g_backslashDamageScale.value >= 3 && (JK2O_TWEAKSABER & ST_SPINBACKSLASH)))) {
 			//Do a backslash 
 			//bs->ideal_viewangles[YAW] += 180;
 			/*if (BS_GroundDistance(bs) < 20)
@@ -17218,7 +17218,7 @@ void NewBotAI(bot_state_t* bs, float thinktime) //BOT START // Niksata Edit - FI
 	// ========================================
 	// COMBAT SYSTEM - UNIFIED MOVEMENT HANDLING
 	// ========================================
-	if ((g_forcePowerDisable.integer != 163837 && g_forcePowerDisable.integer != 163839) || (g_flipKick.integer) || (bs->cur_ps.weapon != WP_SABER)) {
+	if ((g_forcePowerDisable.integer != 163837 && g_forcePowerDisable.integer != 163839) || (JK2O_FLIPKICK) || (bs->cur_ps.weapon != WP_SABER)) {
 		if (bs->currentEnemy->client->ps.fd.forceSide == FORCE_LIGHTSIDE) { // They are LS.
 			if (bs->cur_ps.fd.forceSide == FORCE_LIGHTSIDE)
 				NewBotAI_LSvLS(bs);  // KEEP SEPARATE
@@ -17772,7 +17772,7 @@ void StandardBotAI(bot_state_t* bs, float thinktime)
 #else
 	if (bs->currentEnemy && bs->currentEnemy->client && bs->frame_Enemy_Vis)
 #endif
-		if ((g_forcePowerDisable.integer != 163837 && g_forcePowerDisable.integer != 163839) || (g_flipKick.integer) || (bs->cur_ps.weapon != WP_SABER)) {
+		if ((g_forcePowerDisable.integer != 163837 && g_forcePowerDisable.integer != 163839) || (JK2O_FLIPKICK) || (bs->cur_ps.weapon != WP_SABER)) {
 			// Then do normal combat
 			if (bs->currentEnemy->client->ps.fd.forceSide == FORCE_LIGHTSIDE) { // They are LS.
 				if (bs->cur_ps.fd.forceSide == FORCE_LIGHTSIDE)
