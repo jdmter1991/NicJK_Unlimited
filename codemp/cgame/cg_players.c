@@ -6148,8 +6148,8 @@ static QINLINE int ClampSaberColor(int color) {
 	if (color >= NUM_SABER_COLORS)
 		color = color % NUM_SABER_COLORS; //cap it to highest 'valid' color?
 
-	if (color == SABER_BLACK)
-		return (PLUGIN_NO_BLACKSABERS || cg_noRGBSabers.integer) ? SABER_ORANGE : SABER_BLACK;
+	if (color == SABER_BLACK || color == SABER_REDBLACK)
+		return (PLUGIN_NO_BLACKSABERS || cg_noRGBSabers.integer) ? SABER_ORANGE : color;
 
 	if (color > SABER_PURPLE && (cg_noRGBSabers.integer || ((cgs.serverMod < SVMOD_JAPLUS) && !(cgs.taystJKinfo & TAYSTJK_INFO_RGBSABERS)))) {
 		if (disco.integer)
@@ -6198,6 +6198,7 @@ static void CG_RGBForSaberColor( saber_colors_t color, vec3_t rgb, int cnum, int
 			VectorSet( rgb, 0.9f, 0.2f, 1.0f );
 			break;
 		case SABER_BLACK:
+		case SABER_REDBLACK:
 			VectorSet( rgb, 1.0f, 1.0f, 1.0f );
 			break;
 		case SABER_RGB:
@@ -6265,6 +6266,7 @@ static void CG_RGBForSaberColorTPM(saber_colors_t color, vec3_t rgb, int cnum, i
 		VectorSet(rgb, 0.565f, 0.204f, 0.976f);  // 9034f9 - ROTS 4k purple
 		break;
 	case SABER_BLACK:
+	case SABER_REDBLACK:
 		VectorSet(rgb, 1.0f, 1.0f, 1.0f);
 		break;
 	case SABER_RGB:
@@ -6332,6 +6334,7 @@ static void CG_RGBForSaberColorTPMTheatrical(saber_colors_t color, vec3_t rgb, i
 		VectorSet(rgb, 0.451f, 0.235f, 0.588f);  // 733c96
 		break;
 	case SABER_BLACK:
+	case SABER_REDBLACK:
 		VectorSet(rgb, 1.0f, 1.0f, 1.0f);
 		break;
 	case SABER_RGB:
@@ -6399,6 +6402,7 @@ static void CG_RGBForSaberColorAOTCTheatrical(saber_colors_t color, vec3_t rgb, 
 		VectorSet(rgb, 0.290f, 0.118f, 0.475f);  // 4a1e79
 		break;
 	case SABER_BLACK:
+	case SABER_REDBLACK:
 		VectorSet(rgb, 1.0f, 1.0f, 1.0f);
 		break;
 	case SABER_RGB:
@@ -6486,6 +6490,7 @@ static void CG_RGBForSaberColorROTS(saber_colors_t color, vec3_t rgb, int cnum, 
 		}
 		break;
 	case SABER_BLACK:
+	case SABER_REDBLACK:
 		VectorSet(rgb, 1.0f, 1.0f, 1.0f);
 		break;
 	case SABER_RGB:
@@ -6568,6 +6573,7 @@ static void CG_RGBForSaberColorOT(saber_colors_t color, vec3_t rgb, int cnum, in
 		VectorSet(rgb, 0.565f, 0.204f, 0.976f);  // 9034f9
 		break;
 	case SABER_BLACK:
+	case SABER_REDBLACK:
 		VectorSet(rgb, 1.0f, 1.0f, 1.0f);
 		break;
 	case SABER_RGB:
@@ -6635,6 +6641,7 @@ static void CG_RGBForSaberColorMcquarrie(saber_colors_t color, vec3_t rgb, int c
 		VectorSet(rgb, 0.565f, 0.204f, 0.976f);  // 9034f9
 		break;
 	case SABER_BLACK:
+	case SABER_REDBLACK:
 		VectorSet(rgb, 1.0f, 1.0f, 1.0f);
 		break;
 	case SABER_RGB:
@@ -6702,6 +6709,7 @@ static void CG_RGBForSaberColorAhsoka(saber_colors_t color, vec3_t rgb, int cnum
 		VectorSet(rgb, 0.573f, 0.125f, 0.816f);  // 9220d0
 		break;
 	case SABER_BLACK:
+	case SABER_REDBLACK:
 		VectorSet(rgb, 1.0f, 1.0f, 1.0f);
 		break;
 	case SABER_RGB:
@@ -6924,8 +6932,9 @@ void CG_DoSaber( vec3_t origin, vec3_t dir, float length, float lengthMax, float
 			break;
 #endif
 		case SABER_BLACK:
-			glow = cgs.media.blackSaberGlowShader;
-			blade = cgs.media.blackSaberCoreShader;
+		case SABER_REDBLACK:
+			glow = (color == SABER_REDBLACK ? cgs.media.redblackSaberGlowShader : cgs.media.blackSaberGlowShader);
+			blade = (color == SABER_REDBLACK ? cgs.media.redblackSaberCoreShader : cgs.media.blackSaberCoreShader);
 			doLight = qfalse;
 			break;
 		default:
@@ -7049,7 +7058,8 @@ void CG_DoSaber( vec3_t origin, vec3_t dir, float length, float lengthMax, float
 				break;
 #endif
 			case SABER_BLACK:
-				sbak.customShader = cgs.media.blackSaberCoreShader;
+			case SABER_REDBLACK:
+				sbak.customShader = (color == SABER_REDBLACK ? cgs.media.redblackSaberCoreShader : cgs.media.blackSaberCoreShader);
 				break;
 		}
 	}
@@ -7138,8 +7148,9 @@ void CG_DoSFXSaberTPM(vec3_t blade_muz, vec3_t blade_tip, vec3_t trail_tip, vec3
 		core = cgs.media.ShaderSaberBlade;
 		break;
 	case SABER_BLACK:
-		glow = cgs.media.blackSaberGlowShader;
-		core = cgs.media.blackSaberCoreShader;
+	case SABER_REDBLACK:
+		glow = (color == SABER_REDBLACK ? cgs.media.redblackSaberGlowShader : cgs.media.blackSaberGlowShader);
+		core = (color == SABER_REDBLACK ? cgs.media.redblackSaberCoreShader : cgs.media.blackSaberCoreShader);
 		doLight = qfalse;
 		break;
 	default:
@@ -7467,7 +7478,7 @@ void CG_DoSFXSaberTPM(vec3_t blade_muz, vec3_t blade_tip, vec3_t trail_tip, vec3
 	VectorMA(blade_tip, end_len, end_dir, saber.origin);
 	VectorMA(blade_tip, -0.1f, end_dir, saber.oldorigin);
 
-	if (color == SABER_BLACK) {
+	if (color == SABER_BLACK || color == SABER_REDBLACK) {
 		saber.customShader = cgs.media.ShaderSaberEndblack;
 	}
 	else {
@@ -7491,7 +7502,7 @@ void CG_DoSFXSaberTPM(vec3_t blade_muz, vec3_t blade_tip, vec3_t trail_tip, vec3
 	saber.saberLength = end_len;
 
 	saber.shaderTexCoord[0] = saber.shaderTexCoord[1] = 1.0f;
-	if (color == SABER_BLACK) {
+	if (color == SABER_BLACK || color == SABER_REDBLACK) {
 		// Explicit black for black sabers
 		saber.shaderRGBA[0] = saber.shaderRGBA[1] = saber.shaderRGBA[2] = 0;  // Black RGB
 		saber.shaderRGBA[3] = 255;  // Full alpha
@@ -7593,8 +7604,9 @@ void CG_DoSFXSaberTheatricalTPM(vec3_t blade_muz, vec3_t blade_tip, vec3_t trail
 		core = cgs.media.ShaderSaberBladeRGBTPMTheatrical;
 		break;
 	case SABER_BLACK:
-		glow = cgs.media.blackSaberGlowShader;
-		core = cgs.media.blackSaberCoreShader;
+	case SABER_REDBLACK:
+		glow = (color == SABER_REDBLACK ? cgs.media.redblackSaberGlowShader : cgs.media.blackSaberGlowShader);
+		core = (color == SABER_REDBLACK ? cgs.media.redblackSaberCoreShader : cgs.media.blackSaberCoreShader);
 		doLight = qfalse;
 		break;
 	default:
@@ -7919,7 +7931,7 @@ void CG_DoSFXSaberTheatricalTPM(vec3_t blade_muz, vec3_t blade_tip, vec3_t trail
 	VectorMA(blade_tip, end_len, end_dir, saber.origin);
 	VectorMA(blade_tip, -0.1f, end_dir, saber.oldorigin);
 
-	if (color == SABER_BLACK) {
+	if (color == SABER_BLACK || color == SABER_REDBLACK) {
 		saber.customShader = cgs.media.ShaderSaberEndblack;
 	}
 	else {
@@ -7943,7 +7955,7 @@ void CG_DoSFXSaberTheatricalTPM(vec3_t blade_muz, vec3_t blade_tip, vec3_t trail
 	saber.saberLength = end_len;
 
 	saber.shaderTexCoord[0] = saber.shaderTexCoord[1] = 1.0f;
-	if (color == SABER_BLACK) {
+	if (color == SABER_BLACK || color == SABER_REDBLACK) {
 		// Explicit black for black sabers
 		saber.shaderRGBA[0] = saber.shaderRGBA[1] = saber.shaderRGBA[2] = 0;  // Black RGB
 		saber.shaderRGBA[3] = 255;  // Full alpha
@@ -8045,8 +8057,9 @@ void CG_DoSFXSaberTheatricalAOTC(vec3_t blade_muz, vec3_t blade_tip, vec3_t trai
 		core = cgs.media.ShaderSaberBladeRGBAOTCTheatrical;
 		break;
 	case SABER_BLACK:
-		glow = cgs.media.blackSaberGlowShader;
-		core = cgs.media.blackSaberCoreShader;
+	case SABER_REDBLACK:
+		glow = (color == SABER_REDBLACK ? cgs.media.redblackSaberGlowShader : cgs.media.blackSaberGlowShader);
+		core = (color == SABER_REDBLACK ? cgs.media.redblackSaberCoreShader : cgs.media.blackSaberCoreShader);
 		doLight = qfalse;
 		break;
 	default:
@@ -8371,7 +8384,7 @@ void CG_DoSFXSaberTheatricalAOTC(vec3_t blade_muz, vec3_t blade_tip, vec3_t trai
 	VectorMA(blade_tip, end_len, end_dir, saber.origin);
 	VectorMA(blade_tip, -0.1f, end_dir, saber.oldorigin);
 
-	if (color == SABER_BLACK) {
+	if (color == SABER_BLACK || color == SABER_REDBLACK) {
 		saber.customShader = cgs.media.ShaderSaberEndblack;
 	}
 	else {
@@ -8395,7 +8408,7 @@ void CG_DoSFXSaberTheatricalAOTC(vec3_t blade_muz, vec3_t blade_tip, vec3_t trai
 	saber.saberLength = end_len;
 
 	saber.shaderTexCoord[0] = saber.shaderTexCoord[1] = 1.0f;
-	if (color == SABER_BLACK) {
+	if (color == SABER_BLACK || color == SABER_REDBLACK) {
 		// Explicit black for black sabers
 		saber.shaderRGBA[0] = saber.shaderRGBA[1] = saber.shaderRGBA[2] = 0;  // Black RGB
 		saber.shaderRGBA[3] = 255;  // Full alpha
@@ -8515,8 +8528,9 @@ void CG_DoSFXSaberROTS(vec3_t blade_muz, vec3_t blade_tip, vec3_t trail_tip, vec
 		core = cgs.media.ShaderSaberBlade;
 		break;
 	case SABER_BLACK:
-		glow = cgs.media.blackSaberGlowShader;
-		core = cgs.media.blackSaberCoreShader;
+	case SABER_REDBLACK:
+		glow = (color == SABER_REDBLACK ? cgs.media.redblackSaberGlowShader : cgs.media.blackSaberGlowShader);
+		core = (color == SABER_REDBLACK ? cgs.media.redblackSaberCoreShader : cgs.media.blackSaberCoreShader);
 		doLight = qfalse;
 		break;
 	default:
@@ -8850,7 +8864,7 @@ void CG_DoSFXSaberROTS(vec3_t blade_muz, vec3_t blade_tip, vec3_t trail_tip, vec
 	VectorMA(blade_tip, end_len, end_dir, saber.origin);
 	VectorMA(blade_tip, -0.1f, end_dir, saber.oldorigin);
 
-	if (color == SABER_BLACK) {
+	if (color == SABER_BLACK || color == SABER_REDBLACK) {
 		saber.customShader = cgs.media.ShaderSaberEndblack;
 	}
 	else {
@@ -8874,7 +8888,7 @@ void CG_DoSFXSaberROTS(vec3_t blade_muz, vec3_t blade_tip, vec3_t trail_tip, vec
 	saber.saberLength = end_len;
 
 	saber.shaderTexCoord[0] = saber.shaderTexCoord[1] = 1.0f;
-	if (color == SABER_BLACK) {
+	if (color == SABER_BLACK || color == SABER_REDBLACK) {
 		// Explicit black for black sabers
 		saber.shaderRGBA[0] = saber.shaderRGBA[1] = saber.shaderRGBA[2] = 0;  // Black RGB
 		saber.shaderRGBA[3] = 255;  // Full alpha
@@ -8992,8 +9006,9 @@ void CG_DoSFXSaberOT(vec3_t blade_muz, vec3_t blade_tip, vec3_t trail_tip, vec3_
 		core = cgs.media.ShaderSaberBladeRGBOT;
 		break;
 	case SABER_BLACK:
-		glow = cgs.media.blackSaberGlowShader;
-		core = cgs.media.blackSaberCoreShader;
+	case SABER_REDBLACK:
+		glow = (color == SABER_REDBLACK ? cgs.media.redblackSaberGlowShader : cgs.media.blackSaberGlowShader);
+		core = (color == SABER_REDBLACK ? cgs.media.redblackSaberCoreShader : cgs.media.blackSaberCoreShader);
 		doLight = qfalse;
 		break;
 	default:
@@ -9332,7 +9347,7 @@ void CG_DoSFXSaberOT(vec3_t blade_muz, vec3_t blade_tip, vec3_t trail_tip, vec3_
 	VectorMA(blade_tip, end_len, end_dir, saber.origin);
 	VectorMA(blade_tip, -0.1f, end_dir, saber.oldorigin);
 
-	if (color == SABER_BLACK) {
+	if (color == SABER_BLACK || color == SABER_REDBLACK) {
 		saber.customShader = cgs.media.ShaderSaberEndblack;
 	}
 	else {
@@ -9356,7 +9371,7 @@ void CG_DoSFXSaberOT(vec3_t blade_muz, vec3_t blade_tip, vec3_t trail_tip, vec3_
 	saber.saberLength = end_len;
 
 	saber.shaderTexCoord[0] = saber.shaderTexCoord[1] = 1.0f;
-	if (color == SABER_BLACK) {
+	if (color == SABER_BLACK || color == SABER_REDBLACK) {
 		// Explicit black for black sabers
 		saber.shaderRGBA[0] = saber.shaderRGBA[1] = saber.shaderRGBA[2] = 0;  // Black RGB
 		saber.shaderRGBA[3] = 255;  // Full alpha
@@ -9462,8 +9477,9 @@ void CG_DoSFXSaberMcquarrie(vec3_t blade_muz, vec3_t blade_tip, vec3_t trail_tip
 		core = cgs.media.ShaderSaberBladeRGBMcquarrie;
 		break;
 	case SABER_BLACK:
-		glow = cgs.media.blackSaberGlowShader;
-		core = cgs.media.blackSaberCoreShader;
+	case SABER_REDBLACK:
+		glow = (color == SABER_REDBLACK ? cgs.media.redblackSaberGlowShader : cgs.media.blackSaberGlowShader);
+		core = (color == SABER_REDBLACK ? cgs.media.redblackSaberCoreShader : cgs.media.blackSaberCoreShader);
 		doLight = qfalse;
 		break;
 	default:
@@ -9565,7 +9581,7 @@ void CG_DoSFXSaberMcquarrie(vec3_t blade_muz, vec3_t blade_tip, vec3_t trail_tip
 	//pulse = Q_fabs(sinf((float)cg.time / 25.0f)) * 0.25f; // Niksata Edit
 
 	//effectradius = ((radius * 1.6f * v1) + Q_flrand(-1.0f, 1.0f) * 0.1f) * radiusmult * cg_SFXSabersGlowSize.value; // Niksata Edit original value
-	if (color == SABER_BLACK) // Niksata Edit
+	if (color == SABER_BLACK || color == SABER_REDBLACK) // Niksata Edit
 	{
 		coreradius = (radiusStart + Q_flrand(-1.0f, 1.0f) * radiusRange) * radiusmult * cg_SFXSabersCoreSizeOT.value; // Niksata Edit original value
 	}
@@ -9585,7 +9601,7 @@ void CG_DoSFXSaberMcquarrie(vec3_t blade_muz, vec3_t blade_tip, vec3_t trail_tip
 	}
 	effectradius = (radius + Q_flrand(-1.0f, 1.0f) * radiusRange) * radiusmult; // Niksata Edit ot
 	//effectradius *= /*0.70f*/ 0.65f; // Niksata Edit ep3
-	if (color == SABER_BLACK) // Niksata Edit
+	if (color == SABER_BLACK || color == SABER_REDBLACK) // Niksata Edit
 	{
 		effectradius *= cg_SFXSabersGlowSizeOT.value; // Niksata Edit ot
 	}
@@ -9808,7 +9824,7 @@ void CG_DoSFXSaberMcquarrie(vec3_t blade_muz, vec3_t blade_tip, vec3_t trail_tip
 	VectorMA(blade_tip, end_len, end_dir, saber.origin);
 	VectorMA(blade_tip, -0.1f, end_dir, saber.oldorigin);
 
-	if (color == SABER_BLACK) {
+	if (color == SABER_BLACK || color == SABER_REDBLACK) {
 		saber.customShader = cgs.media.ShaderSaberEndblack;
 	}
 	else {
@@ -9832,7 +9848,7 @@ void CG_DoSFXSaberMcquarrie(vec3_t blade_muz, vec3_t blade_tip, vec3_t trail_tip
 	saber.saberLength = end_len;
 
 	saber.shaderTexCoord[0] = saber.shaderTexCoord[1] = 1.0f;
-	if (color == SABER_BLACK) {
+	if (color == SABER_BLACK || color == SABER_REDBLACK) {
 		// Explicit black for black sabers
 		saber.shaderRGBA[0] = saber.shaderRGBA[1] = saber.shaderRGBA[2] = 0;  // Black RGB
 		saber.shaderRGBA[3] = 255;  // Full alpha
@@ -9934,8 +9950,9 @@ void CG_DoSFXSaberAhsoka(vec3_t blade_muz, vec3_t blade_tip, vec3_t trail_tip, v
 		core = cgs.media.ShaderSaberBladeAhsoka;
 		break;
 	case SABER_BLACK:
-		glow = cgs.media.blackSaberGlowShader;
-		core = cgs.media.blackSaberCoreShader;
+	case SABER_REDBLACK:
+		glow = (color == SABER_REDBLACK ? cgs.media.redblackSaberGlowShader : cgs.media.blackSaberGlowShader);
+		core = (color == SABER_REDBLACK ? cgs.media.redblackSaberCoreShader : cgs.media.blackSaberCoreShader);
 		doLight = qfalse;
 		break;
 	default:
@@ -10260,7 +10277,7 @@ void CG_DoSFXSaberAhsoka(vec3_t blade_muz, vec3_t blade_tip, vec3_t trail_tip, v
 	VectorMA(blade_tip, end_len, end_dir, saber.origin);
 	VectorMA(blade_tip, -0.1f, end_dir, saber.oldorigin);
 
-	if (color == SABER_BLACK) {
+	if (color == SABER_BLACK || color == SABER_REDBLACK) {
 		saber.customShader = cgs.media.ShaderSaberEndblack;
 	}
 	else {
@@ -10284,7 +10301,7 @@ void CG_DoSFXSaberAhsoka(vec3_t blade_muz, vec3_t blade_tip, vec3_t trail_tip, v
 	saber.saberLength = end_len;
 
 	saber.shaderTexCoord[0] = saber.shaderTexCoord[1] = 1.0f;
-	if (color == SABER_BLACK) {
+	if (color == SABER_BLACK || color == SABER_REDBLACK) {
 		// Explicit black for black sabers
 		saber.shaderRGBA[0] = saber.shaderRGBA[1] = saber.shaderRGBA[2] = 0;  // Black RGB
 		saber.shaderRGBA[3] = 255;  // Full alpha
@@ -11307,6 +11324,7 @@ CheckTrail:
 						break;
 						//rgb
 						case SABER_BLACK:
+						case SABER_REDBLACK:
 							VectorSet(rgb1, 0.0f, 0.0f, 0.0f);
 							break;
 						}
@@ -11338,6 +11356,7 @@ CheckTrail:
 							break;
 #endif
 						case SABER_BLACK:
+						case SABER_REDBLACK:
 							trailShader = cgs.media.blackBlurShader;
 							break;
 						}
@@ -11563,6 +11582,7 @@ CheckTrail:
 			}
 			break;
 			case SABER_BLACK:
+			case SABER_REDBLACK:
 				VectorSet(rgb1, 0.0f, 0.0f, 0.0f);
 				break;
 			default:

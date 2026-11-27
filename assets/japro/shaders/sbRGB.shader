@@ -162,6 +162,32 @@ gfx/effects/sabers/blackcore {
 	}
 }
 
+// NicJK saber color 12 (SABER_REDBLACK): black core, red glow
+gfx/effects/sabers/redblackglow {
+	nopicmip
+	notc
+	cull twosided
+	{
+		clampmap gfx/effects/sabers/redblackglow
+		blendFunc GL_SRC_ALPHA GL_ONE_MINUS_SRC_ALPHA
+		rgbGen identity
+		alphaGen vertex
+	}
+}
+
+gfx/effects/sabers/redblackcore {
+	nopicmip
+	notc
+	cull twosided
+	sort additive
+	{
+		clampmap gfx/effects/sabers/redblackcore
+		blendFunc GL_SRC_ALPHA GL_ONE_MINUS_SRC_ALPHA
+		rgbGen identity
+		alphaGen vertex
+	}
+}
+
 gfx/effects/sabers/blacktrail {
 	nopicmip
 	notc

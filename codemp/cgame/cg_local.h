@@ -1759,6 +1759,8 @@ typedef struct cgMedia_s {
 #endif
 
 	qhandle_t	blackSaberGlowShader;
+	qhandle_t	redblackSaberGlowShader;	// NicJK saber color 12
+	qhandle_t	redblackSaberCoreShader;
 	qhandle_t	blackSaberCoreShader;
 	qhandle_t	blackBlurShader;
 	//rgb
