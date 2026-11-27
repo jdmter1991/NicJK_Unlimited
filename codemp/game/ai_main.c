@@ -100,7 +100,17 @@ static double BotProf_NowUs(void) {
 	QueryPerformanceCounter(&t);
 	return (double)t * usPerTick;
 }
+/* page faults of this process (slow-think report): K32GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS layout */
+typedef struct { unsigned long cb, PageFaultCount; size_t PeakWorkingSetSize, WorkingSetSize, a, b, c, d, PagefileUsage, PeakPagefileUsage; } botProfMem_t;
+__declspec(dllimport) void *__stdcall GetCurrentProcess(void);
+__declspec(dllimport) int __stdcall K32GetProcessMemoryInfo(void *process, botProfMem_t *counters, unsigned long cb);
+static unsigned long BotProf_PageFaults(void) {
+	botProfMem_t m;
+	m.cb = sizeof(m);
+	return K32GetProcessMemoryInfo(GetCurrentProcess(), &m, sizeof(m)) ? m.PageFaultCount : 0;
+}
 #else
+static unsigned long BotProf_PageFaults(void) { return 0; }
 #include <time.h>
 static double BotProf_NowUs(void) {
 	struct timespec ts;
@@ -133,9 +143,11 @@ typedef struct botProf_s {
 	botProfSite_t	sites[BOTPROF_MAX_SITES];
 	// per think
 	int				thinkTraces, maxThinkTraces;
+	double			thinkTraceUs;
 } botProf_t;
 
 static botProf_t botProf;
+static double botProfPhase[5];		/* last think: main AI, taunts, anti-idle, learning, tuning (us) */
 vmCvar_t bot_profile;
 
 // Behaviour-changing corrections, switchable so they can be compared in game:
@@ -623,6 +635,7 @@ static void BotProf_Account(const char *fn, double us) {
 	botProf.traces++;
 	botProf.traceUs += us;
 	botProf.thinkTraces++;
+	botProf.thinkTraceUs += us;
 }
 
 static void BotProf_JPTrace(const char *fn, trace_t *results, const vec3_t start, const vec3_t mins, const vec3_t maxs, const vec3_t end, int passEntityNum, int contentmask, int capsule, int traceFlags, int useLod) {
@@ -813,10 +826,25 @@ static void BotProf_Think(int client, float thinktime) {
 		BotAI(client, thinktime);
 		return;
 	}
-	botProf.thinkTraces = 0;
+	unsigned long pf0;
+	double pfEndUs;
+	botProf.thinkTraces = 0; botProf.thinkTraceUs = 0.0;
+	pf0 = BotProf_PageFaults();
 	t0 = BotProf_NowUs();
 	BotAI(client, thinktime);
-	t0 = BotProf_NowUs() - t0;
+	pfEndUs = BotProf_NowUs();
+	t0 = pfEndUs - t0;
+	if (t0 > 40000.0) {
+		/* slow think: what the bot was doing, how much of it was traces, and whether memory had to be paged in */
+		bot_state_t *bs_ = botstates[client];
+		trap->Print("BOTSLOW client %d think %.1f ms: %d traces %.1f ms, page faults %lu, origin %.0f %.0f %.0f, wp %d -> %d, enemy %d, weapon %d\n",
+			client, t0 / 1000.0, botProf.thinkTraces, botProf.thinkTraceUs / 1000.0, BotProf_PageFaults() - pf0,
+			bs_ ? bs_->origin[0] : 0.0f, bs_ ? bs_->origin[1] : 0.0f, bs_ ? bs_->origin[2] : 0.0f,
+			(bs_ && bs_->wpCurrent) ? bs_->wpCurrent->index : -1, (bs_ && bs_->wpDestination) ? bs_->wpDestination->index : -1,
+			(bs_ && bs_->currentEnemy) ? bs_->currentEnemy->s.number : -1, bs_ ? bs_->cur_ps.weapon : -1);
+		trap->Print("BOTSLOW   phases ms: ai %.1f, taunts %.1f, anti-idle %.1f, learning %.1f, tuning %.1f\n",
+			botProfPhase[0] / 1000.0, botProfPhase[1] / 1000.0, botProfPhase[2] / 1000.0, botProfPhase[3] / 1000.0, botProfPhase[4] / 1000.0);
+	}
 	botProf.thinks++;
 	botProf.thinkUs += t0;
 	if (t0 > botProf.maxThinkUs) {
@@ -2655,17 +2683,26 @@ int BotAI(int client, float thinktime) {
 #endif
 	bs->features = BotFeaturesFor(client);
 
+	{	/* phase times for the slow-think report (bot_profile) */
+		double tp = botProf.enabled ? BotProf_NowUs() : 0.0, tq;
+#define BOTPROF_PHASE(k) if (botProf.enabled) { tq = BotProf_NowUs(); botProfPhase[k] = tq - tp; tp = tq; }
 	if (g_newBotAI.integer)
 		NewBotAI(bs, thinktime);
 	else
 		StandardBotAI(bs, thinktime);
-
+	BOTPROF_PHASE(0)
 	BotContextualTaunts(bs);
+	BOTPROF_PHASE(1)
 	BotAntiIdle(bs);
+	BOTPROF_PHASE(2)
 	if (bs->features & BOTF_LEARN) {
 		Bot_LearnResolve(bs);
 	}
+	BOTPROF_PHASE(3)
 	Bot_TuneThink(bs->client, bs->features);
+	BOTPROF_PHASE(4)
+#undef BOTPROF_PHASE
+	}
 	{	// kills and deaths credited to the saber style the bot is in
 		static int lastK[MAX_CLIENTS], lastD[MAX_CLIENTS];
 		const gclient_t *sc = g_entities[bs->client].client;

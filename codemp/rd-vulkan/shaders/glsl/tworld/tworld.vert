@@ -69,6 +69,8 @@ layout(location = 12) flat out vec3 frag_tint;
 layout(location = 13) flat out vec2 frag_tile;
 layout(location = 14) out vec2 frag_tex_coord2;
 layout(location = 16) out float frag_ao;				// the vertex's ambient openness after the strength setting
+layout(location = 8) in vec4 in_lamps;		// lamps that reach the placement (two indices + 1 per value), see tworld.frag
+layout(location = 17) flat out vec4 frag_lamps;
 layout(location = 15) flat out float frag_amb;		// how much of the sky this placement cannot see (0 .. 1)		// second UV set (normal map)		// repeats of the tiling colour layer per unit of UV, 0 = none
 
 out gl_PerVertex {
@@ -154,5 +156,6 @@ void main() {
 	frag_anim = vec2( animf, time );
 	frag_amb = occ;
 	frag_ao = vao;
+	frag_lamps = in_lamps;
 	gl_Position = mvp * vec4( world, 1.0 );
 }
