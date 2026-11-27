@@ -193,5 +193,7 @@
    "canal_boardwalk",
    "canalfoundation"
   ]
- }
+ },
+ "canal_water": true,
+ "_note_canal_water": "2026-11-27, user: 'the canals and rivers need to just be flowing water': the source's dry canal stretches that join two pieces of its water get water at the river's height (tools/canal_water.py). Terrain unchanged."
 }
