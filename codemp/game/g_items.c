@@ -347,7 +347,7 @@ void CreateShield(gentity_t *ent)
 	else
 	{
 		VectorSet(ent->r.mins, -shieldhalfthickness, -halfWidth, -(height>>1));
-		VectorSet(ent->r.maxs, shieldhalfthickness, halfWidth, height);
+		VectorSet(ent->r.maxs, shieldhalfthickness, halfWidth, JK2SABER() ? (height>>1) : height); // JK2 1.02 (mv g_items.c:288)
 	}
 	ent->clipmask = MASK_SHOT;
 
@@ -1217,7 +1217,7 @@ void ItemUse_MedPack_Big(gentity_t *ent)
 
 void ItemUse_MedPack(gentity_t *ent)
 {
-	MedPackGive(ent, MAX_MEDPACK_HEAL_AMOUNT);
+	MedPackGive(ent, JK2SABER() ? 100 : MAX_MEDPACK_HEAL_AMOUNT); // JK2 1.02 medpac heals 100 (mv g_items.c:31)
 }
 
 #define JETPACK_TOGGLE_TIME			1000
@@ -3385,9 +3385,35 @@ void SaveRegisteredItems( void ) {
 G_ItemDisabled
 ============
 */
+// JK2 1.02 mode: items and weapons that JK2 does not have (they are not spawned or given)
+qboolean G_JK2ItemNotInJK2( const gitem_t *item )
+{
+	if ( !item )
+		return qfalse;
+	if ( item->giType == IT_WEAPON )
+	{
+		return (qboolean)( item->giTag == WP_MELEE || item->giTag == WP_CONCUSSION || item->giTag == WP_BRYAR_PISTOL );
+	}
+	if ( item->giType == IT_HOLDABLE )
+	{
+		return (qboolean)( item->giTag == HI_MEDPAC_BIG || item->giTag == HI_JETPACK || item->giTag == HI_HEALTHDISP ||
+			item->giTag == HI_AMMODISP || item->giTag == HI_EWEB || item->giTag == HI_CLOAK );
+	}
+	if ( item->giType == IT_AMMO && item->classname && !Q_stricmp( item->classname, "ammo_all" ) )
+	{
+		return qtrue;
+	}
+	return qfalse;
+}
+
 int G_ItemDisabled( gitem_t *item ) {
 
 	char name[128];
+
+	if ( JK2SABER() && G_JK2ItemNotInJK2( item ) )
+	{
+		return 1;
+	}
 
 	Com_sprintf(name, sizeof(name), "disable_%s", item->classname);
 	return trap->Cvar_VariableIntegerValue( name );

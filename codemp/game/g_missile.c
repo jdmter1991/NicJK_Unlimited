@@ -167,7 +167,7 @@ void G_BounceMissile( gentity_t *ent, trace_t *trace ) {
 	dot = DotProduct( velocity, trace->plane.normal );
 	VectorMA( velocity, -2*dot, trace->plane.normal, ent->s.pos.trDelta );
 
-	if (ent->bounceCount != -5)
+	if (ent->bounceCount != -5 && !JK2SABER()) // JK2 1.02 counts the bounce at the end (mv g_missile.c:189)
 	{
 		ent->bounceCount--;
 	}
@@ -217,6 +217,11 @@ void G_BounceMissile( gentity_t *ent, trace_t *trace ) {
 	VectorAdd( ent->r.currentOrigin, trace->plane.normal, ent->r.currentOrigin);
 	VectorCopy( ent->r.currentOrigin, ent->s.pos.trBase );
 	ent->s.pos.trTime = level.time;
+
+	if (JK2SABER() && ent->bounceCount != -5)
+	{ // JK2 1.02 (mv g_missile.c:189-193)
+		ent->bounceCount--;
+	}
 }
 
 
@@ -710,7 +715,11 @@ void G_MissileImpact( gentity_t *ent, trace_t *trace ) {
 
 			//in this case, deflect it even if we can't actually block it because it hit our saber
 			//WP_SaberCanBlock(otherOwner, ent->r.currentOrigin, 0, 0, qtrue, 0);
-			if (otherOwner->client && otherOwner->client->ps.weaponTime <= 0)
+			if (JK2SABER())
+			{ // JK2 1.02 (mv g_missile.c:437): always, through the 1.02 block code
+				WP_SaberCanBlock(otherOwner, ent->r.currentOrigin, 0, 0, qtrue, 0);
+			}
+			else if (otherOwner->client && otherOwner->client->ps.weaponTime <= 0)
 			{
 				WP_SaberBlockNonRandom(otherOwner, ent->r.currentOrigin, qtrue);
 			}

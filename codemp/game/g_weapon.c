@@ -134,8 +134,8 @@ static vec3_t muzzle;
 
 // Stun Baton
 //--------------
-#define STUN_BATON_DAMAGE			2 * g_weaponDamageScale.value
-#define STUN_BATON_ALT_DAMAGE		20 * g_weaponDamageScale.value
+#define STUN_BATON_DAMAGE			( JK2SABER() ? 20 : 2 * JK2O_WEAPONDAMAGESCALE ) // JK2 1.02: 20 (mv g_weapon.c:95)
+#define STUN_BATON_ALT_DAMAGE		20 * JK2O_WEAPONDAMAGESCALE
 #define STUN_BATON_RANGE			8
 
 // Melee
@@ -771,7 +771,7 @@ static void WP_DisruptorMainFire( gentity_t *ent )
 	vec3_t		start, end;
 	trace_t		tr;
 	gentity_t	*traceEnt, *tent;
-	int			shotRange = 32768;
+	int			shotRange = JK2SABER() ? 8192 : 32768; // JK2 1.02 disruptor range 8192 (mv g_weapon.c)
 	int			ignore, traces;
 	qboolean ghoul2 = qfalse;
 
@@ -1013,7 +1013,7 @@ void WP_DisruptorAltFire(gentity_t *ent)
 	//vec3_t		muzzle2;
 	trace_t		tr;
 	gentity_t	*traceEnt, *tent;
-	float		shotRange = 32768;
+	float		shotRange = JK2SABER() ? 8192 : 32768; // JK2 1.02 disruptor range 8192 (mv g_weapon.c)
 	int			i;
 	int			count, maxCount = 60;
 	int			traces = DISRUPTOR_ALT_TRACES;
@@ -1572,7 +1572,9 @@ static void WP_BowcasterMainFire( gentity_t *ent, int seed )
 	for (i = 0; i < count; i++ )
 	{
 		// create a range of different velocities
-		if (g_tweakWeapons.integer & WT_BOWCASTER_SPRD || ent->client->sess.raceMode)
+		if (JK2SABER())
+			vel = BOWCASTER_VELOCITY * ( Q_flrand(-1.0f, 1.0f) * BOWCASTER_VEL_RANGE + 1.0f ); // JK2 1.02: crandom(), 910..1690 (mv g_weapon.c:866)
+		else if (JK2O_TWEAKWEAPONS & WT_BOWCASTER_SPRD || ent->client->sess.raceMode)
 			vel = BOWCASTER_VELOCITY;// *(Q_flrand(0.0f, 1.0f) * BOWCASTER_VEL_RANGE + 1.0f);
 		else
 			vel = BOWCASTER_VELOCITY * ( Q_flrand(0.0f, 1.0f) * BOWCASTER_VEL_RANGE + 1.0f );//velocity does not need to be syncd with client
@@ -2895,8 +2897,8 @@ void rocketThink( gentity_t *ent )
 		// decay the randomness
 		ent->random *= 0.9f;
 
-		if ( ent->enemy->client
-			&& ent->enemy->client->ps.groundEntityNum != ENTITYNUM_NONE )
+		if ( JK2SABER() || (ent->enemy->client
+			&& ent->enemy->client->ps.groundEntityNum != ENTITYNUM_NONE) ) // JK2 1.02 always dives within 128 (mv g_weapon.c:1578)
 		{//tracking a client who's on the ground, aim at the floor...?
 			// Try to crash into the ground if we get close enough to do splash damage
 			dis = Distance( ent->r.currentOrigin, org );
@@ -3236,7 +3238,7 @@ static void WP_FireRocket( gentity_t *ent, qboolean altFire )
 		missile->splashMethodOfDeath = MOD_ROCKET_SPLASH;
 	}
 //===testing being able to shoot rockets out of the air==================================
-	if (!q3style) {
+	if (!q3style && !JK2SABER()) { // JK2 1.02 rockets can't be shot down
 		missile->health = 10;
 		missile->takedamage = qtrue;
 		missile->r.contents = MASK_SHOT;
@@ -3953,8 +3955,10 @@ void laserTrapStick( gentity_t *ent, vec3_t endpos, vec3_t normal )
 	VectorCopy( ent->s.apos.trBase, ent->s.angles );
 	VectorCopy( ent->s.angles, ent->r.currentAngles );
 
-	//shove the box through the wall
-	if (g_tweakWeapons.integer & WT_EXPLOSIVE_HITBOX) {
+	//shove the box through the wall (JK2 1.02 only does this for the tripwire)
+	if (JK2SABER() && !ent->count) {
+	}
+	else if (JK2O_TWEAKWEAPONS & WT_EXPLOSIVE_HITBOX) {
 		VectorSet(ent->r.mins, -LT_SIZE * 3.5f, -LT_SIZE * 3.5f, -LT_SIZE * 3.5f);
 		VectorSet(ent->r.maxs, LT_SIZE * 3.5f, LT_SIZE * 3.5f, LT_SIZE * 3.5f);
 	}
@@ -3977,6 +3981,12 @@ void laserTrapStick( gentity_t *ent, vec3_t endpos, vec3_t normal )
 		ent->die = laserTrapDelayedExplode;
 		//so that the owner can blow it up with projectiles
 		ent->r.svFlags |= SVF_OWNERNOTSHARED;
+	}
+	else if (JK2SABER())
+	{ // JK2 1.02 alt fire: a timed mine, touch explodes it, blows 2 s after sticking, not shootable (mv g_weapon.c:2031-2037)
+		ent->touch = touchLaserTrap;
+		ent->think = laserTrapExplode;
+		ent->nextthink = level.time + LT_ALT_TIME; // How long 'til she blows
 	}
 	else
 	{
@@ -4225,7 +4235,7 @@ void charge_stick (gentity_t *self, gentity_t *other, trace_t *trace)
 		VectorNPos(self->s.pos.trDelta, tN);
 		self->s.pos.trDelta[0] += vNor[0]*(tN[0]*(((float)Q_irand(1, 10))*0.1));
 		self->s.pos.trDelta[1] += vNor[1]*(tN[1]*(((float)Q_irand(1, 10))*0.1));
-		self->s.pos.trDelta[2] += vNor[2]*(tN[2]*(((float)Q_irand(1, 10))*0.1));
+		self->s.pos.trDelta[2] += vNor[JK2SABER() ? 1 : 2]*(tN[2]*(((float)Q_irand(1, 10))*0.1)); // JK2 1.02 uses vNor[1] here (mv g_weapon.c:2222)
 
 		vectoangles(vNor, self->s.angles);
 		vectoangles(vNor, self->s.apos.trBase);
@@ -4360,7 +4370,8 @@ void drop_charge (gentity_t *self, vec3_t start, vec3_t dir)
 
 	VectorNormalize (dir);
 
-	VectorMA( start, 8, forward, start );  //why is this fucked
+	if (!JK2SABER()) // JK2 1.02 spawns the det pack at the muzzle (mv g_weapon.c:drop_charge)
+		VectorMA( start, 8, forward, start );  //why is this fucked
 
 	bolt = G_Spawn(qfalse);
 	bolt->classname = "detpack";

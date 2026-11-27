@@ -3045,7 +3045,7 @@ extern void RunEmplacedWeapon( gentity_t *ent, usercmd_t **ucmd );
 
 			self->client->ps.pm_type = sPMType;
 
-			if ((meansOfDeath == MOD_SABER || (meansOfDeath == MOD_MELEE && G_HeavyMelee( attacker )) ) || (g_dismember.integer >= 101 && meansOfDeath != MOD_SUICIDE && meansOfDeath != MOD_TEAM_CHANGE))//saber or heavy melee (claws)
+			if (JK2SABER() ? (meansOfDeath == MOD_SABER) : ((meansOfDeath == MOD_SABER || (meansOfDeath == MOD_MELEE && G_HeavyMelee( attacker )) ) || (g_dismember.integer >= 101 && meansOfDeath != MOD_SUICIDE && meansOfDeath != MOD_TEAM_CHANGE)))//saber or heavy melee (claws); JK2 1.02: saber kills only
 			{ //update the anim on the actual skeleton (so bolt point will reflect the correct position) and then check for dismem
 				G_UpdateClientAnims(self, 1.0f);
 				G_CheckForDismemberment(self, attacker, self->pos1, damage, anim, qfalse);
@@ -4454,7 +4454,7 @@ void G_CheckForDismemberment(gentity_t *ent, gentity_t *enemy, vec3_t point, int
 			return;
 		}
 
-		if (damage < 5)
+		if (damage < (JK2SABER() ? 20 : 5)) // JK2 1.02: 20 (mv g_combat.c:2892)
 		{
 			return;
 		}
@@ -5308,7 +5308,7 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, vec3_
 			case MOD_TRIP_MINE_SPLASH:
 			case MOD_TIMED_MINE_SPLASH:
 			case MOD_DET_PACK_SPLASH:
-				damage *= 0.75;
+				damage *= JK2SABER() ? 0.5 : 0.75; // JK2 1.02: 1/2 (mv g_combat.c:3185)
 				break;
 			}
 		}
@@ -5937,7 +5937,7 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, vec3_
 			{
 				int maxtake = take;
 				//G_Sound(targ, CHAN_AUTO, protectHitSound);
-				if (targ->client->forcePowerSoundDebounce < level.time)
+				if (targ->client->forcePowerSoundDebounce < level.time || JK2SABER()) // JK2 1.02: on every hit
 				{
 					G_PreDefSound(targ->client->ps.origin, PDSOUND_PROTECTHIT);
 					targ->client->forcePowerSoundDebounce = level.time + 400;
