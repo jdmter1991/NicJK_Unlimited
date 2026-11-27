@@ -222,6 +222,13 @@ for s in range(len(nodes)):
     nc += 1
 sizes = np.bincount(comp, minlength=nc)
 keep = sizes[comp] >= MIN_GROUP
+# groups that lie entirely at canal-bed level (dry canals bots cannot walk out of) are left out
+_zmed = np.array([np.median(nodes[comp == c_, 4]) for c_ in range(nc)])
+keep &= _zmed[comp] > float(rc.get("bed_level", -120.0))
+# groups high above the ground (roofs reached only by force jumps) are left out
+_tzn, _, _ = avoid_zones.terrain_z(nodes[:, 2], nodes[:, 3])
+_hmed = np.array([np.median(nodes[comp == c_, 4] - _tzn[comp == c_]) for c_ in range(nc)])
+keep &= _hmed[comp] < float(rc.get("max_group_height", 1200.0))
 print("groups %d, kept %d with %d points" % (nc, int((sizes >= MIN_GROUP).sum()), int(keep.sum())))
 
 # ---- 4. chain

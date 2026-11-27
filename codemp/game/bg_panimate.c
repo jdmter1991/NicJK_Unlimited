@@ -28,6 +28,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "bg_local.h"
 #include "anims.h"
 #include "cgame/animtable.h"
+#include "bg_animremap.h"
 
 #ifdef _GAME
 	#include "g_local.h"
@@ -1850,6 +1851,7 @@ void BG_InitAnimsets(void)
 {
 	memset(&bgAllAnims, 0, sizeof(bgAllAnims));
 	BGPAFtextLoaded = qfalse;	// VVFIXME - The PC doesn't seem to need this, but why?
+	BG_AnimRemap_Reset(); // NicJK animremap.cfg is read again on next use
 }
 
 //ALWAYS call on game/cgame shutdown
@@ -2475,7 +2477,7 @@ int BG_ParseAnimationFile(const char *filename, animation_t *animset, qboolean i
 	int			nextIndex = bgNumAllAnims;
 	qboolean	dynAlloc = qfalse;
 	///qboolean	wasLoaded = qfalse;
-	static char BGPAFtext[60000];
+	static char BGPAFtext[262144]; // NicJK: was 60000; per-model animation.cfg files (MovieDuels) are up to 122 KB
 	fileHandle_t	f;
 	int				animNum;
 

@@ -299,19 +299,22 @@ if os.path.exists(_wb) and bool(_w.get("water", True)):
         nonax_count = np.concatenate([nonax_count, np.zeros(NWATER, np.int64)])
 
 
-def water_edge_walls(wb):
+def water_edge_walls(wb, nbed=0):
     """thin boxes on every edge of the water volumes that borders dry ground. The volumes are rows of water
-    raster cells, so they are put back on that raster; an edge is walled where the neighbouring cell is not water"""
+    raster cells, so they are put back on that raster; an edge is walled where the neighbouring cell is not water.
+    The last `nbed` boxes are dry canal beds (dry_canal_beds): walled like water for bots, never closed for players"""
     if not len(wb):
-        return np.zeros((0, 2, 3))
+        return np.zeros((0, 2, 3)), np.zeros((0, 2, 3))
     cs = float(np.median(wb[:, 1, 1] - wb[:, 0, 1]))
     X0 = float(wb[:, 0, 0].min()); Y0 = float(wb[:, 0, 1].min())
     i0 = np.rint((wb[:, 0, 0] - X0) / cs).astype(np.int64); i1 = np.rint((wb[:, 1, 0] - X0) / cs).astype(np.int64)
     jy = np.rint((wb[:, 0, 1] - Y0) / cs).astype(np.int64)
     nx = int(i1.max()) + 2; ny = int(jy.max()) + 2
-    wet = np.zeros((ny + 2, nx + 2), bool); top = np.full((ny + 2, nx + 2), np.nan)
+    wet = np.zeros((ny + 2, nx + 2), bool); top = np.full((ny + 2, nx + 2), np.nan); bedm = np.zeros((ny + 2, nx + 2), bool)
     for k in range(len(wb)):
         wet[jy[k] + 1, i0[k] + 1:i1[k] + 1] = True; top[jy[k] + 1, i0[k] + 1:i1[k] + 1] = wb[k, 1, 2]
+        if k >= len(wb) - nbed:
+            bedm[jy[k] + 1, i0[k] + 1:i1[k] + 1] = True
     # open water: no solid surface above the water within reach. The source's water continues under quay paving and
     # bridges; walls belong where open water meets anything else (the quay edge), not at the hidden wet/dry line
     jj_, ii_ = np.nonzero(wet)
@@ -395,7 +398,7 @@ def water_edge_walls(wb):
     low = float(_w.get("closed_cover_below", 200.0)); deep = float(_w.get("closed_cover_depth", 1200.0))
     solid = []
     for axis_, d_ in ((1, -1), (1, 1), (0, -1), (0, 1)):
-        edge = cov & np.roll(wet, -d_, axis=axis_)
+        edge = cov & ~bedm & np.roll(wet & ~bedm, -d_, axis=axis_)
         for j, i in zip(*np.nonzero(edge)):
             t = top[j, i]; cap = capr[j, i]
             if not np.isfinite(cap) or cap > low:
@@ -410,9 +413,78 @@ def water_edge_walls(wb):
     return np.array(out, np.float64).reshape(-1, 2, 3), np.array(solid, np.float64).reshape(-1, 2, 3)
 
 
+def dry_canal_beds(wb):
+    """dry canal beds as boxes on the water raster: terrain cells lower than `dry_bed_below` (-140 units) that are not
+    water. Bots drop into the source's dry paved canals and cannot walk out; walling their rim like water keeps them out"""
+    if not len(wb) or not bool(_w.get("dry_bed_walls", True)):
+        return np.zeros((0, 2, 3))
+    g_ = np.load(os.path.join(export_dir, "dump", "extras", "terrain_near_carved.npz"))["grid"].astype(np.float64)
+    U_ = float(cfg["units_per_metre"]); O_ = np.array(cfg["origin_m"], np.float64)
+    gx_ = (g_[0, :, 0] - O_[0]) * U_; gy_ = (g_[:, 0, 1] - O_[1]) * U_; gz_ = (g_[:, :, 2] - O_[2]) * U_
+    cs = float(np.median(wb[:, 1, 1] - wb[:, 0, 1])); X0 = float(wb[:, 0, 0].min()); Y0 = float(wb[:, 0, 1].min())
+    lim = float(_w.get("dry_bed_below", -140.0))
+    bb = cfg["regions"]["city"]["collision_bounds_m"]
+    xs = np.arange(X0 + cs / 2 - cs * np.ceil((X0 - (bb[0] - O_[0]) * U_) / cs), (bb[2] - O_[0]) * U_, cs)
+    ys = np.arange(Y0 + cs / 2 - cs * np.ceil((Y0 - (bb[1] - O_[1]) * U_) / cs), (bb[3] - O_[1]) * U_, cs)
+    ii = np.clip(np.searchsorted(gx_, xs), 1, len(gx_) - 1); jj = np.clip(np.searchsorted(gy_, ys), 1, len(gy_) - 1)
+    Z = gz_[np.ix_(jj, ii)]
+    wetc = np.zeros(Z.shape, bool)
+    for b in wb:
+        wetc |= ((xs[None, :] > b[0, 0]) & (xs[None, :] < b[1, 0]))[:1] & ((ys[:, None] > b[0, 1]) & (ys[:, None] < b[1, 1]))
+    bed = (Z < lim) & ~wetc
+    # open to the sky only: terrain under buildings (the palace stands far above low ground) is not a canal bed
+    jb, ib = np.nonzero(bed)
+    if len(jb):
+        px = xs[ib]; py = ys[jb]; pz = Z[jb, ib]
+        U3 = tris.reshape(-1, 3, 3); nz3 = np.cross(U3[:, 1] - U3[:, 0], U3[:, 2] - U3[:, 0])[:, 2]
+        tmn = U3.min(1); tmx = U3.max(1)
+        s3 = np.flatnonzero((np.abs(nz3) > 1e-6) & (tmx[:, 2] > pz.min() + 8) & (tmx[:, 0] >= px.min()) & (tmn[:, 0] <= px.max())
+                            & (tmx[:, 1] >= py.min()) & (tmn[:, 1] <= py.max()))
+        CW = 256.0; bk = {}
+        bx0 = np.floor(tmn[s3, 0] / CW).astype(np.int64); bx1 = np.floor(tmx[s3, 0] / CW).astype(np.int64)
+        by0 = np.floor(tmn[s3, 1] / CW).astype(np.int64); by1 = np.floor(tmx[s3, 1] / CW).astype(np.int64)
+        for q, t_ in enumerate(s3):
+            if (bx1[q] - bx0[q] + 1) * (by1[q] - by0[q] + 1) > 256:
+                continue
+            for gx in range(bx0[q], bx1[q] + 1):
+                for gy in range(by0[q], by1[q] + 1):
+                    bk.setdefault((gx, gy), []).append(t_)
+        roof = np.zeros(len(px), bool)
+        kx = np.floor(px / CW).astype(np.int64); ky = np.floor(py / CW).astype(np.int64)
+        for key in set(zip(kx.tolist(), ky.tolist())):
+            fi = bk.get(key)
+            if not fi:
+                continue
+            fi = np.array(fi); a = U3[fi, 0]; e1 = U3[fi, 1] - a; e2 = U3[fi, 2] - a
+            det = e1[:, 0] * e2[:, 1] - e1[:, 1] * e2[:, 0]
+            pi = np.flatnonzero((kx == key[0]) & (ky == key[1]))
+            dx = px[pi][:, None] - a[None, :, 0]; dy = py[pi][:, None] - a[None, :, 1]
+            with np.errstate(divide="ignore", invalid="ignore"):
+                u = (dx * e2[None, :, 1] - dy * e2[None, :, 0]) / det[None, :]; v = (dy * e1[None, :, 0] - dx * e1[None, :, 1]) / det[None, :]
+            ins = (np.abs(det)[None, :] > 1e-6) & (u >= 0) & (v >= 0) & (u + v <= 1)
+            hz = a[None, :, 2] + u * e1[None, :, 2] + v * e2[None, :, 2] - pz[pi][:, None]
+            roof[pi] = (ins & (hz > 8)).any(1)
+        bed[jb[roof], ib[roof]] = False
+        print("canal bed cells under a roof or floor left out: %d" % int(roof.sum()))
+    out = []
+    for j in range(bed.shape[0]):
+        row = np.flatnonzero(bed[j])
+        for run in np.split(row, np.flatnonzero(np.diff(row) > 1) + 1) if len(row) else []:
+            x0 = xs[run[0]] - cs / 2; x1 = xs[run[-1]] + cs / 2; z = float(Z[j, run].max())
+            out.append([(x0, ys[j] - cs / 2, z - 64), (x1, ys[j] + cs / 2, z)])
+    print("dry canal bed cells: %d in %d rows" % (int(bed.sum()), len(out)))
+    return np.array(out, np.float64).reshape(-1, 2, 3)
+
+
 NMCLIP = 0; NSOLIDW = 0
 if len(WB) and bool(_w.get("bot_water_walls", True)):
     MW, SW = water_edge_walls(WB)
+    # dry canal beds walled on their own, so the line between a bed and the water keeps its wall too
+    BED = dry_canal_beds(WB)
+    if len(BED):
+        MWb, _ = water_edge_walls(BED, nbed=len(BED))
+        if len(MWb):
+            MW = np.concatenate([MW, MWb]); print("bot walls around dry canal beds: %d" % len(MWb))
     if len(MW):
         NMCLIP = len(MW)
         bmin = np.concatenate([bmin, MW[:, 0]]); bmax = np.concatenate([bmax, MW[:, 1]])
@@ -669,6 +741,21 @@ if bool(_w.get("kill_volume", True)):
 if not ent_text:
     ent_text = '{\n"classname" "worldspawn"\n}\n'
 ent_lump = ent_text.encode("ascii") + b"\0"
+
+# ---- planes stored once: bit-identical planes (normal and distance as float32) share one entry; brush sides and
+# nodes are remapped. Collision is unchanged, the file and the memory for planes shrink.
+if bool(cfg.get("bsp_writer", {}).get("dedup_planes", True)):
+    _pl = np.ascontiguousarray(plane_lump.astype("<f4"))
+    _v = _pl.view(np.dtype((np.void, 16))).ravel()
+    _u, _first, _inv = np.unique(_v, return_index=True, return_inverse=True)
+    _order = np.argsort(_first)                       # keep the first-seen order
+    _rank = np.empty(len(_order), np.int64); _rank[_order] = np.arange(len(_order))
+    _remap = _rank[_inv.ravel()].astype(np.int32)
+    n_before = len(_pl)
+    plane_lump = _pl[np.sort(_first)]
+    side_lump["plane"] = _remap[side_lump["plane"]]
+    node_lump["plane"] = _remap[node_lump["plane"]]
+    print("planes stored once: %d -> %d" % (n_before, len(plane_lump)))
 
 # ---- write
 lumps = [ent_lump, shader_lump.tobytes(), plane_lump.astype("<f4").tobytes(), node_lump.tobytes(), leaf_lump.tobytes(), leafsurf_lump.tobytes(),

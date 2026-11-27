@@ -25,6 +25,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "cg_local.h"
 #include "ghoul2/G2.h"
 #include "game/bg_saga.h"
+#include "game/bg_animremap.h"
 #include "cJSON.h"
 #include "hud_tribes.h"
 
@@ -474,6 +475,14 @@ static qboolean CG_RegisterClientModelname( clientInfo_t *ci, const char *modelN
 retryModel:
 	if (badModel)
 	{
+		// NicJK: the default model itself was rejected (e.g. an animremap.cfg
+		// "skeleton" line gave it a GLA that is not humanoid): stop instead of
+		// retrying the same model forever
+		if (modelName && !Q_stricmp(modelName, DEFAULT_MODEL))
+		{
+			Com_Printf(S_COLOR_YELLOW "WARNING: default model %s could not be used (check animremap.cfg skeleton lines)\n", DEFAULT_MODEL);
+			return qfalse;
+		}
 #if 0
 		if (modelName && modelName[0])
 		{
@@ -549,7 +558,8 @@ retryModel:
 	if (GLAName[0] != 0)
 	{
 		if (!strstr(GLAName, "players/_humanoid/") /*&&
-			(!strstr(GLAName, "players/rockettrooper/") || cgs.gametype != GT_SIEGE)*/) //only allow rockettrooper in siege
+			(!strstr(GLAName, "players/rockettrooper/") || cgs.gametype != GT_SIEGE)*/ //only allow rockettrooper in siege
+			&& !(cg_animRemap.integer && BG_AnimRemap_OwnSkeleton(GLAName))) // NicJK: a model's own humanoid skeleton (animremap)
 		{ //Bad!
 			badModel = qtrue;
 			goto retryModel;
@@ -573,6 +583,10 @@ retryModel:
 		{	// Didn't find any slashes, this is a raw filename right in base (whish isn't a good thing)
 			return qfalse;
 		}
+
+		// NicJK animremap: a model on its own humanoid skeleton still plays the humanoid game table
+		if (cg_animRemap.integer && BG_AnimRemap_OwnSkeleton(GLAName))
+			Q_strncpyz( afilename, "models/players/_humanoid/animation.cfg", sizeof( afilename ) );
 
 		//rww - All player models must use humanoid, no matter what.
 		if (Q_stricmp(afilename, "models/players/_humanoid/animation.cfg") /*&&
@@ -803,6 +817,11 @@ int CG_G2SkelForModel(void *g2)
 	GLAName[0] = 0;
 	trap->G2API_GetGLAName(g2, 0, GLAName);
 
+	// NicJK animremap: a model's own humanoid skeleton plays the humanoid game
+	// (table 0); its own frames are applied where it is drawn
+	if (cg_animRemap.integer && BG_AnimRemap_OwnSkeleton(GLAName))
+		return 0;
+
 	slash = Q_strrchr( GLAName, '/' );
 	if ( slash )
 	{
@@ -829,6 +848,15 @@ int CG_G2EvIndexForModel(void *g2, int animIndex)
 
 	GLAName[0] = 0;
 	trap->G2API_GetGLAName(g2, 0, GLAName);
+
+	// NicJK animremap: a model's own skeleton has its own animevents.cfg, keyed
+	// to the frames of its own animation.cfg
+	if (cg_animRemap.integer && BG_AnimRemap_OwnSkeleton(GLAName))
+	{
+		int ownSlot = BG_AnimRemap_OwnSkeletonSlot(GLAName);
+		if (ownSlot >= 0)
+			animIndex = ownSlot;
+	}
 
 	slash = Q_strrchr( GLAName, '/' );
 	if ( slash )
@@ -3165,6 +3193,60 @@ void CG_PlayerAnimEventDo( centity_t *cent, animevent_t *animEvent )
 }
 
 /*
+NicJK animremap.cfg: frames this client's model shows for each animation number.
+Animation numbers (what the server sends and the game code checks) never change.
+*/
+// GLA of the Ghoul2 model this client is drawn with (a model's own GLA, or
+// _humanoid if the model fell back to the default one)
+static const char *CG_AnimRemapGLA( int entNum, clientInfo_t *ci )
+{
+	static void *cachedG2[MAX_CLIENTS];
+	static char cachedModel[MAX_CLIENTS][MAX_QPATH];
+	static char cachedGLA[MAX_CLIENTS][MAX_QPATH];
+	void *g2 = cg_entities[entNum].ghoul2;
+
+	if ( !g2 || !trap->G2_HaveWeGhoul2Models( g2 ) )
+		g2 = ci->ghoul2Model;
+	if ( g2 != cachedG2[entNum] || Q_stricmp( cachedModel[entNum], ci->modelName ) )
+	{
+		cachedG2[entNum] = g2;
+		Q_strncpyz( cachedModel[entNum], ci->modelName, sizeof( cachedModel[entNum] ) );
+		cachedGLA[entNum][0] = 0;
+		if ( g2 && trap->G2_HaveWeGhoul2Models( g2 ) )
+			trap->G2API_GetGLAName( g2, 0, cachedGLA[entNum] );
+	}
+	return cachedGLA[entNum];
+}
+
+const animation_t *CG_AnimRemapVisual( int entNum, int animIndex, clientInfo_t *ci )
+{
+	if ( cg_animRemap.integer && animIndex == 0 && entNum >= 0 && entNum < MAX_CLIENTS )
+	{
+		if ( !ci )
+			ci = &cgs.clientinfo[entNum];
+		if ( ci->infoValid )
+			return BG_AnimRemap_Visual( entNum, animIndex, ci->modelName, ci->skinName, CG_AnimRemapGLA( entNum, ci ) );
+	}
+	return bgAllAnims[animIndex].anims;
+}
+
+// Table for predicting the local player: only differs for lines in "timing" mode,
+// and only when the server uses remaps too (g_animRemap in the serverinfo).
+animation_t *CG_AnimRemapPmove( int entNum, int animIndex )
+{
+	clientInfo_t *ci;
+
+	if ( animIndex != 0 || entNum < 0 || entNum >= MAX_CLIENTS )
+		return NULL;
+	if ( !atoi( Info_ValueForKey( CG_ConfigString( CS_SERVERINFO ), "g_animRemap" ) ) )
+		return NULL;
+	ci = &cgs.clientinfo[entNum];
+	if ( !ci->infoValid )
+		return NULL;
+	return BG_AnimRemap_Pmove( entNum, animIndex, ci->modelName, ci->skinName, CG_AnimRemapGLA( entNum, ci ) );
+}
+
+/*
 void CG_PlayerAnimEvents( int animFileIndex, int eventFileIndex, qboolean torso, int oldFrame, int frame, const vec3_t org, int entNum )
 
 play any keyframed sounds - only when start a new frame
@@ -3228,7 +3310,7 @@ void CG_PlayerAnimEvents( int animFileIndex, int eventFileIndex, qboolean torso,
 			animation_t *animation;
 
 			inSameAnim = qtrue;
-			animation = &bgAllAnims[animFileIndex].anims[anim];
+			animation = (animation_t *)&CG_AnimRemapVisual( entNum, animFileIndex, NULL )[anim];
 			animBackward = (animation->frameLerp<0);
 			if ( animation->loopFrames != -1 )
 			{//a looping anim!
@@ -3496,10 +3578,19 @@ static void CG_SetLerpFrameAnimation( centity_t *cent, clientInfo_t *ci, lerpFra
 		trap->Error( ERR_DROP, "Bad animation number: %i", newAnimation );
 	}
 
-	anim = &bgAllAnims[cent->localAnimIndex].anims[ newAnimation ];
+	anim = (animation_t *)&CG_AnimRemapVisual( cent->currentState.number, cent->localAnimIndex, ci )[ newAnimation ];
 
 	lf->animation = anim;
 	lf->animationTime = lf->frameTime + abs(anim->frameLerp);
+
+	if ( cg_animRemap.integer > 1 && cent->currentState.number < MAX_CLIENTS && cent->localAnimIndex == 0 )
+	{ // NicJK animremap debug: which frames this player's model really shows
+		const animation_t *stock = &bgAllAnims[0].anims[newAnimation];
+		trap->Print( "AnimRemap debug: client %d (%s) %s %s: frames %d-%d%s\n", cent->currentState.number, ci->modelName,
+			lf == &cent->pe.legs ? "legs" : "torso", GetStringForID( animTable, newAnimation ),
+			anim->firstFrame, anim->firstFrame + anim->numFrames - 1,
+			( anim->firstFrame != stock->firstFrame || anim->numFrames != stock->numFrames ) ? " (remapped)" : "" );
+	}
 
 	if (cent->localAnimIndex > 1 &&
 		anim->firstFrame == 0 &&
@@ -12806,7 +12897,7 @@ void CG_ForceFPLSPlayerModel(centity_t *cent, clientInfo_t *ci)
 		CG_RegisterClientModelname(ci, ci->modelName, ci->skinName, ci->teamName, cent->currentState.number);
 	}
 
-	anim = &bgAllAnims[cent->localAnimIndex].anims[ cent->currentState.legsAnim ];
+	anim = (animation_t *)&CG_AnimRemapVisual( cent->currentState.number, cent->localAnimIndex, ci )[ cent->currentState.legsAnim ];
 
 	if (anim)
 	{
@@ -12830,7 +12921,7 @@ void CG_ForceFPLSPlayerModel(centity_t *cent, clientInfo_t *ci)
 		cent->currentState.legsAnim = 0;
 	}
 
-	anim = &bgAllAnims[cent->localAnimIndex].anims[ cent->currentState.torsoAnim ];
+	anim = (animation_t *)&CG_AnimRemapVisual( cent->currentState.number, cent->localAnimIndex, ci )[ cent->currentState.torsoAnim ];
 
 	if (anim)
 	{

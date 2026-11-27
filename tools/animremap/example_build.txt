@@ -1,0 +1,28 @@
+// Example build file for gla_build.py
+//   python tools/animremap/gla_build.py example_build.txt
+//
+// Starts from NicJK's shared humanoid and appends chosen animations from other
+// GLAs that have the humanoid bones (MovieDuels' per-character skeletons, the
+// base game's cinematic GLAs, your own exports...). Bones are matched by name,
+// so files exported with another bone order work.
+//
+// Paths with spaces go in "double quotes". A GLA inside a pk3 is written
+// "path/to/file.pk3::models/players/x/x.gla". Relative paths are relative to
+// this file.
+
+base "../../assets/japro/models/players/_humanoid/_humanoid.gla" "../../assets/japro/models/players/_humanoid/animation.cfg"
+
+// copy named animations (names from that GLA's animation.cfg), with new names
+from "C:/Games/GameData/MD/MD_Assets2.pk3::models/players/_humanoid_dooku/_humanoid.gla" "C:/Games/GameData/MD/MD_Assets2.pk3::models/players/_humanoid_dooku/animation.cfg"
+anim BOTH_SABERFAST_STANCE   DOOKU_FAST_STANCE
+anim BOTH_A1_SPECIAL         DOOKU_A1_SPECIAL
+
+// copy a raw frame range (first, count, new name, loop, fps) - e.g. one of
+// your own animation files that has no animation.cfg
+from "my_anims.gla"
+frames 1 44 MY_ASSAULT -1 30
+
+// out: the combined GLA, the cfg naming the added animations (for animremap
+// animsets), and optionally a full animation.cfg where an added animation
+// named like a game animation (BOTH_...) replaces that entry for every model
+out "_humanoid.gla" "added.cfg"

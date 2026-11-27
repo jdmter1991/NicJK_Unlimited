@@ -97,6 +97,7 @@ void G2Time_ReportTimers(void)
 #include <math.h>
 #else
 #include <float.h>
+#include "rd-common/tr_animremap_gla.h"
 #endif
 
 //rww - RAGDOLL_END
@@ -4256,6 +4257,7 @@ qboolean R_LoadMDXM( model_t *mod, void *buffer, const char *mod_name, qboolean 
 	}
 
 	// first up, go load in the animation file we need that has the skeletal animation info for this model
+	R_AnimRemapGLAOverride( mod_name, mdxm->animName, sizeof( mdxm->animName ) ); // NicJK animremap.cfg "skeleton" lines
 	mdxm->animIndex = RE_RegisterModel(va ("%s.gla",mdxm->animName));
 
 	if (!mdxm->animIndex)

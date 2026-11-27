@@ -200,6 +200,12 @@ typedef struct tworld_s {
 	// local lights (maps/<name>.tlights): lamps that light their surroundings
 	int				numLights;
 	float			*lights;			// 8 floats each: position, radius, colour (already times intensity), unused
+	// every lamp at any distance (maps/<name>.tlampocc + rows below the sun map in <name>_shadow.dds, made by
+	// tools/bake_lamp_occlusion.py): each placement lists the lamps that reach it (8 indices + 1, two per float);
+	// the shader tests each against the lamp's baked occlusion map. 0 = not available (the four nearest lamps are used)
+	int				lampSunHeight;		// texel row where the lamp rows start = height of the sun map
+	int				lampTileRow;		// texel row of the first occlusion tile
+	float			(*instLamps)[4];
 
 	// baked sun shadow map (maps/<name>_shadow.dds + maps/<name>.tshadow), NULL when the map has none
 	image_t			*shadowImage;
@@ -231,6 +237,8 @@ static cvar_t	*r_tworldPBR;
 static cvar_t	*r_tworldFoliageLight;
 static cvar_t	*r_tworldHaze;
 static cvar_t	*r_tworldLamps;
+static cvar_t	*r_tworldLampDebug;
+static cvar_t	*r_tworldLampDistance;
 static cvar_t	*r_tworldIndoor;
 static cvar_t	*r_tworldAO;
 static cvar_t	*r_tworldPortal;
@@ -379,7 +387,7 @@ static void R_LoadTWorldShadow( tworld_t *tw, const char *bspName )
 
 	image = R_FindImageFile( imgName, (imgFlags_t)( IMGFLAG_CLAMPTOEDGE | IMGFLAG_NO_COMPRESSION | IMGFLAG_NOSCALE | IMGFLAG_NOLIGHTSCALE ) );
 	if ( !image || image->internalFormat != VK_FORMAT_R16_UNORM
-		|| image->width != (int)h->width || image->height != (int)h->height ) {
+		|| image->width != (int)h->width || image->height < (int)h->height ) {		// taller: lamp rows below the sun map
 		ri.Printf( PRINT_WARNING, "R_LoadTWorldShadow: %s.dds is missing, not R16 or not the size the .tshadow file names\n", imgName );
 		ri.FS_FreeFile( buffer );
 		return;
@@ -438,6 +446,77 @@ typedef struct {
 	float		tileU, tileV;	// its repeats per unit of UV (whole numbers up to 255)
 } twPbrMaterial2_t;				// 152 bytes, file version 2
 #pragma pack(pop)
+
+/*
+=================
+R_LoadTWorldLampOcclusion
+
+Optional maps/<name>.tlampocc (tools/bake_lamp_occlusion.py): "TLOC", version 1, lamps, tile size, sun map height,
+parameter row, first tile row, tiles per row. The lamp parameters and one octahedral occlusion tile per lamp are
+rows of the shadow texture below the sun map. With it every lamp lights what it reaches at any distance; each
+placement gets the (up to 8) lamps whose radius touches its bounds, nearest first.
+=================
+*/
+static void R_LoadTWorldLampOcclusion( tworld_t *tw, const char *bspName )
+{
+	char		name[MAX_QPATH];
+	uint32_t	*buf = NULL;
+	long		len;
+	int			i, k, tooMany = 0, lit = 0;
+
+	tw->lampSunHeight = 0;
+	tw->instLamps = NULL;
+	if ( !tw->numLights || !tw->shadowImage )
+		return;
+	COM_StripExtension( bspName, name, sizeof( name ) );
+	Q_strcat( name, sizeof( name ), ".tlampocc" );
+	len = ri.FS_ReadFile( name, (void **)&buf );
+	if ( !buf )
+		return;
+	if ( len != 32 || memcmp( buf, "TLOC", 4 ) || buf[1] != 3 || (int)buf[2] != tw->numLights || buf[3] != 64 || buf[2] > 4095
+		|| buf[5] != buf[4] || (int)buf[6] != (int)buf[4] + 2 * ( ( (int)buf[2] + tw->shadowImage->width / 4 - 1 ) / ( tw->shadowImage->width / 4 ) )
+		|| (int)buf[7] != tw->shadowImage->width / 64
+		|| tw->shadowImage->height < (int)( buf[6] + ( ( buf[2] + buf[7] - 1 ) / buf[7] ) * 64 ) ) {
+		ri.Printf( PRINT_WARNING, "R_LoadTWorldLampOcclusion: %s does not match the lamps or the shadow texture\n", name );
+		ri.FS_FreeFile( buf );
+		return;
+	}
+	tw->lampSunHeight = (int)buf[4];
+	tw->lampTileRow = (int)buf[6];
+	ri.FS_FreeFile( buf );
+
+	tw->instLamps = (float (*)[4])ri.Hunk_Alloc( sizeof( float ) * 4 * ( tw->numInstances + 1 ), h_low );
+	for ( i = 0; i < tw->numInstances; i++ ) {
+		const tworldInst_t *in = &tw->instances[i];
+		int		best[8];
+		float	bestD[8];
+		int		nb = 0, q;
+		for ( k = 0; k < tw->numLights; k++ ) {
+			const float *L = tw->lights + k * 8;
+			const float gap = Distance( L, in->center ) - L[3] - in->radius;
+			if ( gap >= 0.0f )
+				continue;
+			if ( nb == 8 ) {
+				tooMany++;
+				if ( gap >= bestD[7] )
+					continue;
+				nb = 7;
+			}
+			for ( q = nb; q > 0 && bestD[q - 1] > gap; q-- ) {
+				best[q] = best[q - 1]; bestD[q] = bestD[q - 1];
+			}
+			best[q] = k; bestD[q] = gap; nb++;
+		}
+		for ( q = 0; q < 4; q++ ) {
+			const int a = ( 2 * q < nb ) ? best[2 * q] + 1 : 0, b = ( 2 * q + 1 < nb ) ? best[2 * q + 1] + 1 : 0;
+			tw->instLamps[i][q] = (float)( a + b * 4096 );		// two 12-bit values: exact in a float
+		}
+		if ( nb )
+			lit++;
+	}
+	ri.Printf( PRINT_ALL, "R_LoadTWorldLampOcclusion: %s: %i lamps at any distance, %i placements lit (%i lamp lists capped at 8)\n",
+		name, tw->numLights, lit, tooMany );
+}
 
 /*
 =================
@@ -565,6 +644,8 @@ void R_LoadTWorld( const char *bspName )
 	r_tworldAO = ri.Cvar_Get( "r_tworldAO", "0.6", CVAR_ARCHIVE_ND, "Cooked world: strength of the baked ambient occlusion of each mesh (0 = off)" );
 	r_tworldIndoor = ri.Cvar_Get( "r_tworldIndoor", "0.55", CVAR_ARCHIVE_ND, "Cooked world: share of the ambient light inside fully enclosed spaces (1 = no darkening)" );
 	r_tworldLamps = ri.Cvar_Get( "r_tworldLamps", "1", CVAR_ARCHIVE_ND, "Cooked world: brightness of the local lights (lamps), 0 = off" );
+	r_tworldLampDistance = ri.Cvar_Get( "r_tworldLampDistance", "4000", CVAR_ARCHIVE_ND, "Cooked world: lamp light is drawn up to this distance from the camera (world units), fading over the last quarter; 0 = no limit" );
+	r_tworldLampDebug = ri.Cvar_Get( "r_tworldLampDebug", "0", CVAR_TEMP, "Cooked world: lamp debug view, 1 = no occlusion test, 2 = placements with lamps in red" );
 	r_tworldInstancing = ri.Cvar_Get( "r_tworldInstancing", "1", CVAR_ARCHIVE_ND, "Cooked world: 1 = one instanced draw per mesh level and material, 0 = one draw per placement through the model path" );
 
 	COM_StripExtension( bspName, name, sizeof( name ) );
@@ -918,6 +999,7 @@ void R_LoadTWorld( const char *bspName )
 			ri.FS_FreeFile( lbuf );
 	}
 	R_LoadTWorldShadow( tw, bspName );
+	R_LoadTWorldLampOcclusion( tw, bspName );
 	R_LoadTWorldPBR( tw, bspName );
 	s_tworld = tw;
 }
@@ -995,7 +1077,8 @@ typedef struct {
 	float	row0[4], row1[4], row2[4];
 	float	tint[4];
 	float	params[4];		// x: detail repeats per unit of UV
-} twInstData_t;				// 80 bytes
+	float	lamps[4];		// lamps that reach the placement: two indices + 1 per value (a + 4096 * b), 0 = none
+} twInstData_t;				// 96 bytes (vk_pipelines.cpp: the instance binding's stride)
 
 static qboolean RB_TWorldInstanced( tworld_t *tw, const int pass )
 {
@@ -1270,6 +1353,8 @@ static qboolean RB_TWorldInstanced( tworld_t *tw, const int pass )
 		u.modelMatrix[13] = r_tworldShadowBias->value * tw->shadowTexel / tw->shadowRange;
 		u.modelMatrix[14] = r_tworldShadows->value;		// above 1: debug views, see tworld.frag
 	}
+	// where the sun map ends and the lamp rows begin (0 = no lamp rows: the sun lookup uses the whole texture)
+	u.modelMatrix[15] = (float)tw->lampSunHeight;
 	uboOffset = data ? vk_append_uniform( &u, sizeof( u ), vk.uniform_entity_item_size ) : ~0U;
 	{
 		// the pass's own block in the main uniform slot: camera and sky, for water reflections
@@ -1313,7 +1398,15 @@ static qboolean RB_TWorldInstanced( tworld_t *tw, const int pass )
 		}
 		f[11] = tw->originM[0];
 		f[15] = tw->originM[1];
-		if ( tw->numLights && r_tworldLamps->value > 0.0f ) {
+		if ( tw->instLamps ) {
+			// every lamp at any distance: the placements carry their lamp lists, the shader reads the lamps from the
+			// shadow texture. lightPos[*].w = 0 switches the nearest-four path off; lightPos[0].x is the brightness
+			f[16] = r_tworldLamps->value;
+			f[17] = 1.0f;
+			f[18] = r_tworldLampDebug->value;
+			f[20] = (float)tw->lampTileRow;		// lightPos[1].x (lightPos[1].w stays 0)
+			f[21] = r_tworldLampDistance->value > 0.0f ? r_tworldLampDistance->value : 1e9f;		// lightPos[1].y
+		} else if ( tw->numLights && r_tworldLamps->value > 0.0f ) {
 			// the four lights nearest the camera (distance beyond their radius)
 			int best[5] = { -1, -1, -1, -1, -1 };
 			float bestD[5] = { 1e30f, 1e30f, 1e30f, 1e30f, 1e30f };
@@ -1388,6 +1481,12 @@ static qboolean RB_TWorldInstanced( tworld_t *tw, const int pass )
 			out->tint[3] = tw->alphas[sub->tintIndex];
 			out->params[0] = tw->details[sub->tintIndex];
 			out->params[1] = sub->texNoScale + tw->tilePacks[sub->tintIndex];
+			if ( tw->instLamps ) {
+				const float *il = tw->instLamps[tw->visInst[i]];
+				out->lamps[0] = il[0]; out->lamps[1] = il[1]; out->lamps[2] = il[2]; out->lamps[3] = il[3];
+			} else {
+				out->lamps[0] = out->lamps[1] = out->lamps[2] = out->lamps[3] = 0.0f;
+			}
 			// animation type, plus the placement's sky occlusion in the fraction (0 .. 0.98)
 			out->params[2] = (float)tw->anims[sub->tintIndex] + ( tw->skyOcc ? tw->skyOcc[tw->visInst[i]] * ( 0.98f / 255.0f ) : 0.0f );
 			if ( tw->anims[sub->tintIndex] == 0 || tw->anims[sub->tintIndex] >= 6 ) {

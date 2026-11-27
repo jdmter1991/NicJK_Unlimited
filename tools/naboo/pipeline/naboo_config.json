@@ -34,11 +34,11 @@
    "collision": {
     "box_below_extent_m": 1.0,
     "skip_below_extent_m": 0.3,
-    "decimate_fraction": 0.08,
-    "decimate_min_tris": 100,
-    "decimate_max_tris": 2000,
+    "decimate_fraction": 0.04,
+    "decimate_min_tris": 60,
+    "decimate_max_tris": 1000,
     "planar_first": true,
-    "planar_angle_deg": 1.0,
+    "planar_angle_deg": 2.0,
     "terrain_stride": 2,
     "weld_m": 0.005
    }
@@ -115,7 +115,8 @@
   "line_tolerance": 0.05,
   "merge_max_corners": 12,
   "merge_max_extent": 1024.0,
-  "bot_wall_above": 1200.0
+  "bot_wall_above": 1200.0,
+  "dry_bed_below": -140.0
  },
  "shadow": {
   "size": 6912,
@@ -185,5 +186,12 @@
    "lawn_only": true,
    "min_grass": 0.5
   }
- ]
+ ],
+ "backdrop_skirts": {
+  "objects": [
+   "naboobackdropcanal",
+   "canal_boardwalk",
+   "canalfoundation"
+  ]
+ }
 }

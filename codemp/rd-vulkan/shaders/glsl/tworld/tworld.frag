@@ -68,6 +68,7 @@ layout(location = 13) flat in vec2 frag_tile;
 layout(location = 14) in vec2 frag_tex_coord2;
 layout(location = 15) flat in float frag_amb;
 layout(location = 16) in float frag_ao;
+layout(location = 17) flat in vec4 frag_lamps;		// lamps that reach this placement: two indices + 1 per value
 
 // light from the nearby lamps on a surface with normal n (display-space, added to the diffuse light)
 vec3 local_lights( vec3 n ) {
@@ -86,12 +87,82 @@ vec3 local_lights( vec3 n ) {
 	return sum;
 }
 
+// every lamp at any distance (maps/<name>.tlampocc): the lamps that reach this placement, read from the rows below
+// the sun map in the shadow texture (texture2): parameters from row S on, one 64 x 64 octahedral occlusion tile per lamp
+// from row lightPos[1].x on. A lamp lights the fragment when nothing nearer stood between them when the map was baked.
+// lamp parameters: two 2 x 2 blocks per lamp from row S on, W / 4 lamps per two rows: [x y / z radius] and [r g / b 0];
+// one gather reads a block (gather order: x = (c, r+1), y = (c+1, r+1), z = (c+1, r), w = (c, r))
+vec4 lamp_block( int idx, int blk, int S, vec2 size ) {
+	int per = int( size.x ) / 4;
+	vec2 corner = vec2( float( ( idx % per ) * 4 + blk * 2 + 1 ), float( S + ( idx / per ) * 2 + 1 ) );
+	return textureGather( texture2, corner / size, 0 ) * 65535.0;
+}
+vec3 baked_lamps( vec3 n ) {
+	int S = int( u_entity.modelMatrix[3].w + 0.5 );
+	if ( u_tw.lightPos[0].y < 0.5 || S <= 0 )
+		return vec3( 0.0 );
+	// only within r_tworldLampDistance of the camera, fading over its last quarter: the pools of distant lamps are a
+	// few pixels, the per-pixel lamp loop is the cost
+	float camFade = 1.0 - smoothstep( 0.75, 1.0, distance( frag_world, u_tw.eye.xyz ) / u_tw.lightPos[1].y );
+	if ( camFade <= 0.0 )
+		return vec3( 0.0 );
+	vec2 size = vec2( textureSize( texture2, 0 ) );
+	int tilesPerRow = int( size.x ) / 64;
+	int tileRow = int( u_tw.lightPos[1].x + 0.5 );
+	vec3 sum = vec3( 0.0 );
+	for ( int k = 0; k < 8; k++ ) {
+		float pv = frag_lamps[k >> 1];
+		int idx = ( ( k & 1 ) == 0 ) ? int( mod( pv, 4096.0 ) ) : int( pv / 4096.0 );
+		if ( idx == 0 )
+			continue;
+		idx -= 1;
+		vec4 pr = lamp_block( idx, 0, S, size );
+		vec3 L = vec3( pr.w, pr.z, pr.x ) - 32768.0;
+		float r = pr.y;
+		vec3 d = L - frag_world;
+		float dd = dot( d, d );
+		float q = dd / max( r * r, 1.0 );
+		if ( q >= 1.0 )
+			continue;
+		float dist = sqrt( dd );
+		// occlusion: octahedral direction from the lamp to the fragment, the 2 x 2 texels around it in one gather, each a
+		// soft pass / fail, blended bilinearly: smooth edges instead of the map's texels
+		vec3 v = -d / max( dist, 1e-3 );
+		v /= ( abs( v.x ) + abs( v.y ) + abs( v.z ) );
+		vec2 o = v.xy;
+		if ( v.z < 0.0 )
+			o = ( 1.0 - abs( v.yx ) ) * vec2( v.x >= 0.0 ? 1.0 : -1.0, v.y >= 0.0 ? 1.0 : -1.0 );
+		vec2 tc = clamp( ( o * 0.5 + 0.5 ) * 64.0 - 0.5, vec2( 0.0 ), vec2( 62.999 ) );
+		vec2 t0 = floor( tc );
+		vec2 fr = tc - t0;
+		vec2 base = vec2( float( ( idx % tilesPerRow ) * 64 ), float( tileRow + ( idx / tilesPerRow ) * 64 ) );
+		vec4 occ = textureGather( texture2, ( base + t0 + 1.0 ) / size, 0 ) * r;
+		float bias = 32.0 + 0.12 * dist;
+		vec4 vis4 = clamp( ( occ + bias - dist ) / bias + 0.5, 0.0, 1.0 );
+		float lampVis = mix( mix( vis4.w, vis4.z, fr.x ), mix( vis4.x, vis4.y, fr.x ), fr.y );
+		if ( u_tw.lightPos[0].z > 0.5 )
+			lampVis = 1.0;
+		if ( lampVis <= 0.0 )
+			continue;
+		vec4 cb = lamp_block( idx, 1, S, size ) / 16384.0;
+		vec3 col = vec3( cb.w, cb.z, cb.x );
+		float att = ( 1.0 - q ) * ( 1.0 - q );
+		float wrap = 0.35 + 0.65 * max( dot( n, d ) / max( dist, 1e-3 ), 0.0 );
+		sum += col * ( att * wrap * lampVis );
+	}
+	// many lamps overlapping (a candle row, a chandelier) must not burn a surface white
+	sum *= u_tw.lightPos[0].x * camFade;
+	return sum / ( 1.0 + max( max( sum.r, sum.g ), sum.b ) * 0.6 );
+}
+
 // share of the sun that reaches the fragment: 1 = fully lit
 float sun_visibility() {
 	float strength = min( u_entity.modelMatrix[3].z, 1.0 );
 	if ( strength <= 0.0 )
 		return 1.0;
 	ivec2 size = textureSize( texture2, 0 );
+	if ( u_entity.modelMatrix[3].w > 0.5 )
+		size.y = int( u_entity.modelMatrix[3].w + 0.5 );		// the lamp rows below the sun map are not sun
 	vec2 uv = frag_shadow.xy - 0.5;
 	if ( uv.x < 1.0 || uv.y < 1.0 || uv.x > float( size.x ) - 3.0 || uv.y > float( size.y ) - 3.0 )
 		return 1.0;										// outside the baked region
@@ -159,7 +230,9 @@ void main() {
 
 	// a surface that faces away from the sun is in its own shadow: no need to look the shadow map up
 	float vis = ( dot( frag_normal, u_entity.localLightOrigin.xyz ) > 0.0 || frag_anim.x > 0.5 ) ? sun_visibility() : 0.0;
-	vec3 lamps = local_lights( normalize( frag_normal ) );
+	vec3 lamps = local_lights( normalize( frag_normal ) ) + baked_lamps( normalize( frag_normal ) );
+	if ( u_tw.lightPos[0].z > 1.5 && ( frag_lamps.x > 0.5 ) )
+		lamps += vec3( 4.0, 0.0, 0.0 );
 	vec3 lit = frag_color.rgb + frag_sun * vis + frag_tint * lamps;
 	vec4 color = vec4( base.rgb * lit, base.a * frag_color.a );
 
@@ -247,7 +320,10 @@ void main() {
 		// a mirror-smooth metal shows only reflections; a rough one scatters the light around it, which here is the
 		// same light a non-metal receives, tinted by the metal's colour (without this, rough metals came out black)
 		vec3 kd = vec3( 1.0 - metal * ( 1.0 - rough ) * ( 1.0 - rough ) );
-		vec3 lin = kd * albedo * ( Eamb + Esun + pow( local_lights( N ), vec3( 2.2 ) ) ) + specSun + specAmb;
+		vec3 lampN = local_lights( N ) + baked_lamps( N );
+		if ( u_tw.lightPos[0].z > 1.5 && frag_lamps.x > 0.5 )
+			lampN += vec3( 4.0, 0.0, 0.0 );		// lamp debug view 2
+		vec3 lin = kd * albedo * ( Eamb + Esun + pow( lampN, vec3( 2.2 ) ) ) + specSun + specAmb;
 		color.rgb = pow( lin, vec3( 1.0 / 2.2 ) );
 	}
 

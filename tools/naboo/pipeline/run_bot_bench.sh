@@ -22,13 +22,15 @@ if [ "$1" = "client" ]; then
   # one pass: five camera positions, 3000 frames each; the log's timestamps give the duration
   py - "$D/nicjk/naboo_botbench.cfg" <<'EOF'
 import sys
-P = [(669, 3583, 60, 42), (3031, 4291, 140, -167), (-1693, 1457, 110, 42), (669, 3583, 1400, 42), (700, -9000, 5000, 90), (362, 9000, 400, 90)]
+P = [(669, 3583, 60, 42), (3031, 4291, 140, -167), (-1693, 1457, 110, 42), (669, 3583, 1400, 42), (700, -9000, 5000, 90), (362, 9000, 400, 90),
+     (-672, 8300, 620, 90), (360, 5400, 160, 90)]      # last two: a palace hall with many candles, the palace forecourt
 L = []
 for c in (1, 2):
     for i, (x, y, z, yaw) in enumerate(P):
         nxt = "vstr c%d_p%d" % (c, i + 1) if i + 1 < len(P) else ("vstr c2_p0" if c == 1 else "echo BENCH_END; wait 20; quit")
-        L.append('set c%d_p%d "setviewpos %d %d %d %d; wait 150; echo BENCH_BEGIN pass %d position %d; wait 3000; echo BENCH_STOP pass %d position %d; %s"' % (c, i, x, y, z, yaw, c, i, c, i, nxt))
-L.append('set benchgo "com_maxfps 125; wait 3500; team s; wait 400; cg_draw2D 0; echo BENCH_BOTS_READY; set com_maxfps 0; vstr c1_p0"')
+        # r_tworldBench: every change of the label prints the renderer's frame-time figures of the section that ended
+        L.append('set c%d_p%d "r_tworldBench move; setviewpos %d %d %d %d; wait 150; r_tworldBench pass%d_pos%d; echo BENCH_BEGIN pass %d position %d; wait 3000; echo BENCH_STOP pass %d position %d; r_tworldBench move; %s"' % (c, i, x, y, z, yaw, c, i, c, i, c, i, nxt))
+L.append('set benchgo "com_maxfps 125; wait 3500; team s; wait 400; cg_draw2D 1; cg_drawFPS 1; echo BENCH_BOTS_READY; set com_maxfps 0; vstr c1_p0"')
 L.append("vstr benchgo")
 open(sys.argv[1], "w").write("\n".join(L) + "\n")
 EOF
@@ -58,10 +60,17 @@ for l in log:
 bots = sum(1 for l in log if "entered the game" in l)
 missing = sorted({re.sub(r".*Unable to find bot '?", "", l).strip("' ") for l in log if "Unable to find bot" in l or "Bot not found" in l})
 modes = [l[20:] for l in log if "MODE:" in l or "render:" in l.lower()][:2]
-per = {"position %d" % p: [round(res.get((c, p), 0)) for c in (1, 2)] for p in range(6)}
-tot = [round(18000.0 / sum(3000.0 / res[(c, p)] for p in range(6))) if all((c, p) in res for p in range(6)) else None for c in (1, 2)]
+# frame rates from the renderer's recorder (TWBENCH lines), not from wait counts
+tw = {}
+for l in log:
+    m = re.search(r"TWBENCH pass(\d)_pos(\d+): frames (\d+), avg ([\d.]+) fps \(([\d.]+) ms\), 1% low ([\d.]+) fps", l)
+    if m:
+        tw[(int(m.group(1)), int(m.group(2)))] = (float(m.group(4)), float(m.group(6)), int(m.group(3)), float(m.group(5)))
+NP = 1 + max([k[1] for k in tw] or [0])
+per = {"position %d" % p: [[round(tw[(c, p)][0]), round(tw[(c, p)][1])] if (c, p) in tw else None for c in (1, 2)] for p in range(NP)}
+tot = [round(sum(tw[(c, p)][2] for p in range(NP)) / (sum(tw[(c, p)][2] * tw[(c, p)][3] for p in range(NP)) / 1000.0)) if all((c, p) in tw for p in range(NP)) else None for c in (1, 2)]
 gpu = open(sys.argv[3]).read().strip() if os.path.exists(sys.argv[3]) else None
-print(json.dumps({"label": sys.argv[2], "fps_per_position_pass1_pass2": per, "fps_whole_pass": tot, "clients_entered": bots, "bots_not_found": missing, "gpu_memory_and_load_at_150s": gpu, "mode_lines": modes,
+print(json.dumps({"label": sys.argv[2], "fps_avg_and_1pct_low_per_position_pass1_pass2": per, "fps_whole_pass": tot, "clients_entered": bots, "bots_not_found": missing, "gpu_memory_and_load_at_150s": gpu, "mode_lines": modes,
                   "errors": [l[20:140] for l in log if "ERROR" in l][:3]}, indent=1))
 EOF
 elif [ "$1" = "server" ]; then

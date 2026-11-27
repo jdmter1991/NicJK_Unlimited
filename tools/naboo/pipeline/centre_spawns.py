@@ -6,7 +6,8 @@ that are made to be seen from afar. A spawn goes when
   * fewer than `min_detail` (60) detailed objects (not backdrop, terrain, sky, water, lights or effects) stand
     within 1500 units of it, or
   * a backdrop object stands within `min_backdrop` (600) units, or
-  * it is more than `max_radius` (13000) units from the centre of the detailed objects.
+  * it is more than `max_radius` (13000) units from the centre of the detailed objects, or
+  * it is more than `max_route_distance` (300) units from every bot route point (fenced terraces, closed yards).
 The same number of spawns is added back on bot route points (walkable, dry, connected; tools/make_bot_routes.py)
 with at least `new_min_detail` (200) detailed objects around them, within `new_radius` (9000) units of the centre,
 open to the sky, at least 700 units from every spawn, spread as far apart as possible, facing the centre.
@@ -36,6 +37,9 @@ def bd_dist(P):
     return np.array([np.hypot(bd[:, 0] - p[0], bd[:, 1] - p[1]).min() for p in P])
 
 
+# spawns must be within reach of the bot routes: a spawn in a fenced terrace or a closed courtyard traps bots
+WALL = np.array([[float(v) for v in re.search(r"\(([^)]+)\)", l).group(1).split()] for l in open(wnt)])
+MAX_ROUTE = float(cfg.get("max_route_distance", 300.0))
 mp = os.path.join(ROOT, "q3base", "base", "maps", mapname + ".map")
 src = open(mp, encoding="utf-8", errors="replace").read()
 blocks = list(re.finditer(r"\{[^{}]*\}", src))
@@ -48,7 +52,8 @@ for m in blocks:
     if '"naboo_centre"' in b:
         keep_txt.append(src[pos:m.start()]); pos = m.end(); continue          # replaced below
     d = detail([o])[0]; bdd = bd_dist([o])[0]; r = np.hypot(*(o[:2] - CEN))
-    if d < MIN_DETAIL or bdd < MIN_BD or r > MAX_R or avoid_zones.avoided([o[0]], [o[1]], [o[2]])[0]:
+    rd = float(np.linalg.norm(WALL[:, :3] - (o + [0, 0, 24]), axis=1).min())      # nearest bot route point
+    if d < MIN_DETAIL or bdd < MIN_BD or r > MAX_R or rd > MAX_ROUTE or avoid_zones.avoided([o[0]], [o[1]], [o[2]])[0]:
         keep_txt.append(src[pos:m.start()]); pos = m.end(); dropped.append(o.tolist() + [int(d), round(float(bdd)), round(float(r))])
     else:
         kept.append(o)
@@ -61,6 +66,9 @@ W = np.unique(np.array([[float(v) for v in re.search(r"\(([^)]+)\)", l).group(1)
 W = W[np.hypot(W[:, 0] - CEN[0], W[:, 1] - CEN[1]) < NEW_R]
 W = W[detail(W) >= NEW_DETAIL]
 W = W[~avoid_zones.avoided(W[:, 0], W[:, 1], W[:, 2] - 24.0)]
+# near the ground only: route points on roofs (reached by force jumps) are no place to spawn
+_tz, _, _ = avoid_zones.terrain_z(W[:, 0], W[:, 1])
+W = W[(W[:, 2] - 24.0 - _tz) < float(cfg.get("max_height_above_ground", 400.0))]
 T = np.load(os.path.join(ed, "collision", "collision_tris.npy")).reshape(-1, 3, 3).astype(np.float64)
 tmin = T.min(1); tmax = T.max(1)
 sel = np.flatnonzero(tmax[:, 2] > W[:, 2].min())

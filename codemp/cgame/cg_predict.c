@@ -28,6 +28,8 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 
 #include "cg_local.h"
 
+animation_t *CG_AnimRemapPmove( int entNum, int animIndex );
+
 static	pmove_t		cg_pmove;
 
 static	int			cg_numSolidEntities;
@@ -1429,6 +1431,11 @@ void CG_PredictPlayerState( void ) {
 		}
 
 		cg_pmove.animations = bgAllAnims[pEnt->localAnimIndex].anims;
+		{ // NicJK animremap.cfg: only "timing" lines change pmove, and only when the server uses them
+			animation_t *remapped = CG_AnimRemapPmove( cg.predictedPlayerState.clientNum, pEnt->localAnimIndex );
+			if ( remapped )
+				cg_pmove.animations = remapped;
+		}
 		cg_pmove.gametype = cgs.gametype;
 
 		cg_pmove.debugMelee = cgs.debugMelee;

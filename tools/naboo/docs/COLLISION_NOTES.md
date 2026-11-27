@@ -228,3 +228,57 @@ later as agreed), the west garden (same layout in the source).
 
 Beta 3 pk3s (`naboo\release\beta3`) installed in the Steam install (beta 2 kept in `backups\steam_naboo_beta2`);
 the Steam build's server loaded the map and the routes, the client loaded the world.
+
+## Round 4 (2026-11-27): smaller collision, one-hour session, route and spawn fixes
+
+Collision file 920 MB -> 677 MB: per-object reduction target halved (4 %, 60-1000 triangles), flat areas merged at
+2 degrees, bit-identical planes stored once (18.6 M -> 15.8 M). Drawn floors with collision within 64 units 89.5 % ->
+94.3 % (the floor fill closes more). Server A/B, 31 bots, 210 s each (`naboo\bsp_ab\v2_vs_v3`): bot traces 5.79 vs
+5.95 us average, AI 3.46 vs 3.48 ms per frame (no measurable change), map start to first bot 7 s -> 5 s. Seen twice
+on the new file only: a single bot think of 220-280 ms once in a 4-20 minute window (old file: at most 31 ms); not
+explained yet.
+
+One-hour session (31 bots, spectator at 1080p, `naboo\bottests\hour1`): nobody under the ground, fell out or drowned;
+7 stuck; water 0.9 % at one spot. `tools/route_usage.py` (new) found where bots leave the routes and where they go back
+and forth with nobody near. Causes and fixes:
+* water under a canal boardwalk (x 5263 y -7502): the boardwalk and canal foundations are shells over hidden water
+  like the backdrop canals -> skirts under them too (`backdrop_skirts` objects).
+* dry paved canal beds (z -179): bots drop in and cannot walk out -> bot-only walls along their rims
+  (`write_collision_bsp.dry_canal_beds`, only cells open to the sky; walled separately from the water).
+* a spawn inside a fenced cafe terrace (x -3722 y -8769) and 21 others more than 300 units from any route point
+  -> `centre_spawns.py` drops spawns out of reach of the routes; new spawns only within 400 units of the ground.
+* route groups on roofs (z 2000+, reachable only by force jumps) left out.
+
+| 20-min runs | run 8 | run 9 | run 10 | run 11 |
+|---|---|---|---|---|
+| changes | skirts + canal beds (merged walls) | separate walls, open-sky beds | + reachable spawns | + no roof spawns or routes |
+| time in water | 2.4 % | 0 % | 0 % | 0 % |
+| below ground / fell out | 0 / 0 | 0 / 0 | 0 / 0 | 1 sample / 0 |
+| stuck 30 s+ | 5 | 1 | 1 | 2 |
+| on the ground more than 600 units from a route | 9.2 % | 3.6 % | 0.9 % | 0.9 % |
+| bot thinking on a route | 78 % | 84 % | 93 % | 91 % |
+
+Beta 4 pk3s (`naboo\release\beta4`) installed in the Steam install (beta 3 kept in `backups\steam_naboo_beta3`).
+
+## Lamps (2026-11-27): every glowing fixture lights its surroundings, at any distance
+
+Before: the cooked world lit itself with the four lamps nearest the camera, so lamps seemed to switch on as the player
+came near, and the palace candles glowed without lighting anything. Of 373 lights most were palace candles; glowing
+fixtures without a light of their own in the source lit nothing.
+
+Now (`tools/glow_lights.py`, `tools/bake_lamp_occlusion.py`, renderer `R_LoadTWorldLampOcclusion`):
+* 836 lights: the source's 373, plus one for every glowing fixture of the cooked world and every emissive part of the
+  source (`list_emissive_parts.py`: 198 street lamp posts and others) that has none, merged within 64 units, at 0.4 of
+  the source lights' strength. Bulb strings in trees and between poles get no light (user: "trees should not glow,
+  only the lightbulbs, candles, chandelier etc").
+* each light has a 64 x 64 octahedral occlusion map baked against the collision (rays start 24 units out), stored with
+  the light parameters in rows below the sun map in `<map>_shadow.dds`; `<map>.tlampocc` describes the layout.
+* each placement lists the (up to 8) lights that reach it; the shader adds their diffuse light with a soft occlusion test
+  and a cap for many overlapping lights. Visible geometry unchanged.
+* not yet: the lamp posts' heads do not glow (their emissive material is not a glowing material in the cook).
+
+Cost, 31 bots at 1080p, the renderer's recorder, before (renderer before the lamp work, 373 source lights, nearest
+four) and after back to back (`naboo\export\city\bench\client_lamps_*3.qconsole.log`): whole pass 157 / 155 fps
+before, 150 / 149 fps after. The first version (one texel read per value, no distance limit) cost 172 / 156 ->
+117 / 129; lamp data is now read as 2 x 2 blocks with one gather each, and lamp light is drawn up to
+`r_tworldLampDistance` (4000 units, about 100 m) from the camera, fading over its last quarter.

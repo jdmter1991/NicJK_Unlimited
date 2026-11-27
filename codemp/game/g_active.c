@@ -25,6 +25,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "g_local.h"
 #include "bg_saga.h"
 #include "g_unlagged.h"
+#include "bg_animremap.h"
 
 extern void Jedi_Cloak( gentity_t *self );
 extern void Jedi_Decloak( gentity_t *self );
@@ -4920,7 +4921,7 @@ void ClientThink_real( gentity_t *ent ) {
 	pmove.pmove_msec = pmove_msec.integer;
 	pmove.pmove_float = pmove_float.integer;
 
-	pmove.animations = bgAllAnims[ent->localAnimIndex].anims;//NULL;
+	pmove.animations = G_AnimRemap_Pmove(ent); // NicJK animremap.cfg: base table unless the model has "timing" lines
 
 	//rww - bgghoul2
 	pmove.ghoul2 = NULL;
