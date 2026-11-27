@@ -712,6 +712,11 @@ static void BotEval_Report(void) {
 		deaths[g] += g_entities[i].client->ps.persistant[PERS_KILLED];
 	}
 	trap->Print("BOTEVAL kata rolls: old logic %d, new logic %d of which started %d; targeted style changes completed %d\n", botEvalKataTried[0], botEvalKataTried[1], botEvalKataStarted[1], botEvalStyleSwitches);
+	if (g_jk2_102sabersystem.integer) {
+		char jk2buf[256];
+		G_JK2SaberStats(jk2buf, sizeof(jk2buf));
+		trap->Print("BOTEVAL %s\n", jk2buf);
+	}
 	trap->Print("BOTEVAL navigation: steered around obstacles %d, jumped low obstacles %d, roam goals reached %d\n", botEvalNavSteers, botEvalNavJumps, botEvalNavGoals);
 	trap->Print("BOTEVAL navigation: force jumps over high obstacles %d, jumps across gaps %d, idle bots set moving %d, stuck jump-outs %d, stuck suicides %d\n",
 		botEvalNavHighJumps, botEvalNavGapJumps, botEvalIdleKicks, botEvalStuckJumps, botEvalStuckSuicides);
@@ -757,7 +762,7 @@ static void BotEval_Report(void) {
 	trap->Print("BOTEVAL duel timing: frames held at the edge of reach %d, counters into a recovering enemy %d, ripostes after a block %d, frames circling %d\n",
 		botEvalDuelHold, botEvalDuelCounter, botEvalDuelRiposte, botEvalDuelCircle);
 	trap->Print("BOTEVAL combat walking: frames walked %d, frames run while an enemy was close %d\n", botEvalWalkFrames, botEvalRunFrames);
-	if (g_mb2manualblock.integer) {
+	if ((g_mb2manualblock.integer && !g_jk2_102sabersystem.integer)) {
 		trap->Print("BOTEVAL mb2 block: guarded hits blocked %d of which perfect blocks %d, guarded hits that got through %d, disarms %d, hits on players not guarding %d, from behind %d; bot guard frames %d, perfect-block aims %d\n",
 			g_mb2Stats[0], g_mb2Stats[1], g_mb2Stats[2], g_mb2Stats[3], g_mb2Stats[4], g_mb2Stats[5], botEvalMb2Guard, botEvalMb2PbTry);
 		trap->Print("BOTEVAL mb2 block: bot frames backing off with no block points left %d\n", botEvalMb2LowBp);
@@ -1676,7 +1681,7 @@ static void Bot_ForceTactics(bot_state_t* bs) {
 		}
 	} else if ((known & (1 << FP_SABERTHROW)) && ps->weapon == WP_SABER && ps->fd.saberAnimLevel != SS_STAFF && !ps->saberInFlight
 		&& !ps->saberHolstered && ps->fd.forcePower >= 30 && Bot_ForceOK(bs, FP_SABERTHROW, qfalse) && Q_irand(1, 100) <= BT(bs, BT_THROW_CHANCE)) {
-		Bot_HoldButtons(bs, g_mb2manualblock.integer ? (BUTTON_ALT_ATTACK | BUTTON_USE) : BUTTON_ALT_ATTACK, 800);	// with MB2 blocking alt attack alone is the guard
+		Bot_HoldButtons(bs, (g_mb2manualblock.integer && !g_jk2_102sabersystem.integer) ? (BUTTON_ALT_ATTACK | BUTTON_USE) : BUTTON_ALT_ATTACK, 800);	// with MB2 blocking alt attack alone is the guard
 		nextUse[bs->client] = level.time + Q_irand(5000, 9000) * pause / 100;
 		botEvalForceUse[4]++;
 	}
@@ -1771,14 +1776,14 @@ void BotInputToUserCommand(bot_state_t* bs, bot_input_t* bi, usercmd_t* ucmd, in
 	// MB2-style manual blocking (g_mb2manualblock): hold the guard when a saber can reach us, and
 	// aim at the side an incoming swing comes from to perfect-block it. Higher skill reads more
 	// swings and reacts sooner. Alt attack together with use stays the saber throw.
-	if (g_mb2manualblock.integer && cl && cl->ps.weapon == WP_SABER && (ucmd->buttons & BUTTON_USE)
+	if ((g_mb2manualblock.integer && !g_jk2_102sabersystem.integer) && cl && cl->ps.weapon == WP_SABER && (ucmd->buttons & BUTTON_USE)
 		&& !(bs->inputHoldUntil > level.time && (bs->inputHoldButtons & BUTTON_USE))
 		&& !(botUsePress[bs->client] > level.time && botUsePress[bs->client] < level.time + 3000)) {
 		// the old "press use now and then in case something is usable" would turn a guard into a saber
 		// throw (alt attack + use): with MB2 blocking, use is only pressed when meant
 		ucmd->buttons &= ~BUTTON_USE;
 	}
-	if (g_mb2manualblock.integer && cl && cl->ps.weapon == WP_SABER && cl->ps.stats[STAT_HEALTH] > 0
+	if ((g_mb2manualblock.integer && !g_jk2_102sabersystem.integer) && cl && cl->ps.weapon == WP_SABER && cl->ps.stats[STAT_HEALTH] > 0
 		&& !(ucmd->buttons & BUTTON_USE) && !(bs->currentEnemy && bs->currentEnemy->client && bs->frame_Enemy_Vis)) {
 		// no enemy chosen, or not in sight: still guard against anyone swinging a saber close by
 		int i;
@@ -1796,7 +1801,7 @@ void BotInputToUserCommand(bot_state_t* bs, bot_input_t* bi, usercmd_t* ucmd, in
 			}
 		}
 	}
-	if (g_mb2manualblock.integer && cl && cl->ps.weapon == WP_SABER && cl->ps.stats[STAT_HEALTH] > 0
+	if ((g_mb2manualblock.integer && !g_jk2_102sabersystem.integer) && cl && cl->ps.weapon == WP_SABER && cl->ps.stats[STAT_HEALTH] > 0
 		&& bs->currentEnemy && bs->currentEnemy->client && bs->frame_Enemy_Vis && !(ucmd->buttons & BUTTON_USE)) {
 		static int pbMove[MAX_CLIENTS], pbGo[MAX_CLIENTS], mbGo[MAX_CLIENTS];
 		const qboolean wantsSwing = (ucmd->buttons & BUTTON_ATTACK) ? qtrue : qfalse;
@@ -14353,6 +14358,9 @@ void Bot_ExecuteSaberCombat(bot_state_t* bs) {
 				}
 			}
 		}
+		if (g_jk2_102sabersystem.integer && (want == BOTSEQ_ROLLSTAB || want == BOTSEQ_STABDOWN)) {
+			want = 0;	// JK2 1.02 saber system: these JKA moves do not exist in JK2
+		}
 		if (want && !ready && want != BOTSEQ_ROLLSTAB) {
 			// the saber is mid-swing: stop pressing attack for a moment so it returns to ready
 			bs->seqPrepType = want;
@@ -14386,7 +14394,10 @@ void Bot_ExecuteSaberCombat(bot_state_t* bs) {
 	}
 
 	// KATA ATTACK (45% + priority) - DYNAMIC RANGE
-	if (bs->features & BOTF_KATA) {
+	if (g_jk2_102sabersystem.integer) {
+		// JK2 1.02 saber system: JK2 has no katas (attack + alt attack would throw the saber)
+	}
+	else if (bs->features & BOTF_KATA) {
 		// Deliberate kata: only when the engine would accept it (PM_CanDoKata: grounded, saber not
 		// thrown and not mid-move, 50 force) and it has a chance to connect, then hold exactly the
 		// input a kata needs until it starts. If it cannot start, fall through to the other moves
