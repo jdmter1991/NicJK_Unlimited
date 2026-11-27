@@ -9132,7 +9132,7 @@ void PM_FinishWeaponChange( void ) {
 	else if (!pm->ps->stats[STAT_RACEMODE] && (g_tweakWeapons.integer & WT_FAST_WEAPONSWITCH))
 		pm->ps->weaponTime += 25;
 	else
-		pm->ps->weaponTime += 50;
+		pm->ps->weaponTime += 250;	// base JKA, and what the client predicts (an upstream change to 50 made every switch mispredict)
 #else
 		pm->ps->weaponTime += 250;
 #endif
@@ -9384,17 +9384,11 @@ static qboolean PM_DoChargedWeapons( qboolean vehicleRocketLock, bgEntity_t *veh
 			if ( (pm->cmd.buttons & BUTTON_ALT_ATTACK)
 				&& pm->ps->ammo[weaponData[pm->ps->weapon].ammoIndex] >= weaponData[pm->ps->weapon].altEnergyPerShot )
 			{
-#ifdef _GAME
-				if (pm->ps->stats[STAT_RACEMODE]) {
-					PM_RocketLock(2048, qfalse);
-					charging = qtrue;
-				}
-				altFire = qtrue;
-#else
+				// homing lock on both sides (a jaPRO update left it to racemode on the server only, when the old
+				// mortar alt fire moved to the repeater, so homing rockets never locked in normal play)
 				PM_RocketLock(2048,qfalse);
 				charging = qtrue;
 				altFire = qtrue;
-#endif
 			}
 			break;
 

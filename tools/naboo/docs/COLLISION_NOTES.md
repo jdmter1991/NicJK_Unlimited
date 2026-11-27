@@ -299,3 +299,19 @@ a 35 m2 quay stone triangle at x 4745 y 3700 had collision under its four test p
 dropped into the gap under it (4 of 12 stuck bots in run 12). Run 13 (20 min, 31 bots): stuck 2, nobody under the
 ground or fallen out, water 0.5 % at two walkway spots (x 5410 y -4300, x -1900 y 9200; one drowned) - to fix next.
 Beta 6 pk3s installed in the Steam install (beta 5 kept in backups\steam_naboo_beta5).
+
+## Canal water (beta 7)
+
+Bots got into the water at two walkway spots: the east river quay (5410, -4300) and the canal bank below the palace's south side (-1900, 9200). The canals there were dry beds in the source, lying below the river's surface. `canal_water.py` fills them with the river's water: it floods outward from the source's water raster into cells whose terrain is at least 0.3 m below the surface and that have open sky (no collision 0.3 to 25 m above). A filled stretch is kept only when it joins two or more separate pieces of the source's water, inside the playable area. The terrain is not changed. Result: 1,611 cells (6,444 m2) in five stretches. `cook_v1.py` adds them to the `__water_fill` mesh, and the BSP writer turns them into water volumes with the usual bot walls. Full rebuild: `rebuild_world_chain.sh <tag>`.
+
+Run 14 (20 min, 30 bots; the client stalled from lack of memory, server-side data only):
+
+| | before (run 13) | after (run 14) |
+|---|---|---|
+| water samples | 0.51% | 0% |
+| drowned | 1 | 0 |
+| stuck | 2 | 6 |
+| below ground / fell out | 0 / 0 | 0 / 0 |
+| off route | 0.56% | 0.05% |
+
+The stuck spots, for a later look: (-4261, 5186), (-6038, 4131), (-5267, 4131), (4430, -6674), (6909, 1594).

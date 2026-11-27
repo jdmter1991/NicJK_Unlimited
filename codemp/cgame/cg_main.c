@@ -806,6 +806,8 @@ static void CG_RegisterSounds( void ) {
 	//Black
 	cgs.media.blackSaberGlowShader		= trap->R_RegisterShader( "gfx/effects/sabers/blackglow" );
 	cgs.media.blackSaberCoreShader		= trap->R_RegisterShader( "gfx/effects/sabers/blackcore" );
+	cgs.media.redblackSaberGlowShader	= trap->R_RegisterShader( "gfx/effects/sabers/redblackglow" );
+	cgs.media.redblackSaberCoreShader	= trap->R_RegisterShader( "gfx/effects/sabers/redblackcore" );
 	cgs.media.blackBlurShader			= trap->R_RegisterShader( "gfx/effects/sabers/blacktrail" );
 	//rgb
 

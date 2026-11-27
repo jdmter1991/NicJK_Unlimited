@@ -1784,7 +1784,7 @@ void SetupGameGhoul2Model(gentity_t *ent, char *modelname, char *skinName)
 				trap->G2API_GetGLAName( ent->ghoul2, 0, GLAName);
 
 				if (!GLAName[0] || (!strstr(GLAName, "players/_humanoid/") && ent->s.number < MAX_CLIENTS && !G_PlayerHasCustomSkeleton(ent)
-					&& !(g_animRemap.integer && BG_AnimRemap_OwnSkeleton(GLAName)))) // NicJK: a model's own humanoid skeleton (animremap)
+					&& !(g_permodelanims.integer && BG_AnimRemap_OwnSkeleton(GLAName)))) // NicJK: a model's own humanoid skeleton (animremap)
 				{ //a bad model
 					trap->G2API_CleanGhoul2Models(&(ent->ghoul2));
 					ent->ghoul2 = NULL;
@@ -2405,6 +2405,42 @@ float GetModelScale(const char* modelName) {
 	return 1.0f; // Default scale
 }
 
+// modelscale.cfg for a player: the scale the client draws (iModelScale) and the server's box. Used at spawn
+// and when the model changes in game. The config names models without a skin, so "kyle/default" looks
+// up "kyle". A live player whose bigger box would not fit where he stands gets it on a later frame.
+void G_ApplyPlayerModelScale( gentity_t *ent, const char *modelWithSkin, qboolean setBoxNow ) {
+	char model[MAX_QPATH];
+	char *slash;
+	float scale;
+	vec3_t mins, maxs;
+	if ( !ent || !ent->client ) {
+		return;
+	}
+	Q_strncpyz( model, modelWithSkin ? modelWithSkin : "", sizeof( model ) );
+	slash = strchr( model, '/' );
+	if ( slash ) {
+		*slash = 0;
+	}
+	scale = GetModelScale( model );
+	ent->client->ps.iModelScale = (int)( scale * 100.0f );
+	VectorScale( playerMins, scale, mins );
+	VectorScale( playerMaxs, scale, maxs );
+	if ( !setBoxNow && ent->client->sess.sessionTeam != TEAM_SPECTATOR && ent->health > 0 && !ent->client->ps.m_iVehicleNum ) {
+		trace_t tr;
+		trap->Trace( &tr, ent->client->ps.origin, mins, maxs, ent->client->ps.origin, ent->s.number, ent->clipmask ? ent->clipmask : MASK_PLAYERSOLID, qfalse, 0, 0 );
+		if ( tr.startsolid || tr.allsolid ) {
+			ent->client->modelScaleBoxPending = qtrue;
+			return;
+		}
+	}
+	VectorCopy( mins, ent->r.mins );
+	VectorCopy( maxs, ent->r.maxs );
+	ent->client->modelScaleBoxPending = qfalse;
+	if ( ent->r.linked ) {
+		trap->LinkEntity( (sharedEntity_t *)ent );
+	}
+}
+
 // REPLACE your current model scaling section with this:
 /*
 	// MODEL SCALING INTEGRATION - Config file support
@@ -2649,11 +2685,8 @@ qboolean ClientUserinfoChanged(int clientNum) { //I think anything treated as an
 	}
 
 	// MODEL SCALING INTEGRATION - Config file support // Niksata Edit
-	float scale = GetModelScale(model);
-
-	// Set the scale values
-	// client->ps.modelScale = scale; // This field doesn't exist - removed
-	client->ps.iModelScale = (int)(scale * 100.0f); // Niksata Edit
+	// (skin stripped as at spawn, and the box resized too, so a model change in game takes effect at once)
+	G_ApplyPlayerModelScale( ent, model, qfalse );
 
 	//WT_TRIBES
 	if (g_tribesMode.integer && (!client->sess.raceMode || (level.gametype >= GT_TEAM && client->sess.sessionTeam > TEAM_FREE))) {
@@ -3456,7 +3489,7 @@ void G_BreakArm(gentity_t *ent, int arm)
 //Update the ghoul2 instance anims based on the playerstate values
 qboolean BG_SaberStanceAnim( int anim );
 qboolean PM_RunningAnim( int anim );
-// NicJK animremap.cfg: each client's "model/skin" as sent to the other clients
+// NicJK per-model-anims-config.cfg: each client's "model/skin" as sent to the other clients
 static char g_animRemapModel[MAX_CLIENTS][MAX_QPATH];
 
 void G_AnimRemap_SetClientModel(int clientNum, const char *modelSkin)
@@ -3467,7 +3500,7 @@ void G_AnimRemap_SetClientModel(int clientNum, const char *modelSkin)
 
 static qboolean G_AnimRemap_ClientModel(gentity_t *ent, char *model, char *skin, char *gla, int size)
 {
-	if (!g_animRemap.integer || !ent->client || ent->s.number >= MAX_CLIENTS || ent->localAnimIndex != 0)
+	if (!g_permodelanims.integer || !ent->client || ent->s.number >= MAX_CLIENTS || ent->localAnimIndex != 0)
 		return qfalse;
 	BG_AnimRemap_SplitModel(g_animRemapModel[ent->s.number], model, size, skin, size);
 	// the GLA of the server's own Ghoul2 instance: frames from a model's own GLA
@@ -4857,53 +4890,9 @@ void ClientSpawn(gentity_t *ent) {
 	client->inactivityTime = level.time + g_inactivity.integer * 1000;
 	client->latched_buttons = 0;
 
-	// Apply model scale to bounding boxes // Niksata Edit - FIX FOR /default
-
+	// Apply model scale (modelscale.cfg) to the drawn size and the box // Niksata Edit - FIX FOR /default
 	trap->GetUserinfo(ent - g_entities, userinfo, sizeof(userinfo));
-	char* model = Info_ValueForKey(userinfo, "model");
-
-	//Com_Printf("ClientSpawn: raw userinfo model='%s'\n", model); // debug
-
-	// Handle modelname/default format - extract just modelname
-	char cleanModel[MAX_QPATH];
-	char* slashPos = strchr(model, '/');
-	if (slashPos) {
-		// Copy everything before the slash
-		int len = slashPos - model;
-		if (len > 0 && len < MAX_QPATH) {
-			strncpy(cleanModel, model, len);
-			cleanModel[len] = '\0';
-			//Com_Printf("ClientSpawn: extracted clean model='%s' from '%s'\n", cleanModel, model); // debug
-			model = cleanModel;
-		}
-	}
-
-	//Com_Printf("ClientSpawn: final model for scaling='%s'\n", model); //debug
-
-	// Force config reload if needed
-	if (!scaleConfigLoaded) {
-		LoadModelScaleConfig();
-	}
-
-	float scale = GetModelScale(model);
-	//Com_Printf("GetModelScale('%s') returned: %.2f\n", model, scale); //debug
-
-	// Update stored value
-	client->ps.iModelScale = (int)(scale * 100.0f);
-	//Com_Printf("Set iModelScale to: %d\n", client->ps.iModelScale); //debug
-
-	if (scale != 1.0f) {
-		VectorScale(playerMins, scale, ent->r.mins);
-		VectorScale(playerMaxs, scale, ent->r.maxs);
-		/*Com_Printf("Applied scaling: mins=(%.1f,%.1f,%.1f) maxs=(%.1f,%.1f,%.1f)\n",
-			ent->r.mins[0], ent->r.mins[1], ent->r.mins[2],
-			ent->r.maxs[0], ent->r.maxs[1], ent->r.maxs[2]);*/ //debug
-	}
-	else {
-		VectorCopy(playerMins, ent->r.mins);
-		VectorCopy(playerMaxs, ent->r.maxs);
-		//Com_Printf("Used default bounding boxes\n"); //debug
-	} // Niksata Edit
+	G_ApplyPlayerModelScale(ent, Info_ValueForKey(userinfo, "model"), qtrue);
 
 	if (!level.intermissiontime) {
 		if (ent->client->sess.sessionTeam != TEAM_SPECTATOR) {

@@ -3454,6 +3454,7 @@ static void G_GunDuelEndWeapon(gentity_t *ent)
 
 void Cmd_RaceTele_f(gentity_t *ent, qboolean useForce);
 extern void G_MB2BlockThink( gentity_t *ent );
+extern void G_ApplyPlayerModelScale( gentity_t *ent, const char *modelWithSkin, qboolean setBoxNow );
 void ClientThink_real( gentity_t *ent ) {
 	gclient_t	*client;
 	pmove_t		pmove;
@@ -3466,6 +3467,12 @@ void ClientThink_real( gentity_t *ent ) {
 	qboolean	isFollowing;
 
 	G_MB2BlockThink( ent );
+	if ( ent->client->modelScaleBoxPending ) {
+		// model changed in game where the bigger box did not fit: try again until there is room
+		char ui[MAX_INFO_STRING];
+		trap->GetUserinfo( ent - g_entities, ui, sizeof( ui ) );
+		G_ApplyPlayerModelScale( ent, Info_ValueForKey( ui, "model" ), qfalse );
+	}
 
 	client = ent->client;
 
@@ -4926,7 +4933,7 @@ void ClientThink_real( gentity_t *ent ) {
 	pmove.pmove_msec = pmove_msec.integer;
 	pmove.pmove_float = pmove_float.integer;
 
-	pmove.animations = G_AnimRemap_Pmove(ent); // NicJK animremap.cfg: base table unless the model has "timing" lines
+	pmove.animations = G_AnimRemap_Pmove(ent); // NicJK per-model-anims-config.cfg: base table unless the model has "timing" lines
 
 	//rww - bgghoul2
 	pmove.ghoul2 = NULL;

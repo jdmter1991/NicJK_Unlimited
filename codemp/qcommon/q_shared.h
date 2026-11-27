@@ -360,6 +360,7 @@ typedef enum
 	SABER_FLAME2,
 	SABER_ELEC2,
 	SABER_BLACK,
+	SABER_REDBLACK,	// NicJK: like SABER_BLACK, red glow and black core (redblackglow / redblackcore)
 	NUM_SABER_COLORS
 } saber_colors_t;
 

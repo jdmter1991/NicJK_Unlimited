@@ -192,6 +192,8 @@ saber_colors_t TranslateSaberColor( const char *name ) {
 		return SABER_ELEC2;
 	if ( !Q_stricmp( name, "black" ) )
 		return SABER_BLACK;
+	if ( !Q_stricmp( name, "redblack" ) )
+		return SABER_REDBLACK;
 	//rgb
 	if ( !Q_stricmp( name, "random" ) )
 		return (saber_colors_t)Q_irand( SABER_ORANGE, SABER_PURPLE );

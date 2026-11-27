@@ -1851,7 +1851,7 @@ void BG_InitAnimsets(void)
 {
 	memset(&bgAllAnims, 0, sizeof(bgAllAnims));
 	BGPAFtextLoaded = qfalse;	// VVFIXME - The PC doesn't seem to need this, but why?
-	BG_AnimRemap_Reset(); // NicJK animremap.cfg is read again on next use
+	BG_AnimRemap_Reset(); // NicJK per-model-anims-config.cfg is read again on next use
 }
 
 //ALWAYS call on game/cgame shutdown
@@ -2892,7 +2892,7 @@ void BG_SaberStartTransAnim( int clientNum, int saberAnimLevel, int weapon, int 
 			((anim) >= BOTH_T3_BR__R && (anim) <= BOTH_T3_BL_TL))
 		{
 			if (saberAnimLevel == SS_FAST || saberAnimLevel == SS_STRONG) {
-				animSpeed = 0;
+				*animSpeed = 1.0f;	// transitions at normal speed (this used to clear the local pointer, which did the same by accident)
 				return;
 			}
 		}

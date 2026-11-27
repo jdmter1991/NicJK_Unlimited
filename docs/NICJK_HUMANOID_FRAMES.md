@@ -19,8 +19,8 @@ custom frame number moved down by 26273 (old 47649 = new 21376).
 `animation.cfg` is now the stock one (plus stock stand-ins for NicJK's three extra names, BOTH_SABERTAVION_STANCE,
 BOTH_SABERDESANN_STANCE and BOTH_A1_SPECIAL_YODA), with every custom animation listed as comments at the end.
 NicJK's previous versions of the 17 entries that differed from stock are in `animation_nicjk.cfg`
-(renumbered); `docs/animremap.cfg` gives them to Niksata's models (NikolayAngelov*, DarkNicangell*) through
-animremap, so with `cg_animRemap 1` / `g_animRemap 1` those models play exactly what NicJK played before and
+(renumbered); `docs/per-model-anims-config.cfg` gives them to Niksata's models (NikolayAngelov*, DarkNicangell*) through
+animremap, so with `cg_permodelanims 1` / `g_permodelanims 1` those models play exactly what NicJK played before and
 every other model plays the stock animations.
 
 | Frames | Count | Name in animation.cfg comments |

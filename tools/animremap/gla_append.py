@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-gla_append.py - build a per-model GLA for NicJK animremap.cfg
+gla_append.py - build a per-model GLA for NicJK per-model-anims-config.cfg
 
 Appends the animation frames of one or more GLA files to a base GLA
 (normally models/players/_humanoid/_humanoid.gla). All files must have the
@@ -8,7 +8,7 @@ same skeleton (same bones, same order, same parents); the script refuses
 otherwise. The base frames stay at the same frame numbers, so the stock
 _humanoid animation.cfg still describes the result and stock clients play the
 normal animations on it. The appended frames start at the offsets printed
-at the end; give those to "animset" lines in animremap.cfg.
+at the end; give those to "animset" lines in per-model-anims-config.cfg.
 
 Usage:
   python gla_append.py OUT.gla INTERNAL_NAME BASE.gla EXTRA1.gla [EXTRA2.gla ...]
