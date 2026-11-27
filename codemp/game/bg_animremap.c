@@ -502,8 +502,34 @@ static void AR_AddEntry( const char *model, const char *skin, int from, int to, 
 }
 
 // One line's FROM/TO pair, with '*' prefix groups expanded. Returns entries added.
-static int AR_AddPair( const char *model, const char *skin, const char *fromName, const char *toName, int mode, int source, const char *where ) {
+static int AR_AddPair( const char *model, const char *skin, const char *fromName, const char *toName, int mode, qboolean modeGiven, int source, const char *where ) {
 	int fromLen = strlen( fromName ), toLen = strlen( toName );
+
+	if ( !strcmp( fromName, "*" ) && toLen > 2 && !strcmp( toName + toLen - 2, ":*" ) ) {
+		// "* SET:*": every animation of the animset that has a game animation's
+		// name replaces that animation. Without a mode, loops (stances, walks,
+		// runs, in-air) play at their own speed and the rest keep this game's length.
+		char setName[AR_NAME];
+		int s, i, added = 0;
+
+		Q_strncpyz( setName, toName, toLen - 1 < AR_NAME ? toLen - 1 : AR_NAME );
+		s = AR_FindAnimset( setName );
+		if ( s < 0 ) {
+			Com_Printf( S_COLOR_YELLOW "AnimRemap: %s: animset %s must be declared (animset line) before \"* %s\"\n", where, setName, toName );
+			return 0;
+		}
+		for ( i = ar_animsets[s].first; i < ar_animsets[s].first + ar_animsets[s].count; i++ ) {
+			char target[AR_NAME * 2];
+			int id = GetIDForString( animTable, ar_setAnims[i].name );
+			if ( id < 0 )
+				continue;
+			Com_sprintf( target, sizeof( target ), "%s:%s", setName, ar_setAnims[i].name );
+			AR_AddEntry( model, skin, id, -1, target,
+				modeGiven ? mode : ( ar_setAnims[i].anim.loopFrames != -1 ? AR_FREE : AR_FIT ), source );
+			added++;
+		}
+		return added;
+	}
 
 	if ( strchr( toName, ':' ) ) {
 		// replacement from an animset; resolved when the model is built (the
@@ -647,7 +673,7 @@ static void AR_ParseFile( const char *filename, const char *fixedModel ) {
 			}
 		}
 		mode = ( n > need ) ? AR_ParseMode( tok[need], where ) : AR_FIT;
-		added += AR_AddPair( model, skin, tok[need - 2], tok[need - 1], mode, source, where );
+		added += AR_AddPair( model, skin, tok[need - 2], tok[need - 1], mode, n > need ? qtrue : qfalse, source, where );
 	}
 	free( buf );
 	Com_Printf( "AnimRemap: %d remaps from %s\n", added, filename );
