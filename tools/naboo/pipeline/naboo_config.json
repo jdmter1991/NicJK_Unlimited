@@ -115,7 +115,8 @@
   "line_tolerance": 0.05,
   "merge_max_corners": 12,
   "merge_max_extent": 1024.0,
-  "bot_wall_above": 1200.0
+  "bot_wall_above": 1200.0,
+  "dry_bed_below": -140.0
  },
  "shadow": {
   "size": 6912,
@@ -185,5 +186,12 @@
    "lawn_only": true,
    "min_grass": 0.5
   }
- ]
+ ],
+ "backdrop_skirts": {
+  "objects": [
+   "naboobackdropcanal",
+   "canal_boardwalk",
+   "canalfoundation"
+  ]
+ }
 }
