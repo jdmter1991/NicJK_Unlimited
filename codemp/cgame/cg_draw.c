@@ -10336,10 +10336,15 @@ void CG_DrawCloakFuel(void)
 	float x = SCREEN_WIDTH - (SCREEN_WIDTH - CLFUELBAR_X)*cgs.widthRatioCoef;
 	float y = CLFUELBAR_Y;
 	float percent = ((float)cg.snap->ps.cloakFuel/100.0f)*CLFUELBAR_H;
+	// MB2-style manual block: the server keeps the block points in cloakFuel; drawn gold with a label,
+	// and also while guarding at full points
+	const qboolean mb2 = ( cgs.mb2manualblock && cg.snap->ps.weapon == WP_SABER ) ? qtrue : qfalse;
 
 	if (percent > CLFUELBAR_H)
 	{
-		return;
+		if ( !mb2 )
+			return;
+		percent = CLFUELBAR_H;
 	}
 
 	if ( cg.snap->ps.jetpackFuel < 100 )
@@ -10363,6 +10368,34 @@ void CG_DrawCloakFuel(void)
 	cColor[1] = 0.1f;
 	cColor[2] = 0.3f;
 	cColor[3] = 0.1f;
+
+	if ( mb2 )
+	{
+		vec4_t tColor = { 1.0f, 0.85f, 0.3f, 1.0f };
+		const int bp = cg.snap->ps.cloakFuel;
+		const char *label = cg.snap->ps.userInt2 ? "MANUAL" : ( cg.snap->ps.userInt3 ? "GUARD" : "BLOCK" );
+		// gold, turning red as the points run out
+		aColor[0] = 0.9f;
+		aColor[1] = 0.15f + 0.55f * ( bp > 100 ? 1.0f : bp / 100.0f );
+		aColor[2] = 0.05f;
+		aColor[3] = cg.snap->ps.userInt3 ? 0.95f : 0.7f;
+		cColor[0] = 0.3f;
+		cColor[1] = 0.2f;
+		cColor[2] = 0.05f;
+		cColor[3] = 0.15f;
+		if ( cg.snap->ps.userInt2 )
+		{	// manual block open: blue, as MB2 shows a successful one
+			tColor[0] = 0.4f; tColor[1] = 0.7f; tColor[2] = 1.0f;
+		}
+		else if ( !cg.snap->ps.userInt3 )
+		{
+			tColor[0] = 0.8f; tColor[1] = 0.8f; tColor[2] = 0.8f; tColor[3] = 0.8f;
+		}
+		CG_Text_Paint( x + ( CLFUELBAR_W * cgs.widthRatioCoef - CG_Text_Width( label, 0.5f, FONT_SMALL ) ) * 0.5f,
+			y - 2.0f * CG_Text_Height( label, 0.5f, FONT_SMALL ) - 9.0f, 0.5f, tColor, label, 0, 0, ITEM_TEXTSTYLE_SHADOWED, FONT_SMALL );
+		CG_Text_Paint( x + ( CLFUELBAR_W * cgs.widthRatioCoef - CG_Text_Width( va( "%i", bp ), 0.5f, FONT_SMALL ) ) * 0.5f,
+			y - CG_Text_Height( "0", 0.5f, FONT_SMALL ) - 5.0f, 0.5f, tColor, va( "%i", bp ), 0, 0, ITEM_TEXTSTYLE_SHADOWED, FONT_SMALL );
+	}
 
 	//draw the background (black)
 	CG_DrawRect(x, y, CLFUELBAR_W * cgs.widthRatioCoef, CLFUELBAR_H, 1.0f, colorTable[CT_BLACK]);
@@ -11573,8 +11606,9 @@ static void CG_Draw2D( void ) {
 		}
 
 	}
-	if (cg.snap->ps.cloakFuel < 100)
-	{ //draw it as long as it isn't full
+	if (cg.snap->ps.cloakFuel < 100
+		|| (cgs.mb2manualblock && cg.snap->ps.weapon == WP_SABER && cg.snap->ps.userInt3))
+	{ //draw it as long as it isn't full (MB2 block points: also while guarding)
 		CG_DrawCloakFuel();
 	}
 	if (cg.predictedPlayerState.emplacedIndex > 0)
