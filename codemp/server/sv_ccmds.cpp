@@ -191,7 +191,13 @@ static void SV_Map_f( void ) {
 	}
 
 	Com_sprintf (expanded, sizeof(expanded), "maps/%s.bsp", map);
-	if ( FS_ReadFile (expanded, NULL) == -1 ) {
+	// opened with the 64-bit length: FS_ReadFile reports -1 for a .bsp of 2 GB or more (a big map)
+	fileHandle_t mapFile;
+	FS_FOpenFileReadLarge( expanded, &mapFile );
+	if ( mapFile ) {
+		FS_FCloseFile( mapFile );
+	}
+	if ( !mapFile ) {
 		Com_Printf ("Can't find map %s\n", expanded);
 		return;
 	}

@@ -2906,7 +2906,8 @@ qboolean G_VoteMap( gentity_t *ent, int numArgs, const char *arg1, const char *a
 	}
 
 	Com_sprintf( bspName, sizeof(bspName), "maps/%s.bsp", arg2 );
-	if ( trap->FS_Open( bspName, &fp, FS_READ ) <= 0 ) {
+	// a missing map leaves no handle; the length alone can't tell, since a .bsp of 2 GB or more (a big map) wraps it
+	if ( trap->FS_Open( bspName, &fp, FS_READ ) == 0 || fp == NULL_FILE ) {
 		trap->SendServerCommand( ent-g_entities, va( "print \"Can't find map %s on server\n\"", bspName ) );
 		if( fp != NULL_FILE )
 			trap->FS_Close( fp );

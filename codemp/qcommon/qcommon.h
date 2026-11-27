@@ -711,6 +711,10 @@ qboolean FS_FindPureDLL(const char *name);
 int		FS_Write( const void *buffer, int len, fileHandle_t f );
 
 int		FS_Read( void *buffer, int len, fileHandle_t f );
+int64_t	FS_FOpenFileReadLarge( const char *qpath, fileHandle_t *file );
+// FS_FOpenFileRead with a 64-bit length, for files of 2 GB or more (big maps); -1 if not found
+int64_t	FS_ReadLarge( void *buffer, int64_t len, fileHandle_t f );
+// FS_Read for lengths of 2 GB or more
 // properly handles partial reads and reads from other dlls
 
 void	FS_FCloseFile( fileHandle_t f );
@@ -847,6 +851,8 @@ void		Com_MPause_f(void);
 int			Com_EventLoop( void );
 int			Com_Milliseconds( void );	// will be journaled properly
 uint32_t	Com_BlockChecksum( const void *buffer, int length );
+uint32_t	Com_BlockChecksumLarge( const void *buffer, size_t length );
+// the same checksum for buffers of 2 GB or more (equal to Com_BlockChecksum below 2 GB)
 char		*Com_MD5File(const char *filename, int length, const char *prefix, int prefix_len);
 int      Com_HashKey(char *string, int maxlen);
 int			Com_Filter(char *filter, char *name, int casesensitive);
@@ -967,6 +973,7 @@ void *S_Malloc	( int iSize );					// NOT 0 filled memory only for small allocati
 void *Z_Malloc  ( int iSize, memtag_t eTag, qboolean bZeroit = qfalse, int iAlign = 4);	// return memory NOT zero-filled by default
 void *S_Malloc	( int iSize );					// NOT 0 filled memory only for small allocations
 #endif
+void *Z_MallocLarge( size_t iSize, memtag_t eTag, qboolean bZeroit = qfalse );	// Z_Malloc for 2 GB or more (a big map .bsp image)
 void  Z_MorphMallocTag( void *pvBuffer, memtag_t eDesiredTag );
 void  Z_Validate( void );
 int   Z_MemSize	( memtag_t eTag );

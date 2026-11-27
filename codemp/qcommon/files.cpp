@@ -1951,6 +1951,65 @@ int FS_Read( void *buffer, int len, fileHandle_t f ) {
 
 /*
 =================
+FS_FOpenFileReadLarge
+
+FS_FOpenFileRead for files that may be 2 GB or larger (a big map's .bsp). The length is measured with 64-bit file
+positions, so it is right past 2 GB, where FS_FOpenFileRead's long (32 bits on Windows) wraps. Files in a pk3 are
+always below 2 GB (the zip reader has no zip64), so their length comes from the pk3 directory as before.
+Returns the length, or -1 if the file was not found (*file is 0 then).
+=================
+*/
+int64_t FS_FOpenFileReadLarge( const char *qpath, fileHandle_t *file ) {
+	const long len = FS_FOpenFileRead( qpath, file, qfalse );
+	if ( !*file ) {
+		return -1;
+	}
+	if ( fsh[*file].zipFile ) {
+		return len;
+	}
+	FILE *fp = fsh[*file].handleFiles.file.o;
+#ifdef _WIN32
+	const __int64 pos = _ftelli64( fp );
+	_fseeki64( fp, 0, SEEK_END );
+	const __int64 end = _ftelli64( fp );
+	_fseeki64( fp, pos, SEEK_SET );
+#else
+	const off_t pos = ftello( fp );
+	fseeko( fp, 0, SEEK_END );
+	const off_t end = ftello( fp );
+	fseeko( fp, pos, SEEK_SET );
+#endif
+	return end < 0 ? -1 : (int64_t)end;
+}
+
+/*
+=================
+FS_ReadLarge
+
+FS_Read for lengths of 2 GB or more: reads in blocks of 256 MB. Returns the number of bytes read.
+=================
+*/
+int64_t FS_ReadLarge( void *buffer, int64_t len, fileHandle_t f ) {
+	const int64_t	block = 256 * 1024 * 1024;
+	byte			*buf = (byte *)buffer;
+	int64_t			done = 0;
+
+	while ( done < len ) {
+		const int want = (int)( ( len - done ) < block ? ( len - done ) : block );
+		const int got = FS_Read( buf + done, want, f );
+		if ( got <= 0 ) {
+			break;
+		}
+		done += got;
+		if ( got < want ) {
+			break;
+		}
+	}
+	return done;
+}
+
+/*
+=================
 FS_Write
 
 Properly handles partial writes

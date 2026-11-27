@@ -206,3 +206,30 @@ uint32_t Com_BlockChecksum (const void *buffer, int length)
 
 	return val;
 }
+
+/*
+Com_BlockChecksumLarge: Com_BlockChecksum for buffers of 2 GB or more (a big map's .bsp). The same steps as mdfour():
+whole 64-byte blocks, then the tail, with the same 32-bit running length, so below 2 GB the result equals
+Com_BlockChecksum's and checksums stay compatible with older builds.
+*/
+uint32_t Com_BlockChecksumLarge (const void *buffer, size_t length)
+{
+	int				digest[4];
+	mdfour_ctx		md;
+	uint32_t		M[16];
+	byte			*in = (byte *)buffer;
+
+	mdfour_begin(&md);
+	m = &md;
+	while (length >= 64) {
+		copy64(M, in);
+		mdfour64(M);
+		in += 64;
+		length -= 64;
+		m->totalN += 64;
+	}
+	mdfour_tail(in, (int)length);
+	mdfour_result(&md, (byte *)digest);
+
+	return digest[0] ^ digest[1] ^ digest[2] ^ digest[3];
+}
