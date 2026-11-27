@@ -35,6 +35,14 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "bg_local.h"
 #include "w_saber.h"
 
+// declared before use (GCC/Clang reject implicit declarations)
+extern qboolean WP_ForcePowerUsable( gentity_t *self, forcePowers_t forcePower );
+extern void WP_ForcePowerStart( gentity_t *self, forcePowers_t forcePower, int overrideAmt );
+extern int WP_AbsorbConversion( gentity_t *attacked, int atdAbsLevel, gentity_t *attacker, int atPower, int atPowerLevel, int atForceSpent );
+extern void DoGripAction( gentity_t *self, forcePowers_t forcePower );
+extern int ForceShootDrain( gentity_t *self );
+extern void ForceShootLightning( gentity_t *self );
+
 extern int forcePowerNeeded[NUM_FORCE_POWER_LEVELS][NUM_FORCE_POWERS];
 extern int g_LastFrameTime;
 extern int speedLoopSound;

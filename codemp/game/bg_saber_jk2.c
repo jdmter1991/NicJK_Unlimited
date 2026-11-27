@@ -34,6 +34,9 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "bg_public.h"
 #include "bg_local.h"
 
+// declared before use (GCC/Clang reject implicit declarations)
+extern void BG_SetAnim(playerState_t *ps, animation_t *animations, int setAnimParts, int anim, int setAnimFlags);
+
 #if defined(_GAME)
 	#include "g_local.h"
 #elif defined(_CGAME)

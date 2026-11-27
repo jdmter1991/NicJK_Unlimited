@@ -5831,7 +5831,42 @@ CG_DrawFPS
 ==================
 */
 #define	FPS_FRAMES	60 //increased from 16 for accuracy
+
+// cg_drawFPSGraph: the time of each of the last FPS_GRAPH_FRAMES frames as bars under the FPS counter,
+// green up to 8 ms (125 fps), yellow up to 16.7 ms (60 fps), red beyond; the grey line marks 16.7 ms.
+#define	FPS_GRAPH_FRAMES	120
+static int fpsGraphTimes[FPS_GRAPH_FRAMES], fpsGraphIndex;
+static float CG_DrawFPSGraph( float y ) {
+	const float h = 30.0f, maxMs = 33.3f;
+	const float barW = 1.0f * cgs.widthRatioCoef;
+	const float w = FPS_GRAPH_FRAMES * barW;
+	const float x0 = SCREEN_WIDTH - 5 - w;
+	vec4_t back = { 0.0f, 0.0f, 0.0f, 0.45f }, line = { 0.6f, 0.6f, 0.6f, 0.8f };
+	int i;
+	CG_FillRect( x0, y, w, h, back );
+	for ( i = 0; i < FPS_GRAPH_FRAMES; i++ ) {
+		const int ms = fpsGraphTimes[( fpsGraphIndex + i ) % FPS_GRAPH_FRAMES];
+		float bh = h * ( ms > maxMs ? 1.0f : ms / maxMs );
+		vec4_t c = { 0.2f, 0.9f, 0.2f, 0.9f };
+		if ( ms > 16 ) { c[0] = 0.95f; c[1] = 0.2f; }
+		else if ( ms > 8 ) { c[0] = 0.95f; c[1] = 0.85f; }
+		if ( bh < 1.0f ) bh = 1.0f;
+		CG_FillRect( x0 + i * barW, y + h - bh, barW, bh, c );
+	}
+	CG_FillRect( x0, y + h - h * ( 16.7f / maxMs ), w, 1.0f, line );
+	return y + h + 4;
+}
+
+static float CG_DrawFPSText( float y );
 static float CG_DrawFPS( float y ) {
+	y = CG_DrawFPSText( y );
+	if ( cg_drawFPSGraph.integer ) {
+		y = CG_DrawFPSGraph( y + 2 );
+	}
+	return y;
+}
+
+static float CG_DrawFPSText( float y ) {
 	char		*s;
 	static unsigned short previousTimes[FPS_FRAMES], index;
 	static int	previous;
@@ -5846,6 +5881,8 @@ static float CG_DrawFPS( float y ) {
 	previous = t;
 
 	previousTimes[index % FPS_FRAMES] = frameTime;
+	fpsGraphTimes[fpsGraphIndex % FPS_GRAPH_FRAMES] = frameTime;
+	fpsGraphIndex = ( fpsGraphIndex + 1 ) % FPS_GRAPH_FRAMES;
 	index++;
 	// average multiple frames together to smooth changes out a bit
 	total = 0;

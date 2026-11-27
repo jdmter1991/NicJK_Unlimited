@@ -55,6 +55,9 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 
 // JK2 1.02 mode: heal costs 25 at every rank, so the bots read the force table instead of the JKA threshold
 extern int forcePowerNeeded[NUM_FORCE_POWER_LEVELS][NUM_FORCE_POWERS];
+// declared before first use (GCC/Clang reject implicit declarations; MSVC accepted them)
+extern qboolean BG_SabersOff( playerState_t *ps );
+static qboolean BotNav_PathClear(bot_state_t* bs, vec3_t dir, float dist, float raise);
 #define BOT_HEAL_NEED(ps, base) ( g_jk2_102sabersystem.integer ? forcePowerNeeded[(ps)->fd.forcePowerLevel[FP_HEAL]][FP_HEAL] : (base) )
 
 
