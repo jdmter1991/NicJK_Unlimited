@@ -144,6 +144,14 @@ the normal ones.
    Remap lines still work on top (a replacement then comes from the model's own
    table). A client without the feature (or a stock client) shows Kyle, as
    before. The server poses Kyle for saber hits unless `d_perPlayerGhoul2` is on.
+   **Any model on any such skeleton, from the cfg:** `skeleton MODEL GLA`
+   (e.g. `skeleton kyle models/players/_humanoid_vader/_humanoid`) makes the
+   renderer load that GLA for the model instead of the one in its `.glm`
+   header (rd-common/tr_animremap_gla.h, called where every renderer loads a
+   `.glm`: rd-vulkan, rd-vanilla, rd-rend2 and rd-dedicated). From then on it
+   is the same as a model that names the GLA itself. Models are cached, so a
+   changed line applies after `vid_restart` or a restart. A client whose
+   renderer is not NicJK's, or with `cg_animRemap 0`, shows the model as usual.
 2. **Model's own GLA = humanoid frames + extra frames appended**. The
    GLA sits in `models/players/_humanoid/` (accepted everywhere, like Talon),
    frames 0..21375 are byte-identical to `_humanoid.gla`, so the stock
@@ -211,3 +219,6 @@ happened with remaps off too; not checked whether stock JA does the same.
 * `codemp/game/g_svcmds.c`, `codemp/cgame/cg_consolecmds.c` - list/reload.
 * `codemp/game/bg_panimate.c` - remaps are cleared with the anim sets.
 * `tools/animremap/gla_append.py` - builds a model's own GLA.
+* `codemp/rd-common/tr_animremap_gla.h` + one line in each renderer's `.glm`
+  loader (rd-vulkan, rd-vanilla, rd-rend2, rd-dedicated) - `skeleton` lines.
+* `codemp/game/bg_public.h` - `MAX_ANIM_EVENTS` 300 -> 512.

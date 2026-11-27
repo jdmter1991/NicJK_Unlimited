@@ -288,8 +288,10 @@ static arSkel_t *AR_FindSkel( const char *glaIn ) {
 	int i, hBones, bones, hEnd, end, found, missing = 0;
 
 	AR_NormalizeGLA( glaIn, gla, sizeof( gla ) );
-	if ( !gla[0] || strstr( gla, "players/_humanoid/" ) || !humanoid )
+	if ( !gla[0] || strstr( gla, "players/_humanoid/" ) )
 		return NULL; // the normal skeleton folder: nothing special
+	// note: this must not need the humanoid table; the first model a client
+	// registers is checked before that table is loaded
 	for ( i = 0; i < ar_numSkels; i++ ) {
 		if ( !strcmp( ar_skels[i].gla, gla ) )
 			return ar_skels[i].ok ? &ar_skels[i] : NULL;
@@ -319,14 +321,17 @@ static arSkel_t *AR_FindSkel( const char *glaIn ) {
 		Com_Printf( S_COLOR_YELLOW "AnimRemap: %s.gla has no readable %s; the model is replaced as usual\n", gla, folderCfg );
 		return NULL;
 	}
-	// animations this game uses that the file lacks: the model's standing idle
+	// animations this game knows that the file lacks: the model's standing idle
+	// (named in the console when the humanoid table says this game uses them)
 	for ( i = 0; i < MAX_ANIMATIONS; i++ ) {
-		if ( humanoid[i].numFrames > 0 && s->table[i].numFrames <= 0 ) {
+		if ( s->table[i].numFrames > 0 )
+			continue;
+		if ( humanoid && humanoid[i].numFrames > 0 ) {
 			if ( missing < 8 )
 				Com_Printf( "AnimRemap: %s: no %s, using its BOTH_STAND1\n", folderCfg, GetStringForID( animTable, i ) );
-			s->table[i] = s->table[BOTH_STAND1];
 			missing++;
 		}
+		s->table[i] = s->table[BOTH_STAND1];
 	}
 	// a slot so the model's animevents.cfg is read against its own frames, and so
 	// a plain BG_ParseAnimationFile of this cfg finds it instead of reading the file
@@ -604,6 +609,12 @@ static void AR_ParseFile( const char *filename, const char *fixedModel ) {
 				Q_strncpyz( tok[n++], t, MAX_QPATH );
 		}
 
+		if ( !Q_stricmp( tok[0], "skeleton" ) ) {
+			// skeleton MODEL GLA: read by the renderer when the model is loaded
+			// (rd-common/tr_animremap_gla.h); the model then shows up here with
+			// that GLA and is drawn with the animation.cfg next to it
+			continue;
+		}
 		if ( !Q_stricmp( tok[0], "animset" ) ) {
 			if ( n < 4 ) {
 				Com_Printf( S_COLOR_YELLOW "AnimRemap: %s: expected animset NAME GLA ANIMATION_CFG [OFFSET]\n", where );

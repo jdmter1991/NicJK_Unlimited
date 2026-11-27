@@ -25,6 +25,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "tr_cache.h"
 #include <qcommon/sstring.h>
 #include <qcommon/matcomp.h>
+#include "rd-common/tr_animremap_gla.h"
 
 #define	LL(x) x=LittleLong(x)
 
@@ -553,6 +554,7 @@ qboolean R_LoadMDXM_Server( model_t *mod, void *buffer, const char *mod_name, qb
 	}
 
 	// first up, go load in the animation file we need that has the skeletal animation info for this model
+	R_AnimRemapGLAOverride( mod_name, mdxm->animName, sizeof( mdxm->animName ) ); // NicJK animremap.cfg "skeleton" lines
 	mdxm->animIndex = RE_RegisterServerModel(va ("%s.gla",mdxm->animName));
 	if (!mdxm->animIndex)
 	{

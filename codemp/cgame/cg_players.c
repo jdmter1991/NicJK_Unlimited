@@ -475,6 +475,14 @@ static qboolean CG_RegisterClientModelname( clientInfo_t *ci, const char *modelN
 retryModel:
 	if (badModel)
 	{
+		// NicJK: the default model itself was rejected (e.g. an animremap.cfg
+		// "skeleton" line gave it a GLA that is not humanoid): stop instead of
+		// retrying the same model forever
+		if (modelName && !Q_stricmp(modelName, DEFAULT_MODEL))
+		{
+			Com_Printf(S_COLOR_YELLOW "WARNING: default model %s could not be used (check animremap.cfg skeleton lines)\n", DEFAULT_MODEL);
+			return qfalse;
+		}
 #if 0
 		if (modelName && modelName[0])
 		{
@@ -575,6 +583,10 @@ retryModel:
 		{	// Didn't find any slashes, this is a raw filename right in base (whish isn't a good thing)
 			return qfalse;
 		}
+
+		// NicJK animremap: a model on its own humanoid skeleton still plays the humanoid game table
+		if (cg_animRemap.integer && BG_AnimRemap_OwnSkeleton(GLAName))
+			Q_strncpyz( afilename, "models/players/_humanoid/animation.cfg", sizeof( afilename ) );
 
 		//rww - All player models must use humanoid, no matter what.
 		if (Q_stricmp(afilename, "models/players/_humanoid/animation.cfg") /*&&

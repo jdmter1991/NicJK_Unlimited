@@ -266,7 +266,7 @@ models/players/visor/animation.cfg, etc
 
 ======================
 */
-static char UIPAFtext[60000];
+static char UIPAFtext[262144]; // NicJK: was 60000; per-model animation.cfg files (MovieDuels) are up to 122 KB
 int UI_ParseAnimationFile(const char *filename, animation_t *animset, qboolean isHumanoid)
 {
 	char		*text_p;

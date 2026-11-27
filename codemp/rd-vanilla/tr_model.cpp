@@ -29,6 +29,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 
 #include <vector>
 #include <map>
+#include "rd-common/tr_animremap_gla.h"
 
 #define	LL(x) x=LittleLong(x)
 #define	LS(x) x=LittleShort(x)
@@ -874,6 +875,7 @@ qboolean ServerLoadMDXM( model_t *mod, void *buffer, const char *mod_name, qbool
 	}
 
 	// first up, go load in the animation file we need that has the skeletal animation info for this model
+	R_AnimRemapGLAOverride( mod_name, mdxm->animName, sizeof( mdxm->animName ) ); // NicJK animremap.cfg "skeleton" lines
 	mdxm->animIndex = RE_RegisterServerModel(va ("%s.gla",mdxm->animName));
 	if (!mdxm->animIndex)
 	{
