@@ -469,8 +469,16 @@ QINLINE int PM_GetMovePhysics(void)
 int PM_GetSaberStance(void)
 {
 	int anim = BOTH_STAND2;
-	saberInfo_t *saber1 = BG_MySaber( pm->ps->clientNum, 0 );
-	saberInfo_t *saber2 = BG_MySaber( pm->ps->clientNum, 1 );
+	saberInfo_t *saber1;
+	saberInfo_t *saber2;
+
+	if (JK2SABER())
+	{ // JK2 1.02 saber system: the three JK2 stances only
+		return PM_GetSaberStance_JK2();
+	}
+
+	saber1 = BG_MySaber( pm->ps->clientNum, 0 );
+	saber2 = BG_MySaber( pm->ps->clientNum, 1 );
 
 	if (!pm->ps->saberEntityNum)
 	{ //lost it
@@ -4480,6 +4488,11 @@ static qboolean PM_CheckJump( void )
 		}
 	}
 
+	if (JK2SABER())
+	{ // JK2 1.02 saber system: 1.02 yellow flip and red jump-hack (mv bg_pmove.c:1293-1345)
+		PM_CheckJumpAttack_JK2();
+	}
+	else
 #ifdef _GAME
 	if ((g_tweakSaber.integer & ST_JK2RDFA) && !pm->ps->stats[STAT_RACEMODE])
 #else
@@ -6271,9 +6284,9 @@ static int PM_TryRoll( void )
 		}
 
 #ifdef _GAME
-	if (!(g_tweakSaber.integer & ST_ALLOW_ROLLCANCEL) || pm->ps->stats[STAT_RACEMODE]) {
+	if ((!(g_tweakSaber.integer & ST_ALLOW_ROLLCANCEL) || pm->ps->stats[STAT_RACEMODE]) && !JK2SABER()) {
 #else
-	if (!(cgs.jcinfo & JAPRO_CINFO_ROLLCANCEL) || IsRacemode(pm->ps)) {
+	if ((!(cgs.jcinfo & JAPRO_CINFO_ROLLCANCEL) || IsRacemode(pm->ps)) && !JK2SABER()) {
 #endif
 		if ( BG_SaberInAttack( pm->ps->saberMove ) || BG_SaberInSpecialAttack( pm->ps->torsoAnim )
 			|| BG_SpinningSaberAnim( pm->ps->legsAnim )
@@ -9098,7 +9111,10 @@ void PM_FinishWeaponChange( void ) {
 
 	if (weapon == WP_SABER)
 	{
-		PM_SetSaberMove(LS_DRAW);
+		if (JK2SABER())
+			PM_SetSaberMove_JK2(LS_DRAW); // JK2 1.02 saber system
+		else
+			PM_SetSaberMove(LS_DRAW);
 	}
 	else
 	{
@@ -10397,7 +10413,10 @@ if (pm->ps->duelInProgress)
 	if (pm->ps->weapon == WP_SABER)
 	{
 		//rww - we still need the item stuff, so we won't return immediately
-		PM_WeaponLightsaber();
+		if (JK2SABER())
+			PM_WeaponLightsaber_JK2(); // JK2 1.02 saber system
+		else
+			PM_WeaponLightsaber();
 		killAfterItem = 1;
 	}
 	else if (pm->ps->weapon != WP_EMPLACED_GUN)
@@ -12095,7 +12114,7 @@ void BG_AdjustClientSpeed(playerState_t *ps, usercmd_t *cmd, int svTime)
 	}
 
 
-	if ( cmd->forwardmove < 0 && !(cmd->buttons&BUTTON_WALKING) && pm->ps->groundEntityNum != ENTITYNUM_NONE && !JK2SWINGS(ps) )
+	if ( cmd->forwardmove < 0 && !(cmd->buttons&BUTTON_WALKING) && pm->ps->groundEntityNum != ENTITYNUM_NONE && !JK2SWINGS(ps) && !JK2SABER() )
 	{//running backwards is slower than running forwards (like SP)
 #ifdef _GAME
 		if (!(g_tweakSaber.integer & ST_ALLOW_ROLLCANCEL) || pm->ps->stats[STAT_RACEMODE])
@@ -12183,7 +12202,7 @@ void BG_AdjustClientSpeed(playerState_t *ps, usercmd_t *cmd, int svTime)
 	}
 	else if ( BG_SpinningSaberAnim( ps->legsAnim ) )
 	{
-		if (ps->fd.saberAnimLevel == FORCE_LEVEL_3 && !JK2SWINGS(ps))
+		if (ps->fd.saberAnimLevel == FORCE_LEVEL_3 && !JK2SWINGS(ps) && !JK2SABER())
 		{
 			ps->speed *= 0.3f;
 		}
@@ -12202,13 +12221,13 @@ void BG_AdjustClientSpeed(playerState_t *ps, usercmd_t *cmd, int svTime)
 			ps->speed *= 0.85f;
 			break;
 		case FORCE_LEVEL_3:
-			ps->speed *= JK2SWINGS(ps) ? 0.70f : 0.55f;
+			ps->speed *= (JK2SWINGS(ps) || JK2SABER()) ? 0.70f : 0.55f;
 			break;
 		default:
 			break;
 		}
 	}
-	else if (ps->weapon == WP_SABER && ps->fd.saberAnimLevel == FORCE_LEVEL_3 && !JK2SWINGS(ps) &&
+	else if (ps->weapon == WP_SABER && ps->fd.saberAnimLevel == FORCE_LEVEL_3 && !JK2SWINGS(ps) && !JK2SABER() &&
 		PM_SaberInTransition(ps->saberMove))
 	{ //Now, we want to even slow down in transitions for level 3 (since it has chains and stuff now)
 		if (cmd->forwardmove < 0)
@@ -14271,6 +14290,16 @@ void PmoveSingle (pmove_t *pmove) {
 	{
 		stiffenedUp = qtrue;
 	}
+	else if ( JK2SABER() && pm->ps->saberLockTime >= pm->cmd.serverTime )
+	{ // JK2 1.02 saber system: in a lock you keep pushing forward (mv bg_pmove.c:4629-4634), no turn lock
+		pm->cmd.upmove = 0;
+		pm->cmd.forwardmove = 50;
+		pm->cmd.rightmove = 0;
+	}
+	else if ( JK2SABER() && pm->ps->weapon == WP_SABER &&
+		( BG_SaberInSpecial_JK2( pm->ps->saberMove ) || BG_SaberInSpecialAttack_JK2( pm->ps->legsAnim ) ) )
+	{ // JK2 1.02 saber system: 1.02 has no movement lock or view spin during the special moves
+	}
 	else if ( BG_SaberLockBreakAnim( pm->ps->legsAnim )
 		|| BG_SaberLockBreakAnim( pm->ps->torsoAnim )
 		|| pm->ps->saberLockTime >= pm->cmd.serverTime )
@@ -14735,6 +14764,10 @@ void PmoveSingle (pmove_t *pmove) {
 	PM_AdjustAngleForWallRun( pm->ps, &pm->cmd, qtrue );
 
 //[JAPRO - Serverside + Clientside - Saber - Spin Red DFA , Spin Backslash - Start]
+	if (JK2SABER())
+	{ // JK2 1.02 saber system: no view lock during lunge, DFA or back attacks (mv bg_pmove.c:4578-4582)
+	}
+	else
 #ifdef _GAME
 	if (pm->ps->saberMove == LS_A_BACKSTAB && !(g_tweakSaber.integer & ST_SPINBACKSLASH))
 		PM_SetPMViewAngle(pm->ps, pm->ps->viewangles, &pm->cmd);
