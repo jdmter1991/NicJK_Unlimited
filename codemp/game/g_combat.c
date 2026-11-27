@@ -2226,6 +2226,12 @@ void player_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 		return;
 	}
 
+	// map testing: where players die and how (water, falling, suicide point at holes and bad edges in a map)
+	if ( g_logDeathPos.integer ) {
+		G_LogPrintf( "DeathPos: %i %i %.0f %.0f %.0f %s\n", meansOfDeath, self->s.number,
+			self->client->ps.origin[0], self->client->ps.origin[1], self->client->ps.origin[2], self->client->pers.netname );
+	}
+
 #if _GRAPPLE
 	if (self->client && self->client->hook)
 		Weapon_HookFree(self->client->hook);

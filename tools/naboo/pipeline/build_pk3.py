@@ -11,14 +11,14 @@ tag = sys.argv[4] if len(sys.argv) > 4 else "beta1"
 os.makedirs(out, exist_ok=True)
 LIMIT = 1900 * 1024 * 1024
 t0 = time.time()
-maps = [f for f in ("%s.bsp %s.tworld %s.tpbr %s.tuv2 %s.tao %s.tsky %s.tlights %s.tportal %s.tshadow %s_shadow.dds" % ((mapname,) * 10)).split()
+maps = [f for f in ("%s.bsp %s.tworld %s.tpbr %s.tuv2 %s.tao %s.tsky %s.tlights %s.tlampocc %s.tportal %s.tshadow %s_shadow.dds" % ((mapname,) * 11)).split()
         if os.path.exists(os.path.join(mod, "maps", f))]
 shaders = ["naboo_%s.shader" % mapname, "naboo_sys.shader", "naboo_doors.shader"]
 small = [("maps/" + f) for f in maps] + [("shaders/" + f) for f in shaders if os.path.exists(os.path.join(mod, "shaders", f))]
 for d in ("models/map_objects/" + mapname, "music/" + mapname, "textures/naboo/env"):
     for f in sorted(os.listdir(os.path.join(mod, d))) if os.path.isdir(os.path.join(mod, d)) else []:
         small.append(d + "/" + f)
-for f in ("scripts/%s.arena" % mapname, "levelshots/%s.jpg" % mapname, "levelshots_16_9/%s.jpg" % mapname):
+for f in ("%s_readme.txt" % mapname, "scripts/%s.arena" % mapname, "botroutes/%s.wnt" % mapname, "levelshots/%s.jpg" % mapname, "levelshots_16_9/%s.jpg" % mapname):
     if os.path.exists(os.path.join(mod, f)):
         small.append(f)
 # texture names: every "textures/naboo/<name>" in the shader files, the PBR side file and the door models

@@ -1,0 +1,284 @@
+# Naboo Theed: collision problems (open list)
+
+Collected for the map-fix round; nothing here is fixed yet. Units are engine units (39.37 per metre), positions
+as `x y z` in the game's coordinates (`setviewpos x y z` goes there).
+
+## Reported by the user (field test, Steam install, 2026-11-26)
+
+| What | Where | Notes |
+|---|---|---|
+| Crates you can walk through | not given | see "Crates" below: most crate placements have collision geometry nearby, but the check counts the ground under them too, so whether the crate itself is solid is still to be tested against the brushes |
+| Ground by the fence at the river has no collision | river, by a fence | the player fell into the water there |
+
+## Found by checks
+
+### Drawn floors without collision (`tools\visual_vs_collision.py`, 14,505 samples on upward-facing surfaces)
+
+* 84.2 % of the samples have solid within 4 units below the drawn surface, 90.3 % within 16, 92.0 % within 64.
+* 1,164 samples (8 %) have no solid within 64 units: 1,142 small patches spread over the map (the worst cells have
+  only 2 samples each, so these are many small holes rather than a few large ones). Report:
+  `devgame_naboo\nicjk\maps\naboo_theed_floorcheck.json`.
+* 1,746 samples lie under a water surface (expected for river and fountain beds; not counted as holes).
+
+### Crates and containers (proximity check against `export\city\collision\collision_tris.npy`)
+
+* 16 placements have no collision triangle within 45 units of their centre: 6 of `container_03_s_a`, 3 of
+  `o_container_03_s_a_01`, 3 of `container_03_s_propdress_1x2x2`, 4 of `container_03_s_propdress_08`
+  (e.g. at 1201 10194 -499, -33 -8526 14, -589 -7984 9, -1981 -4229 31, 2617 -2093 57, 1548 2770 31).
+* All others have triangles nearby, which may be only the floor under them: to be checked with a brush test.
+
+### Collision rules that can explain pass-through props (`tools\naboo_config.json`, "collision")
+
+* objects smaller than 0.35 m get no collision at all;
+* objects up to 1.2 m become a single box;
+* larger ones are decimated to 20 % of their triangles (200 to 3,000), which can open gaps in thin walls and fences.
+
+## A river with most of its water missing (user, 2026-11-26)
+
+One river shows little of its water surface, and has missing collision as well. Which river is still to be found
+(earlier water audit, `export\city\water_audit.json`, found nothing missing, so the check itself missed this case).
+
+## Method for the fixes (user: "use these tests with bots")
+
+Bot runs on a test server log where players die by water, falling and suicide, with positions, so that the bad
+spots can be found and fixed, then the same run repeated to see the counts drop.
+
+## Bots in the water and odd spawn points (user, 2026-11-26)
+
+* Bots walk into the water far too often. The map has no bot routes (`botroutes/naboo_theed.wnt`), so bots move
+  without waypoints and do not see quay edges. Plan: bot-only clip (`CONTENTS_BOTCLIP`, which the engine supports:
+  "do not enter this brush by navigation") along water edges that border walkable ground, written by
+  `tools\write_collision_bsp.py` from `export\city\collision\water_boxes.npy`; players are not affected.
+* Review all 109 spawn points and remove or move the odd ones (near water edges, in corners, on props).
+
+## Seen in the long-play test (31 bots, Steam install)
+
+First ~10 minutes, deaths by cause (server log): saber 421, dark force 17, suicide 11, falling 5, water 3.
+Suicides may be bots killing themselves when stuck; to be matched with positions.
+
+(filled in after the run: bot falls, deaths by falling, bots stuck in or passing through geometry)
+
+### More from the user, watching the long-play run
+
+* Bot "Goku" walked through a chapel-like building: no collision in its walls (likely the decimation to at most
+  3,000 triangles per object, see the rules above).
+* The big crates have no collision: confirmed by the material check, all container meshes use a cut-out material
+  and the collision export keeps opaque materials only.
+* One fence floats in the air.
+* Bot "Karlach" fell through a hole just in front of the palace interior's main staircase.
+* Bots that fall through holes do not die: they land on collision further down (likely the terrain under the
+  plazas) and walk around under the map.
+* Far buildings flicker while the camera follows a running bot (depth precision or detail switching; to check).
+* User screenshots: a bot sunk to the waist in the quay paving by the river balustrade (no collision at the paving
+  surface; 194 hole samples lie at quay level, the largest group), and a bot walking on the source terrain under
+  the palace ("no one should get here"). Fix: close the holes (collision export) and take the terrain collision
+  away wherever the city's floors cover it, with a kill volume below, so whoever still falls through dies and the
+  death log shows the spot.
+* User screenshot: bot "Cultist" far below the whole map, looking up at the underside of the terrain. The map's
+  sky box (`naboo_theed.map`, worldspawn) has a solid bottom at z -7936; anyone falling out of the world lands on
+  it and walks there. Fix: a kill volume (trigger_hurt) over the whole map just above that floor, below the
+  lowest real ground, so falling out of the world kills.
+* User screenshot ("a big problem area"): bot "Vader Mcquarrie" in the river below a sheer quay wall with the
+  balustrade above; there is no way back up, so a bot that gets in stays there. They get in through the quay
+  paving holes along the balustrade (earlier screenshot). Fix: close the paving holes, make the balustrade solid
+  for everyone, bot clip along quay edges; check whether a way out of the water exists in the source (steps).
+* User screenshot: "the building with stairs and no collision": courtyard with a fountain, curved stone stairs and
+  an arcaded building (columns, red curtains in the arches). Likely the same building bot "Goku" walked through.
+  To locate from the bot position logs and the source file; check its walls, columns and stairs.
+* User screenshot: bot "Reborn" sunk into the quay paving up to its head, next to the balustrade by a stone bench
+  (another stretch of the same quay; the paving has no collision at its surface along the balustrade).
+* User screenshot (just after the 40-minute map reload): two bots fighting on a dry paved floor at the foot of a
+  tall quay wall with a balustrade on top and a bridge in the distance. This is most likely the river whose water
+  is missing: the bed is drawn and walkable, the water surface above it is not there. To find in the source which
+  water surface covers this channel and why the cook dropped it.
+* User screenshot ("missing collision"): the camera following a bot is pressed into a tall quay wall at water
+  level, with water on both sides of the view: the bot stands inside the quay wall. The wall's river face has no
+  collision (or only far behind the drawn face). Same quay meshes as the paving reports.
+
+## Textures to check (user, free play)
+
+* A tall building wall with pilasters (light grey bases, dark reddish-brown stone between): the stone reads as
+  large, soft, smeared blocks without fine detail, unlike the crisp sandstone elsewhere. Likely a baked material
+  with the wrong repeat or without its tiling detail layer. To compare with a render of the source at that wall.
+* The tour also showed (earlier sessions) the market building and statues as texture/UV suspects; the map-wide
+  texture/UV check is still open in TODO.
+* User (free play): bot/player walks through a large garden hedge; hedges (clipped walls of foliage) should block.
+  New rule: hedge meshes get a simple block collision; bushes, flowers, vines and grass stay passable.
+* User ("geometry is not right here"): on a terrace by curved stairs and a balustrade, the tiled floor folds up
+  into a soft slope toward the railing. Looks like a ground surface (terrain or the world-projected "virtual
+  terrain" paving) poking up through the terrace paving. To compare with the source: cut or lower that surface.
+* User (free play): a dim enclosed pocket with tiled floor fading into dirt, a sloped stone block and a closed
+  city door with a round emblem, walls all around and a dark ceiling: probably a space under or behind a terrace
+  that is reachable through the raised ground beside the balustrade. Not meant to be walkable; close its entrance.
+* User ("ground texture"): open paving seen from above shows a straight hard seam: one side darker than the
+  other, with the tile pattern continuous across it. Likely two paving placements with different lighting: the
+  sky occlusion (`.tsky`) is one value per placement, so neighbouring ground pieces can differ by a step.
+  Fix to try: per-vertex sky occlusion for large ground pieces, or no indoor darkening for open ground.
+* User: a lamp post you can stand on top of: posts under 1.2 m across become one box as wide as the lamp head and
+  as tall as the post (also an invisible wall around the slim post). Rule: tall slim objects (lamp posts, banner
+  poles, bollards) get a thin eight-sided column solid instead of a box.
+* User ("this door is blocked"): an open metal garden gate between two stone pillars (river/market side) cannot be
+  walked through although both leaves stand open. The gate object (frame and leaves) becomes one solid block over
+  the whole opening. Rule: gates keep their real parts (leaves, posts), never one block over the opening.
+* User (free play): in a canal, only a narrow ribbon of water runs along the foot of the tall quay wall; the rest of
+  the channel is a dry, sloped sandy bank rising above the water. So the water surface is there, but the ground of
+  the bed (terrain) sticks out above it over most of the channel. Probably the "river with most of its water
+  missing" and the dry paved channel. Fix: lower (carve) the bed under the whole water surface, as for the other
+  rivers, and its collision with it.
+* User (free play): by the garden fountain pool, a flat teal water patch lies on the paving outside the pool, with
+  hard straight edges. Looks like one of the water patches the cook generates to fill trenches ("fill water"),
+  placed where the paving is level with it. Fix: drop generated water where solid paving lies at or above it;
+  check every generated patch against the source the same way.
+* User (free play, river from above): a patch of grass, paving and sand path sticks up through the river surface
+  with a jagged stair-step edge, plus a row of small pale triangles poking through the water nearby. The stair-step
+  edge is the cell grid of the terrain lowering under water: a block of cells was not lowered, and coarse terrain
+  triangles at its edge reach above the surface. Fix: lower every terrain vertex inside each water surface (plus a
+  margin) to below the bed depth, at vertex level rather than per cell, then check that no ground lies above any
+  water surface. Same cause as the canal whose bank rises above the water.
+* User ("textures look blurry here"): the cliff by the waterfall, seen up close: rock and moss are soft and smeared.
+  Large cliff meshes carry one unique texture stretched over a big area; the source adds a tiling rock detail layer
+  (and detail normals) on top, which the port probably lacks for these materials. To check: the cliff materials'
+  bake size and whether their tiling detail layer and normal map survived the bake.
+* User ("and no collision"): inside the waterfall cliff: the player passes into the rock. Collision is only built
+  inside the playable bounds (`collision_bounds_m` of the city region); objects outside (324 skipped) get none, and
+  the cliff is likely one of them while still reachable. Fix: either extend the collision bounds to every surface a
+  player can reach, or put an invisible boundary wall (player clip) at the edge of the playable area so scenery
+  without collision cannot be reached. Prefer the boundary wall plus collision for any scenery inside it.
+* User ("bugged textures"): beside the round building's curved steps, a large paving area is a flat pinkish-beige
+  colour with no tiles or detail at all, while the paving next to it shows proper stone tiles. Candidates: one of
+  the 12 world-projected paving materials drawn without its tiling layer (the base "gnd_flat" colour only), or a
+  material whose texture was not found and fell back to its plain colour. To identify with `tools\world_probe.py`
+  at that spot.
+* User (free play): at a balustrade wall, a black crate lies tilted and half sunk into the paving (a placement that
+  probably rested on something missing, or rotated wrongly), and the wall base shows a lighter rectangular block in
+  the middle with hard edges (same per-placement lighting step as the paving seam). Check the crate's placement
+  against the source.
+* User ("a lot of colour-mismatched stone"): open paving where the same stone tiles change brightness and tint in
+  bands and patches with straight edges. Two causes to separate: the per-placement lighting step (sky occlusion,
+  see the seam above) and neighbouring paving drawn with different materials (world-projected paving with its own
+  base colour next to mesh-textured paving of the same stone). Fix: per-vertex sky occlusion for ground pieces, and
+  match the base colour and roughness of the world-projected paving to the baked paving of the same stone.
+* User (free play): open ground where four rectangles of the same paving meet in a straight cross, each with a
+  clearly different brightness and tint (light grey, mid grey, brown). This is the corner of four baked terrain
+  ground tiles (`gt_<x>_<y>`, e.g. gt_7_15 / gt_8_15 / gt_7_16 / gt_8_16 as found earlier): each tile is baked on its
+  own and they do not match. Fix: bake the ground tiles with the same exposure and colour scale, then blend a strip
+  along every tile border; verify by sampling the colour on both sides of every border.
+
+## Round 2 (2026-11-26 evening): fixes and three 20-minute bot runs
+
+Changes: exact source terrain and water (no lowering, no generated water); collision export with cut-out materials
+solid (crates, chairs, speeder, metal fences), hedges as blocks (bushes named "nocollision" stay passable), vertex
+welding before reduction, budget 8 % (100-2000 triangles per object, boxes below 1 m); no terrain collision where a
+wide floor covers it (13,419 triangles); bot-only walls (monster clip) along open-water edges, 320 units high
+(2,174 brushes); a kill volume over the hull floor. Map file 910 MB (was 277 MB): too large, the writer needs
+optimising before a release. Floor check: 89.5 % of drawn floors have collision within 64 units; the remaining holes
+are mostly roofs, backdrop cliffs and terrain hidden under building floors; on walkable surfaces mainly quay stone
+tiles (149 samples), concrete (66) and projected paving (51).
+
+Bot runs (31 bots, spectator, positions every 2 s; `naboo\bottests\run1..3`, analysis.md in each):
+
+| | run 1 | run 2 | run 3 |
+|---|---|---|---|
+| positions below the ground | 7 | 16 | 22 |
+| fell out of the world | 4 | 7 | 5 |
+| stuck 30 s or more | 21 | 19 | 29 |
+| time in water | 23 % | 18 % | 16 % |
+
+Worst spots (all runs, `run3\analysis_all_runs.json`): falling out near `setviewpos 455 -414 40 0` (one gap, most
+falls); stuck at `setviewpos -3379 -14475 -52 0` (16 times); water entered mostly from low banks and steps around
+x -5016 y -10104 and x 5126 y -8050 (bots step in from about 40 units above the surface, where the bot walls do not
+stand). Beta 2 pk3s built from this state and installed in the Steam install (beta 1 kept in backups).
+
+## Round 3 (2026-11-26/27): spots from the bot runs, bot routes, spawns; beta 3
+
+Terrain: checked against the source. `Terrain_Near` is a 1537 x 1537 grid at 1 m and the cooked terrain matches all
+2,362,369 vertices exactly (0.0000 m); terrain tiles are 64 m and the coarse detail levels start about 420 m away.
+The jagged bank seen under the canal walkway (x -9350 y 4444) is the source's own terrain: the backdrop canal pieces
+(`NabooBackdropCanal_01..04`) are shells, and under their walkway tops lies an older copy of the river (water plane at
+-128, rough terrain at -169) that the source only hides from the eye.
+
+Fixes (all invisible, visible geometry unchanged):
+* `backdrop_skirts.py`: walls from every outer edge of the backdrop canal walkway tops down 1600 units (2,692
+  triangles), so nobody gets into the hidden space under them.
+* `write_collision_bsp.py`: bot walls 1200 units high (were 320; bots force-jumped over), bot walls along the dry banks
+  of water under floors and bridges (546), solid walls where open water meets water under a low floor (< 200 units,
+  1,265, for everyone).
+* `drop_water_spawns.py`: 13 spawns stood 40 units over open water (z -88, water -128) and sent bots straight into
+  the river; removed.
+* `make_bot_routes.py`: `botroutes/naboo_theed.wnt` generated from the collision (400-unit grid, dry floors only,
+  every link traced through the collision, bot walls and closing walls; 3,993 entries, 23 groups, 287 KB). Bots
+  follow it about 75 % of their thinking time.
+* `centre_spawns.py`: 25 spawns in the plain outskirts (few detailed objects, backdrop pieces near, far from the
+  centre) moved to route points in the detailed city, open to the sky (farthest spawn 12,900 units from the centre,
+  was 18,500).
+* `avoid_zones.py` + config `avoid_zones`: the west garden lawn (grass and blob bushes, the same in the source) has no
+  spawns and no route points.
+
+Spots checked against the source renders (`tools/render_ref.py`): the balustrade terrace at x 1359 y -3496 (dark boxes
+by the stairs are in the source), the paved dry canal at x -4684 y -11107 (paved in the source, water to be added
+later as agreed), the west garden (same layout in the source).
+
+| | run 4 | run 5 | run 6 | run 7 |
+|---|---|---|---|---|
+| changes | tall walls | + skirts | + routes, water spawns | + centre spawns |
+| positions below the ground | 1 | 0 | 2 | 2 |
+| fell out of the world | 1 | 0 | 0 | 0 |
+| stuck 30 s or more | 18 | 18 | 8 | 3 |
+| time in water | 17.8 % | 18.1 % | 0.0 % | 0.05 % |
+
+Beta 3 pk3s (`naboo\release\beta3`) installed in the Steam install (beta 2 kept in `backups\steam_naboo_beta2`);
+the Steam build's server loaded the map and the routes, the client loaded the world.
+
+## Round 4 (2026-11-27): smaller collision, one-hour session, route and spawn fixes
+
+Collision file 920 MB -> 677 MB: per-object reduction target halved (4 %, 60-1000 triangles), flat areas merged at
+2 degrees, bit-identical planes stored once (18.6 M -> 15.8 M). Drawn floors with collision within 64 units 89.5 % ->
+94.3 % (the floor fill closes more). Server A/B, 31 bots, 210 s each (`naboo\bsp_ab\v2_vs_v3`): bot traces 5.79 vs
+5.95 us average, AI 3.46 vs 3.48 ms per frame (no measurable change), map start to first bot 7 s -> 5 s. Seen twice
+on the new file only: a single bot think of 220-280 ms once in a 4-20 minute window (old file: at most 31 ms); not
+explained yet.
+
+One-hour session (31 bots, spectator at 1080p, `naboo\bottests\hour1`): nobody under the ground, fell out or drowned;
+7 stuck; water 0.9 % at one spot. `tools/route_usage.py` (new) found where bots leave the routes and where they go back
+and forth with nobody near. Causes and fixes:
+* water under a canal boardwalk (x 5263 y -7502): the boardwalk and canal foundations are shells over hidden water
+  like the backdrop canals -> skirts under them too (`backdrop_skirts` objects).
+* dry paved canal beds (z -179): bots drop in and cannot walk out -> bot-only walls along their rims
+  (`write_collision_bsp.dry_canal_beds`, only cells open to the sky; walled separately from the water).
+* a spawn inside a fenced cafe terrace (x -3722 y -8769) and 21 others more than 300 units from any route point
+  -> `centre_spawns.py` drops spawns out of reach of the routes; new spawns only within 400 units of the ground.
+* route groups on roofs (z 2000+, reachable only by force jumps) left out.
+
+| 20-min runs | run 8 | run 9 | run 10 | run 11 |
+|---|---|---|---|---|
+| changes | skirts + canal beds (merged walls) | separate walls, open-sky beds | + reachable spawns | + no roof spawns or routes |
+| time in water | 2.4 % | 0 % | 0 % | 0 % |
+| below ground / fell out | 0 / 0 | 0 / 0 | 0 / 0 | 1 sample / 0 |
+| stuck 30 s+ | 5 | 1 | 1 | 2 |
+| on the ground more than 600 units from a route | 9.2 % | 3.6 % | 0.9 % | 0.9 % |
+| bot thinking on a route | 78 % | 84 % | 93 % | 91 % |
+
+Beta 4 pk3s (`naboo\release\beta4`) installed in the Steam install (beta 3 kept in `backups\steam_naboo_beta3`).
+
+## Lamps (2026-11-27): every glowing fixture lights its surroundings, at any distance
+
+Before: the cooked world lit itself with the four lamps nearest the camera, so lamps seemed to switch on as the player
+came near, and the palace candles glowed without lighting anything. Of 373 lights most were palace candles; glowing
+fixtures without a light of their own in the source lit nothing.
+
+Now (`tools/glow_lights.py`, `tools/bake_lamp_occlusion.py`, renderer `R_LoadTWorldLampOcclusion`):
+* 836 lights: the source's 373, plus one for every glowing fixture of the cooked world and every emissive part of the
+  source (`list_emissive_parts.py`: 198 street lamp posts and others) that has none, merged within 64 units, at 0.4 of
+  the source lights' strength. Bulb strings in trees and between poles get no light (user: "trees should not glow,
+  only the lightbulbs, candles, chandelier etc").
+* each light has a 64 x 64 octahedral occlusion map baked against the collision (rays start 24 units out), stored with
+  the light parameters in rows below the sun map in `<map>_shadow.dds`; `<map>.tlampocc` describes the layout.
+* each placement lists the (up to 8) lights that reach it; the shader adds their diffuse light with a soft occlusion test
+  and a cap for many overlapping lights. Visible geometry unchanged.
+* not yet: the lamp posts' heads do not glow (their emissive material is not a glowing material in the cook).
+
+Cost, 31 bots at 1080p, the renderer's recorder, before (renderer before the lamp work, 373 source lights, nearest
+four) and after back to back (`naboo\export\city\bench\client_lamps_*3.qconsole.log`): whole pass 157 / 155 fps
+before, 150 / 149 fps after. The first version (one texel read per value, no distance limit) cost 172 / 156 ->
+117 / 129; lamp data is now read as 2 x 2 blocks with one gather each, and lamp light is drawn up to
+`r_tworldLampDistance` (4000 units, about 100 m) from the camera, fading over its last quarter.

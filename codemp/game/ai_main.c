@@ -100,7 +100,17 @@ static double BotProf_NowUs(void) {
 	QueryPerformanceCounter(&t);
 	return (double)t * usPerTick;
 }
+/* page faults of this process (slow-think report): K32GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS layout */
+typedef struct { unsigned long cb, PageFaultCount; size_t PeakWorkingSetSize, WorkingSetSize, a, b, c, d, PagefileUsage, PeakPagefileUsage; } botProfMem_t;
+__declspec(dllimport) void *__stdcall GetCurrentProcess(void);
+__declspec(dllimport) int __stdcall K32GetProcessMemoryInfo(void *process, botProfMem_t *counters, unsigned long cb);
+static unsigned long BotProf_PageFaults(void) {
+	botProfMem_t m;
+	m.cb = sizeof(m);
+	return K32GetProcessMemoryInfo(GetCurrentProcess(), &m, sizeof(m)) ? m.PageFaultCount : 0;
+}
 #else
+static unsigned long BotProf_PageFaults(void) { return 0; }
 #include <time.h>
 static double BotProf_NowUs(void) {
 	struct timespec ts;
@@ -133,9 +143,11 @@ typedef struct botProf_s {
 	botProfSite_t	sites[BOTPROF_MAX_SITES];
 	// per think
 	int				thinkTraces, maxThinkTraces;
+	double			thinkTraceUs;
 } botProf_t;
 
 static botProf_t botProf;
+static double botProfPhase[5];		/* last think: main AI, taunts, anti-idle, learning, tuning (us) */
 vmCvar_t bot_profile;
 
 // Behaviour-changing corrections, switchable so they can be compared in game:
@@ -245,6 +257,13 @@ vmCvar_t bot_abTest;
 //          It still runs to close a gap, after an enemy who is getting away, when evading or
 //          breaking off hurt, while jumping or doing a special, with a gun, and with a flag.
 #define BOTF_WALK		4194304
+// 8388608: duel timing, from the JK2 1.02 duelling the user pointed to ("A complete guide to the
+//          lightsaber in Jedi Outcast 1.02", JK2 School of self defence). Do not trade swings:
+//          while the enemy swings and his blade will not reach, hold at the edge of reach instead
+//          of walking into it; when his swing ends, bounces or is parried, step in and strike at
+//          once ("instant counter"); after blocking a swing, strike straight back ("riposte");
+//          at the edge of reach and with nothing happening, circle him instead of closing straight.
+#define BOTF_DUEL		8388608
 
 // the distance band a bot wants to fight in with this weapon; qfalse for the saber and melee
 static qboolean Bot_GunBand(int weapon, qboolean enemyHasSaber, float *min, float *max) {
@@ -498,7 +517,13 @@ static int botEvalObjDirect, botEvalObjWp, botEvalWpThinks, botEvalNoWpThinks;
 static int botEvalCliffStops, botEvalFallDeaths, botEvalCliffJumps;
 extern int g_mb2Stats[6];
 extern int G_MB2PerfectBlockZone( gentity_t *attacker );
+static int botEvalMb2LowBp;
 static int botEvalMb2Guard, botEvalMb2PbTry, botEvalWalkFrames, botEvalRunFrames;
+static int botEvalDuelHold, botEvalDuelCounter, botEvalDuelRiposte, botEvalDuelCircle;
+extern qboolean PM_SaberInReturn( int move );
+extern qboolean PM_SaberInBounce( int move );
+extern qboolean PM_SaberInBrokenParry( int move );
+extern qboolean PM_SaberInParry( int move );
 // for working out why bots fall: where each bot last stood on the ground, and its last navigation jump
 static vec3_t botLastGround[MAX_CLIENTS];
 static int botLastGroundTime[MAX_CLIENTS], botLastNavJumpTime[MAX_CLIENTS], botLastNavJumpHold[MAX_CLIENTS], botLastHurtBy[MAX_CLIENTS], botLastHurtTime[MAX_CLIENTS];
@@ -631,6 +656,7 @@ static void BotProf_Account(const char *fn, double us) {
 	botProf.traces++;
 	botProf.traceUs += us;
 	botProf.thinkTraces++;
+	botProf.thinkTraceUs += us;
 }
 
 static void BotProf_JPTrace(const char *fn, trace_t *results, const vec3_t start, const vec3_t mins, const vec3_t maxs, const vec3_t end, int passEntityNum, int contentmask, int capsule, int traceFlags, int useLod) {
@@ -723,10 +749,13 @@ static void BotEval_Report(void) {
 		botEvalObj[7], botEvalObj[6], botEvalSiege[0], botEvalSiege[1], botEvalSiege[2]);
 	trap->Print("BOTEVAL siege classes handed to bots: infantry %d, vanguard %d, support %d, jedi %d, demolitions %d, heavy weapons %d; thinks firing something heavy at an objective %d\n",
 		botEvalSiegeClass[0], botEvalSiegeClass[1], botEvalSiegeClass[2], botEvalSiegeClass[3], botEvalSiegeClass[4], botEvalSiegeClass[5], botEvalSiege[3]);
+	trap->Print("BOTEVAL duel timing: frames held at the edge of reach %d, counters into a recovering enemy %d, ripostes after a block %d, frames circling %d\n",
+		botEvalDuelHold, botEvalDuelCounter, botEvalDuelRiposte, botEvalDuelCircle);
 	trap->Print("BOTEVAL combat walking: frames walked %d, frames run while an enemy was close %d\n", botEvalWalkFrames, botEvalRunFrames);
 	if (g_mb2manualblock.integer) {
 		trap->Print("BOTEVAL mb2 block: guarded hits blocked %d of which perfect blocks %d, guarded hits that got through %d, disarms %d, hits on players not guarding %d, from behind %d; bot guard frames %d, perfect-block aims %d\n",
 			g_mb2Stats[0], g_mb2Stats[1], g_mb2Stats[2], g_mb2Stats[3], g_mb2Stats[4], g_mb2Stats[5], botEvalMb2Guard, botEvalMb2PbTry);
+		trap->Print("BOTEVAL mb2 block: bot frames backing off with no block points left %d\n", botEvalMb2LowBp);
 	}
 	trap->Print("BOTEVAL cliffs: jumps with nothing to land on refused %d\n", botEvalCliffJumps);
 	trap->Print("BOTEVAL cliffs: steps over an edge refused %d; deaths by falling %d, of which right after a navigation jump %d, after being hit %d, other %d\n",
@@ -826,10 +855,25 @@ static void BotProf_Think(int client, float thinktime) {
 		BotAI(client, thinktime);
 		return;
 	}
-	botProf.thinkTraces = 0;
+	unsigned long pf0;
+	double pfEndUs;
+	botProf.thinkTraces = 0; botProf.thinkTraceUs = 0.0;
+	pf0 = BotProf_PageFaults();
 	t0 = BotProf_NowUs();
 	BotAI(client, thinktime);
-	t0 = BotProf_NowUs() - t0;
+	pfEndUs = BotProf_NowUs();
+	t0 = pfEndUs - t0;
+	if (t0 > 40000.0) {
+		/* slow think: what the bot was doing, how much of it was traces, and whether memory had to be paged in */
+		bot_state_t *bs_ = botstates[client];
+		trap->Print("BOTSLOW client %d think %.1f ms: %d traces %.1f ms, page faults %lu, origin %.0f %.0f %.0f, wp %d -> %d, enemy %d, weapon %d\n",
+			client, t0 / 1000.0, botProf.thinkTraces, botProf.thinkTraceUs / 1000.0, BotProf_PageFaults() - pf0,
+			bs_ ? bs_->origin[0] : 0.0f, bs_ ? bs_->origin[1] : 0.0f, bs_ ? bs_->origin[2] : 0.0f,
+			(bs_ && bs_->wpCurrent) ? bs_->wpCurrent->index : -1, (bs_ && bs_->wpDestination) ? bs_->wpDestination->index : -1,
+			(bs_ && bs_->currentEnemy) ? bs_->currentEnemy->s.number : -1, bs_ ? bs_->cur_ps.weapon : -1);
+		trap->Print("BOTSLOW   phases ms: ai %.1f, taunts %.1f, anti-idle %.1f, learning %.1f, tuning %.1f\n",
+			botProfPhase[0] / 1000.0, botProfPhase[1] / 1000.0, botProfPhase[2] / 1000.0, botProfPhase[3] / 1000.0, botProfPhase[4] / 1000.0);
+	}
 	botProf.thinks++;
 	botProf.thinkUs += t0;
 	if (t0 > botProf.maxThinkUs) {
@@ -1637,6 +1681,54 @@ void BotInputToUserCommand(bot_state_t* bs, bot_input_t* bi, usercmd_t* ucmd, in
 
 	BotInputToUserCommand_Inner(bs, bi, ucmd, delta_angles, time, useTime);
 
+	// duel timing (bot_features 8388608)
+	if ((bs->features & BOTF_DUEL) && cl && cl->ps.weapon == WP_SABER && cl->ps.stats[STAT_HEALTH] > 0 && !BG_SabersOff(&cl->ps)
+		&& cl->ps.groundEntityNum != ENTITYNUM_NONE && bs->currentEnemy && bs->currentEnemy->client && bs->frame_Enemy_Vis
+		&& !bs->seqType && !(level.time <= bs->intentUntil && (bs->intentFlags & (BOTINTENT_EVADE | BOTINTENT_WORLD | BOTINTENT_KATA)))) {
+		static int circleSide[MAX_CLIENTS], circleUntil[MAX_CLIENTS], counterUntil[MAX_CLIENTS], lastOwnMove[MAX_CLIENTS];
+		const gclient_t *ec = bs->currentEnemy->client;
+		const float d = bs->frame_Enemy_Len;
+		const int em = ec->ps.saberMove, mm = cl->ps.saberMove;
+		const qboolean enemySaber = (ec->ps.weapon == WP_SABER && !BG_SabersOff(&ec->ps)) ? qtrue : qfalse;
+		const qboolean enemySwinging = (enemySaber && (BG_SaberInAttack(em) || BG_SaberInSpecial(em))) ? qtrue : qfalse;
+		const qboolean enemyOpen = (!enemySaber || PM_SaberInReturn(em) || PM_SaberInBounce(em) || PM_SaberInBrokenParry(em)
+			|| BG_InKnockDown(ec->ps.legsAnim) || ec->ps.saberInFlight) ? qtrue : qfalse;
+		const qboolean meReady = (!BG_SaberInAttack(mm) && !BG_SaberInSpecial(mm) && cl->ps.weaponTime <= 150) ? qtrue : qfalse;
+		int skill = (int)bs->settings.skill;
+		if (skill < 1) skill = 1;
+		if (skill > 5) skill = 5;
+		if (counterUntil[bs->client] > level.time + 2000) counterUntil[bs->client] = 0;
+		if (PM_SaberInParry(mm) && !PM_SaberInParry(lastOwnMove[bs->client]) && d < 150.0f) {
+			// just blocked his swing: strike straight back
+			counterUntil[bs->client] = level.time + 250 + (5 - skill) * 40;
+			botEvalDuelRiposte++;
+		}
+		lastOwnMove[bs->client] = mm;
+		if (enemyOpen && d < 170.0f && meReady) {
+			counterUntil[bs->client] = level.time + 300;
+			botEvalDuelCounter++;
+		}
+		if (counterUntil[bs->client] > level.time && d < 175.0f) {
+			ucmd->buttons |= BUTTON_ATTACK;
+			if (d > 60.0f) ucmd->forwardmove = 127;
+		} else if (enemySwinging && meReady && d > 85.0f && d < 160.0f
+			&& BotPred_BladeHits(bs->currentEnemy, &g_entities[bs->client], 200) < 0) {
+			// his swing will not reach: let it pass at the edge of reach instead of walking into it
+			if (ucmd->forwardmove > 0) ucmd->forwardmove = 0;
+			ucmd->buttons &= ~BUTTON_ATTACK;
+			botEvalDuelHold++;
+		} else if (!enemySwinging && meReady && d > 110.0f && d < 170.0f && ucmd->forwardmove > 0) {
+			// at the edge of reach with nothing happening: circle, closing slowly
+			if (circleUntil[bs->client] < level.time || circleUntil[bs->client] > level.time + 5000) {
+				circleSide[bs->client] = Q_irand(0, 1) ? 127 : -127;
+				circleUntil[bs->client] = level.time + Q_irand(900, 1800);
+			}
+			ucmd->rightmove = circleSide[bs->client];
+			ucmd->forwardmove = 48;
+			botEvalDuelCircle++;
+		}
+	}
+
 	// walking in a saber fight (bot_features 4194304)
 	if ((bs->features & BOTF_WALK) && cl && cl->ps.weapon == WP_SABER && cl->ps.stats[STAT_HEALTH] > 0
 		&& cl->ps.groundEntityNum != ENTITYNUM_NONE && bs->currentEnemy && bs->currentEnemy->client && bs->frame_Enemy_Vis
@@ -1672,6 +1764,30 @@ void BotInputToUserCommand(bot_state_t* bs, bot_input_t* bi, usercmd_t* ucmd, in
 	// MB2-style manual blocking (g_mb2manualblock): hold the guard when a saber can reach us, and
 	// aim at the side an incoming swing comes from to perfect-block it. Higher skill reads more
 	// swings and reacts sooner. Alt attack together with use stays the saber throw.
+	if (g_mb2manualblock.integer && cl && cl->ps.weapon == WP_SABER && (ucmd->buttons & BUTTON_USE)
+		&& !(bs->inputHoldUntil > level.time && (bs->inputHoldButtons & BUTTON_USE))
+		&& !(botUsePress[bs->client] > level.time && botUsePress[bs->client] < level.time + 3000)) {
+		// the old "press use now and then in case something is usable" would turn a guard into a saber
+		// throw (alt attack + use): with MB2 blocking, use is only pressed when meant
+		ucmd->buttons &= ~BUTTON_USE;
+	}
+	if (g_mb2manualblock.integer && cl && cl->ps.weapon == WP_SABER && cl->ps.stats[STAT_HEALTH] > 0
+		&& !(ucmd->buttons & BUTTON_USE) && !(bs->currentEnemy && bs->currentEnemy->client && bs->frame_Enemy_Vis)) {
+		// no enemy chosen, or not in sight: still guard against anyone swinging a saber close by
+		int i;
+		for (i = 0; i < MAX_CLIENTS; i++) {
+			const gentity_t *o = &g_entities[i];
+			if (i == bs->client || !o->inuse || !o->client || o->health <= 0 || OnSameTeam(&g_entities[bs->client], (gentity_t *)o)
+				|| o->client->ps.weapon != WP_SABER || !BG_SaberInAttack(o->client->ps.saberMove)) {
+				continue;
+			}
+			if (DistanceSquared(o->client->ps.origin, cl->ps.origin) < 140.0f * 140.0f) {
+				ucmd->buttons |= BUTTON_ALT_ATTACK;
+				botEvalMb2Guard++;
+				break;
+			}
+		}
+	}
 	if (g_mb2manualblock.integer && cl && cl->ps.weapon == WP_SABER && cl->ps.stats[STAT_HEALTH] > 0
 		&& bs->currentEnemy && bs->currentEnemy->client && bs->frame_Enemy_Vis && !(ucmd->buttons & BUTTON_USE)) {
 		static int pbMove[MAX_CLIENTS], pbGo[MAX_CLIENTS];
@@ -1681,7 +1797,15 @@ void BotInputToUserCommand(bot_state_t* bs, bot_input_t* bi, usercmd_t* ucmd, in
 		int skill = (int)bs->settings.skill;
 		if (skill < 1) skill = 1;
 		if (skill > 5) skill = 5;
-		if (ec->ps.weapon == WP_SABER && !BG_SabersOff(&ec->ps) && (d < 150.0f || (d < 240.0f && enemySwinging))) {
+		if (cl->mb2bp < 12.0f && d < 240.0f) {
+			// out of block points: a guard now only gets the saber knocked away. Back off at
+			// walking pace, which also lets the points come back.
+			ucmd->forwardmove = -64;
+			if (ucmd->rightmove > 64) ucmd->rightmove = 64;
+			if (ucmd->rightmove < -64) ucmd->rightmove = -64;
+			ucmd->buttons &= ~BUTTON_ATTACK;
+			botEvalMb2LowBp++;
+		} else if (ec->ps.weapon == WP_SABER && !BG_SabersOff(&ec->ps) && (d < 150.0f || (d < 240.0f && enemySwinging))) {
 			ucmd->buttons |= BUTTON_ALT_ATTACK;
 			botEvalMb2Guard++;
 			if (enemySwinging) {
@@ -2740,17 +2864,26 @@ int BotAI(int client, float thinktime) {
 #endif
 	bs->features = BotFeaturesFor(client);
 
+	{	/* phase times for the slow-think report (bot_profile) */
+		double tp = botProf.enabled ? BotProf_NowUs() : 0.0, tq;
+#define BOTPROF_PHASE(k) if (botProf.enabled) { tq = BotProf_NowUs(); botProfPhase[k] = tq - tp; tp = tq; }
 	if (g_newBotAI.integer)
 		NewBotAI(bs, thinktime);
 	else
 		StandardBotAI(bs, thinktime);
-
+	BOTPROF_PHASE(0)
 	BotContextualTaunts(bs);
+	BOTPROF_PHASE(1)
 	BotAntiIdle(bs);
+	BOTPROF_PHASE(2)
 	if (bs->features & BOTF_LEARN) {
 		Bot_LearnResolve(bs);
 	}
+	BOTPROF_PHASE(3)
 	Bot_TuneThink(bs->client, bs->features);
+	BOTPROF_PHASE(4)
+#undef BOTPROF_PHASE
+	}
 	{	// kills and deaths credited to the saber style the bot is in
 		static int lastK[MAX_CLIENTS], lastD[MAX_CLIENTS];
 		const gclient_t *sc = g_entities[bs->client].client;
@@ -19049,7 +19182,7 @@ int BotAISetup(int restart) {
 	trap->Cvar_Register(&bot_profile, "bot_profile", "0", 0);
 	trap->Cvar_Register(&bot_fixes, "bot_fixes", "1", CVAR_ARCHIVE);
 	trap->Cvar_Register(&bot_abBase, "bot_abBase", "0", 0);	// features of the baseline group in an A/B test
-	trap->Cvar_Register(&bot_features, "bot_features", "4188671", CVAR_ARCHIVE);	// everything measured to help or do no harm: all bits except 512 (guide tactics), 1024 (counters) and 4096 (swing table), which lost their A/B tests
+	trap->Cvar_Register(&bot_features, "bot_features", "12577279", CVAR_ARCHIVE);	// everything measured to help or do no harm; off: 512 (guide tactics), 1024 (counters), 4096 (swing table), 4194304 (combat walking), which lost or showed no gain
 	trap->Cvar_Register(&bot_abTest, "bot_abTest", "0", 0);
 	trap->Cvar_Register(&bot_attachments, "bot_attachments", "1", 0);
 	trap->Cvar_Register(&bot_camp, "bot_camp", "1", 0);
