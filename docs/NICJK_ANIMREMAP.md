@@ -100,6 +100,35 @@ would hide the user's loose file.
   differ from the original by a few ms (the log shows the shown length); the
   gameplay timer is untouched.
 
+## Recommended: one shared humanoid with extra animations
+
+Every model keeps the one shared `models/players/_humanoid/_humanoid.gla`; new
+animations are appended to it once, and `animremap.cfg` picks per model which
+animation each move plays. Because the server and every client have the same
+file, the server's hit model can be posed with the remapped frames (saber hits
+follow what is drawn), stock clients see the model with its normal animations,
+and corpses, faces and ragdolls only ever get valid frames.
+
+1. Build the combined GLA with `tools/animremap/gla_build.py BUILDFILE` (see
+   `tools/animremap/example_build.txt`): `base` the current shared humanoid,
+   `from` any GLA with the humanoid bones (any bone order), `anim NAME NEW_NAME`
+   or `frames FIRST COUNT NEW_NAME`, `out humanoid.gla added.cfg [full.cfg]`.
+   Base frames keep their numbers; the bone data is shared, so only new poses
+   add size. Limit: 65535 frames in total (NicJK's humanoid uses 48591).
+2. Ship the new `_humanoid.gla` and `added.cfg` in a pk3 that every player has.
+3. In animremap.cfg:
+
+        animset ext  models/players/_humanoid/_humanoid.gla  models/players/_humanoid/added.cfg  0
+        kyle    BOTH_SABERFAST_STANCE  ext:DOOKU_FAST_STANCE  free
+        desann  BOTH_VICTORY_FAST      ext:VADER_VICTORY_FAST
+
+   Or pass a third `out` file to get a full animation.cfg in which added
+   animations named like game animations replace them for every model.
+
+`docs/NICJK_HUMANOID_FRAMES.md` maps what is in NicJK's current humanoid
+(stock, SJE pack, the custom merges, the Yoda attacks) and which frames its
+animation.cfg uses.
+
 ## A model's own animations (its own GLA)
 
 Goal: as in single player, a model can carry its own animation file, so one
@@ -218,7 +247,9 @@ happened with remaps off too; not checked whether stock JA does the same.
 * `codemp/cgame/cg_predict.c` - prediction table for `timing`.
 * `codemp/game/g_svcmds.c`, `codemp/cgame/cg_consolecmds.c` - list/reload.
 * `codemp/game/bg_panimate.c` - remaps are cleared with the anim sets.
-* `tools/animremap/gla_append.py` - builds a model's own GLA.
+* `tools/animremap/gla_append.py` - appends whole GLAs (same bone order only).
+* `tools/animremap/gla_build.py` + `example_build.txt` - picks named animations
+  or frame ranges from any humanoid-bone GLA into one GLA (bones matched by name).
 * `codemp/rd-common/tr_animremap_gla.h` + one line in each renderer's `.glm`
   loader (rd-vulkan, rd-vanilla, rd-rend2, rd-dedicated) - `skeleton` lines.
 * `codemp/game/bg_public.h` - `MAX_ANIM_EVENTS` 300 -> 512.
