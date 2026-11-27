@@ -543,7 +543,8 @@ Tactics for the Jedi Outcast 1.02 saber rules (w_saber_jk2.c, bg_saber_jk2.c, w_
 Runs on the finished usercmd, after the duel timing, so it has the last word on attack and the
 movement keys; the cliff check after it can still veto a jump. Everything read here is on the
 screen for a player too: the enemy's animation (which tells his saber move and how far into it he
-is), where he stands and looks, and the bot's own state. bot_jk2Tactics picks the parts (testing).
+is), where he stands and looks, and the bot's own state. bot_jk2Tactics picks the parts (default 15:
+guard, red DFA, lock, heal; the others lost or showed no gain in A/B matches, see docs/NICJK_BOTS.md).
    1 guard:   1.02 blocks by itself, but only when the defender is not attacking, is in the ready
               pose or a parry, does not hold attack, and faces the hit (saber defence 3: anything
               in front; 2: within 53 degrees; 1: within 25). A swing that is about to reach the bot
@@ -19830,9 +19831,9 @@ int BotAISetup(int restart) {
 	trap->Cvar_Register(&bot_profile, "bot_profile", "0", 0);
 	trap->Cvar_Register(&bot_fixes, "bot_fixes", "1", CVAR_ARCHIVE);
 	trap->Cvar_Register(&bot_abBase, "bot_abBase", "0", 0);	// features of the baseline group in an A/B test
-	trap->Cvar_Register(&bot_features, "bot_features", "12577279", CVAR_ARCHIVE);	// everything measured to help or do no harm; off: 512 (guide tactics), 1024 (counters), 4096 (swing table), 4194304 (combat walking), which lost or showed no gain
+	trap->Cvar_Register(&bot_features, "bot_features", "46131711", CVAR_ARCHIVE);	// everything measured to help or do no harm (33554432 acts only in JK2 1.02 mode); off: 512 (guide tactics), 1024 (counters), 4096 (swing table), 4194304 (combat walking), which lost or showed no gain
 	trap->Cvar_Register(&bot_abTest, "bot_abTest", "0", 0);
-	trap->Cvar_Register(&bot_jk2Tactics, "bot_jk2Tactics", "511", 0);	// parts of bot_features 33554432 (testing)
+	trap->Cvar_Register(&bot_jk2Tactics, "bot_jk2Tactics", "15", 0);	// parts of bot_features 33554432: guard, red DFA, lock, heal won their A/B; 16, 32, 64, 128, 256 did not
 	trap->Cvar_Register(&bot_attachments, "bot_attachments", "1", 0);
 	trap->Cvar_Register(&bot_camp, "bot_camp", "1", 0);
 
