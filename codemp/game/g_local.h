@@ -1970,6 +1970,16 @@ qboolean HasSetSaberOnly(void);
 void WP_ForcePowerStop( gentity_t *self, forcePowers_t forcePower );
 void WP_SaberPositionUpdate( gentity_t *self, usercmd_t *ucmd );
 int WP_SaberCanBlock(gentity_t *self, vec3_t point, int dflags, int mod, qboolean projectile, int attackStr);
+
+// JK2 1.02 saber system (w_saber_jk2.c), only used while g_jk2_102sabersystem is on
+int WP_SaberCanBlock_JK2( gentity_t *self, vec3_t point, int dflags, int mod, qboolean projectile, int attackStr );
+qboolean WP_SabersCheckLock_JK2( gentity_t *ent1, gentity_t *ent2 );
+void WP_JK2SaberGeometry( gentity_t *self, gentity_t *mySaber, vec3_t boltOrigin, vec3_t boltDir, vec3_t end );
+void WP_JK2SaberBox( gentity_t *saberent );
+void WP_JK2SaberDamage( gentity_t *self, vec3_t boltOrigin, vec3_t end );
+void G_JK2SaberCheckSingle( gentity_t *ent );
+void Cmd_SaberAttackCycle_JK2( gentity_t *ent );
+void G_JK2SaberStats( char *buf, int bufSize );
 void WP_SaberInitBladeData( gentity_t *ent );
 void WP_InitForcePowers( gentity_t *ent );
 void WP_SpawnInitForcePowers( gentity_t *ent );
@@ -2093,6 +2103,51 @@ void Svcmd_ToggleAllowVote_f( void );
 	#include "g_xcvar.h"
 #undef XCVAR_PROTO
 void G_RegisterCvars( void );
+qboolean G_JK2ItemNotInJK2( const gitem_t *item ); // g_items.c
+void BG_JK2SetTables( qboolean on ); // bg_pmove_jk2.c
+void G_JK2CountDrain( int forcePower, int amount ); // w_force_jk2.c
+void G_JK2ForceStats( char *buf, int size ); // w_force_jk2.c
+
+// JK2 1.02 mode (g_jk2_102sabersystem): saber, force, movement, weapons and match rules of JK2 1.02.
+// Same definition as in bg_local.h, for game files that do not include it.
+#ifndef JK2SABER
+#define JK2SABER() ( g_jk2_102sabersystem.integer != 0 )
+#endif
+
+// jaPRO/TaystJK gameplay options as the game reads them: while the JK2 1.02 mode is on each one is
+// treated as its neutral value (0, or 1.0 for scales, 0.5 for self damage), without changing the cvar.
+#define JK2O_TWEAKFORCE              ( JK2SABER() ? 0 : g_tweakForce.integer )
+#define JK2O_TWEAKWEAPONS            ( JK2SABER() ? 0 : g_tweakWeapons.integer )
+#define JK2O_TWEAKSABER              ( JK2SABER() ? 0 : g_tweakSaber.integer )
+#define JK2O_FLIPKICK                ( JK2SABER() ? 0 : g_flipKick.integer )
+#define JK2O_FIXROLL                 ( JK2SABER() ? 0 : g_fixRoll.integer )
+#define JK2O_LOCATIONDAMAGE          ( JK2SABER() ? 0 : g_locationBasedDamage.integer )
+#define JK2O_PROJG2COLLISION         ( JK2SABER() ? 0 : d_projectileGhoul2Collision.integer )
+#define JK2O_UNLAGGED                ( JK2SABER() ? 0 : g_unlagged.integer )
+#define JK2O_FIXLIGHTNING            ( JK2SABER() ? 0 : g_fixLightning.integer )
+#define JK2O_FIXGETUPS               ( JK2SABER() ? 0 : g_fixGetups.integer )
+#define JK2O_NONRANDOMKNOCKDOWN      ( JK2SABER() ? 0 : g_nonRandomKnockdown.integer )
+#define JK2O_FIXKILLCREDIT           ( JK2SABER() ? 0 : g_fixKillCredit.integer )
+#define JK2O_GODCHAT                 ( JK2SABER() ? 0 : g_godChat.integer )
+#define JK2O_PROJINHERITANCE         ( JK2SABER() ? 0.0f : g_projectileInheritance.value )
+#define JK2O_PROJINHERITANCE_I       ( JK2SABER() ? 0 : g_projectileInheritance.integer )
+#define JK2O_FULLINHERITANCE         ( JK2SABER() ? 0 : g_fullInheritance.integer )
+#define JK2O_SLIDEONPLAYER           ( JK2SABER() ? 0 : g_slideOnPlayer.integer )
+#define JK2O_FIXPLAYERCOLLISION      ( JK2SABER() ? 0 : g_fixPlayerCollision.integer )
+#define JK2O_DEBUGMELEE              ( JK2SABER() ? 0 : g_debugMelee.integer )
+#define JK2O_LIGHTNINGBLOCK          ( JK2SABER() ? 0 : g_lightningBlockEnabled.integer )
+#define JK2O_MAXFALLDMG              ( JK2SABER() ? 0 : g_maxFallDmg.integer )
+#define JK2O_FLAGDRAG                ( JK2SABER() ? 0.0f : g_flagDrag.value )
+#define JK2O_WEAPONDAMAGESCALE       ( JK2SABER() ? 1.0f : g_weaponDamageScale.value )
+#define JK2O_PROJVELOCITYSCALE       ( JK2SABER() ? 1.0f : g_projectileVelocityScale.value )
+#define JK2O_SPLASHDAMAGESCALE       ( JK2SABER() ? 1.0f : g_splashDamageScale.value )
+#define JK2O_SELFDAMAGESCALE         ( JK2SABER() ? 0.5f : g_selfDamageScale.value )
+#define JK2O_TEAMHEALSCALE           ( JK2SABER() ? 1.0f : g_teamHealScale.value )
+#define JK2O_TEAMENERGIZESCALE       ( JK2SABER() ? 1.0f : g_teamEnergizeScale.value )
+#define JK2O_TEAMABSORBSCALE         ( JK2SABER() ? 1.0f : g_teamAbsorbScale.value )
+#define JK2O_FLIPKICKDAMAGESCALE     ( JK2SABER() ? 1.0f : g_flipKickDamageScale.value )
+#define JK2O_GLITCHKICKDAMAGE        ( JK2SABER() ? -1 : g_glitchKickDamage.integer )
+#define JK2O_FORCEDISABLEFFA         ( JK2SABER() ? 0 : g_forcePowerDisableFFA.integer )
 void G_UpdateCvars( void );
 
 extern gameImport_t *trap;

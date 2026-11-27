@@ -1350,7 +1350,7 @@ qboolean ValidRaceSettings(int restrictions, gentity_t *player)
 		return qfalse;
 	if (g_jediVmerc.integer) //umm..
 		return qfalse;
-	if (g_debugMelee.integer >= 2)
+	if (JK2O_DEBUGMELEE >= 2)
 		return qfalse;
 	if (!g_smoothClients.integer)
 		return qfalse;
@@ -2932,7 +2932,7 @@ void hurt_touch( gentity_t *self, gentity_t *other, trace_t *trace ) {
 		if (other->client->ps.otherKillerTime > level.time)
 		{ //we're as good as dead, so if someone pushed us into this then remember them
 //JAPRO - Serverside - Fixkillcredit - Start
-			if (g_fixKillCredit.integer) {
+			if (JK2O_FIXKILLCREDIT) {
 				other->client->ps.otherKillerTime = level.time + 2000;
 				other->client->ps.otherKillerDebounceTime = level.time + 100;
 			}

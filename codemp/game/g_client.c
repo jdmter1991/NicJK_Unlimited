@@ -2421,7 +2421,7 @@ void G_ApplyPlayerModelScale( gentity_t *ent, const char *modelWithSkin, qboolea
 	if ( slash ) {
 		*slash = 0;
 	}
-	scale = GetModelScale( model );
+	scale = JK2SABER() ? 1.0f : GetModelScale( model ); // JK2 1.02 has no model scale (and no scaled box)
 	ent->client->ps.iModelScale = (int)( scale * 100.0f );
 	VectorScale( playerMins, scale, mins );
 	VectorScale( playerMaxs, scale, maxs );
@@ -4068,7 +4068,7 @@ void GiveClientWeapons(gclient_t *client) {
 				client->ps.stats[STAT_WEAPONS] |= (1 << i);
 		}
 
-		if (g_tweakWeapons.integer & WT_TRIBES) { //oh right, startingWeapons bit 1 gives more ammo
+		if (JK2O_TWEAKWEAPONS & WT_TRIBES) { //oh right, startingWeapons bit 1 gives more ammo
 			if (g_startingWeapons.integer & (1 << WP_BLASTER) || g_startingWeapons.integer & (1 << WP_BRYAR_OLD))
 				client->ps.ammo[AMMO_BLASTER] = 600;
 			if (g_startingWeapons.integer & (1 << WP_DISRUPTOR) || g_startingWeapons.integer & (1 << WP_BOWCASTER) || g_startingWeapons.integer & (1 << WP_DEMP2))
@@ -4491,7 +4491,55 @@ void ClientSpawn(gentity_t *ent) {
 
 	client->savedJumpLevel = 0;//rabbit
 
-	if ( level.gametype != GT_HOLOCRON 
+	if ( JK2SABER() && !client->sess.raceMode && level.gametype != GT_SIEGE )
+	{ // JK2 1.02 spawn loadout (mv g_client.c:1935-1980): saber, or the stun baton without saber offence,
+	  // plus the pistol (JK2's pistol is our WP_BRYAR_OLD), and the pistol is selected; no jediVmerc rules
+		if (level.gametype == GT_HOLOCRON)
+		{
+			//always get free saber level 1 in holocron
+			client->ps.stats[STAT_WEAPONS] |= ( 1 << WP_SABER );
+		}
+		else
+		{
+			if (client->ps.fd.forcePowerLevel[FP_SABER_OFFENSE])
+			{
+				client->ps.stats[STAT_WEAPONS] |= ( 1 << WP_SABER );
+			}
+			else
+			{ //if you don't have saber attack rank then you don't get a saber
+				client->ps.stats[STAT_WEAPONS] |= (1 << WP_STUN_BATON);
+			}
+		}
+
+		if (!wDisable || !(wDisable & (1 << WP_BRYAR_OLD)))
+		{
+			client->ps.stats[STAT_WEAPONS] |= ( 1 << WP_BRYAR_OLD );
+		}
+		else if (level.gametype == GT_JEDIMASTER)
+		{
+			client->ps.stats[STAT_WEAPONS] |= ( 1 << WP_BRYAR_OLD );
+		}
+
+		if (level.gametype == GT_JEDIMASTER)
+		{
+			client->ps.stats[STAT_WEAPONS] &= ~(1 << WP_SABER);
+			client->ps.stats[STAT_WEAPONS] |= (1 << WP_STUN_BATON);
+		}
+
+		if (client->ps.stats[STAT_WEAPONS] & (1 << WP_BRYAR_OLD))
+		{
+			client->ps.weapon = WP_BRYAR_OLD;
+		}
+		else if (client->ps.stats[STAT_WEAPONS] & (1 << WP_SABER))
+		{
+			client->ps.weapon = WP_SABER;
+		}
+		else
+		{
+			client->ps.weapon = WP_STUN_BATON;
+		}
+	}
+	else if ( level.gametype != GT_HOLOCRON 
 		&& level.gametype != GT_JEDIMASTER 
 		&& !HasSetSaberOnly()
 		&& !AllForceDisabled( g_forcePowerDisable.integer )
@@ -4605,7 +4653,7 @@ void ClientSpawn(gentity_t *ent) {
 			client->ps.stats[STAT_WEAPONS] |= (1 << WP_MELEE);
 		}
 
-		if (client->ps.stats[STAT_WEAPONS] & (1 << WP_SABER) && (!(g_tweakWeapons.integer & WT_TRIBES)))
+		if (client->ps.stats[STAT_WEAPONS] & (1 << WP_SABER) && (!(JK2O_TWEAKWEAPONS & WT_TRIBES)))
 		{
 			client->ps.weapon = WP_SABER;
 		}
@@ -4716,6 +4764,11 @@ void ClientSpawn(gentity_t *ent) {
 		client->ps.stats[STAT_HOLDABLE_ITEMS] = bgSiegeClasses[client->siegeClass].invenItems;
 		client->ps.stats[STAT_HOLDABLE_ITEM] = 0;
 	}
+	else if ( JK2SABER() && !client->sess.raceMode )
+	{ // JK2 1.02: no holdables at spawn
+		client->ps.stats[STAT_HOLDABLE_ITEMS] = 0;
+		client->ps.stats[STAT_HOLDABLE_ITEM] = 0;
+	}
 	else
 	{
 		GiveClientItems(client);
@@ -4745,8 +4798,8 @@ void ClientSpawn(gentity_t *ent) {
 	}
 
 // nmckenzie: DESERT_SIEGE... or well, siege generally.  This was over-writing the max value, which was NOT good for siege.
-	if (!g_startingWeapons.integer && inSiegeWithClass == qfalse)
-	{
+	if ((!g_startingWeapons.integer || (JK2SABER() && !client->sess.raceMode)) && inSiegeWithClass == qfalse)
+	{ // (JK2 1.02 always gives 100 blaster ammo, mv g_client.c:2123)
 		client->ps.ammo[AMMO_BLASTER] = 100; //ammoData[AMMO_BLASTER].max; //100 seems fair.
 	}
 //	client->ps.ammo[AMMO_POWERCELL] = ammoData[AMMO_POWERCELL].max;
@@ -4850,7 +4903,7 @@ void ClientSpawn(gentity_t *ent) {
 	}
 	else
 	{//Clan Arena starting armor/hp here
-		if (g_tweakWeapons.integer & WT_TRIBES) {
+		if (JK2O_TWEAKWEAPONS & WT_TRIBES) {
 			ent->health = client->ps.stats[STAT_HEALTH] = client->ps.stats[STAT_MAX_HEALTH];
 			client->ps.stats[STAT_ARMOR] = 0;
 		}
@@ -4872,6 +4925,16 @@ void ClientSpawn(gentity_t *ent) {
 			client->ps.stats[STAT_ARMOR] = client->ps.stats[STAT_MAX_HEALTH];
 		else
 			client->ps.stats[STAT_ARMOR] = client->ps.stats[STAT_MAX_HEALTH] * 0.25;
+	}
+
+	if ( JK2SABER() && !client->sess.raceMode && level.gametype != GT_SIEGE && level.gametype != GT_POWERDUEL )
+	{ // JK2 1.02: 125 health and 25 armor in every gametype, duel included (mv g_client.c:2164-2167)
+		ent->health = client->ps.stats[STAT_HEALTH] = client->ps.stats[STAT_MAX_HEALTH] * 1.25;
+		client->ps.stats[STAT_ARMOR] = client->ps.stats[STAT_MAX_HEALTH] * 0.25;
+		if ( developer.integer )
+		{ // test output: the 1.02 spawn state
+			trap->Print( "JK2 spawn: client %d health %d armor %d weapons 0x%x weapon %d blaster ammo %d holdables 0x%x\n", index, ent->health, client->ps.stats[STAT_ARMOR], client->ps.stats[STAT_WEAPONS], client->ps.weapon, client->ps.ammo[AMMO_BLASTER], client->ps.stats[STAT_HOLDABLE_ITEMS] );
+		}
 	}
 
 	G_SetOrigin( ent, spawn_origin );
@@ -5067,7 +5130,7 @@ void ClientDisconnect( int clientNum ) {
 	}
 
 //JAPRO - Serverside - Stop those pesky reconnect whores - Start
-	if (g_fixKillCredit.integer > 1 && (ent->health > 0) && !(ent->r.svFlags & SVF_BOT) && 0 <= ent->client->ps.otherKiller && ent->client->ps.otherKiller < MAX_CLIENTS && ent->client->ps.otherKillerTime > level.time && ent->client->sess.sessionTeam != TEAM_SPECTATOR)
+	if (JK2O_FIXKILLCREDIT > 1 && (ent->health > 0) && !(ent->r.svFlags & SVF_BOT) && 0 <= ent->client->ps.otherKiller && ent->client->ps.otherKiller < MAX_CLIENTS && ent->client->ps.otherKillerTime > level.time && ent->client->sess.sessionTeam != TEAM_SPECTATOR)
 	{
 		attacker = &g_entities[ent->client->ps.otherKiller];
 		if (attacker->client) {

@@ -2966,7 +2966,7 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
 				break;
 			case PDSOUND_ABSORBHIT:
 				sID = trap->S_RegisterSound("sound/weapons/force/absorbhit.mp3");
-				if (es->trickedentindex >= 0 && es->trickedentindex < MAX_CLIENTS)
+				if (!cgs.jk2_102sabersystem && es->trickedentindex >= 0 && es->trickedentindex < MAX_CLIENTS) // JK2 1.02: the hit sound is at the attacker, no absorber index
 				{
 					int clnum = es->trickedentindex;
 

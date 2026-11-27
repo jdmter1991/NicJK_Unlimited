@@ -109,14 +109,41 @@ void PM_SetAnim(int setAnimParts,int anim,int setAnimFlags);
 void PM_WeaponLightsaber(void);
 void PM_SetSaberMove(short newMove);
 
+// JK2 1.02 saber system (bg_saber_jk2.c), only used while JK2SABER() is true
+void PM_WeaponLightsaber_JK2( void );
+void PM_SetSaberMove_JK2( short newMove );
+void PM_CheckJumpAttack_JK2( void );
+int PM_GetSaberStance_JK2( void );
+qboolean BG_SaberInAttack_JK2( int move );
+qboolean BG_SaberInSpecial_JK2( int move );
+qboolean BG_SaberInSpecialAttack_JK2( int anim );
+qboolean BG_SpinningSaberAnim_JK2( int anim );
+qboolean BG_FlippingAnim_JK2( int anim );
+qboolean PM_SaberInBrokenParry_JK2( int move );
+void PM_SetAnim_JK2( int setAnimParts, int anim, int setAnimFlags );
+
+// JK2 1.02 force, movement, weapons and match rules (bg_pmove_jk2.c, w_force_jk2.c, g_jk2.c)
+qboolean BG_InSpecialJump_JK2( int anim );
+void BG_JK2SetTables( qboolean on );
+
 void PM_SetForceJumpZStart(float value);
 
 void BG_CycleInven(playerState_t *ps, int direction);
 
+// JK2 1.02 saber system (g_jk2_102sabersystem). Every 1.02 code path is gated by this.
 #ifdef _GAME
-#define MB2BLOCK() ( g_mb2manualblock.integer != 0 )
+#ifndef JK2SABER
+#define JK2SABER() ( g_jk2_102sabersystem.integer != 0 )
+#endif
 #else
-#define MB2BLOCK() ( cgs.mb2manualblock != 0 )
+#define JK2SABER() ( cgs.jk2_102sabersystem != 0 )
+#endif
+
+// MB2 manual block is ignored while the JK2 1.02 saber system is on (1.02 blocks automatically).
+#ifdef _GAME
+#define MB2BLOCK() ( g_mb2manualblock.integer != 0 && !JK2SABER() )
+#else
+#define MB2BLOCK() ( cgs.mb2manualblock != 0 && !JK2SABER() )
 #endif
 
 #ifdef _GAME

@@ -51,6 +51,24 @@ int		ysalamiriLoopSound	= 0;
 
 int ForceShootDrain( gentity_t *self );
 
+// JK2 1.02 force powers (w_force_jk2.c), used while JK2SABER() is true
+int ForcePowerUsableOn_JK2( gentity_t *attacker, gentity_t *other, forcePowers_t forcePower );
+qboolean WP_ForcePowerAvailable_JK2( gentity_t *self, forcePowers_t forcePower );
+qboolean WP_ForcePowerUsable_JK2( gentity_t *self, forcePowers_t forcePower );
+int WP_AbsorbConversion_JK2( gentity_t *attacked, int atdAbsLevel, gentity_t *attacker, int atPower, int atPowerLevel, int atForceSpent );
+void ForceHeal_JK2( gentity_t *self );
+void ForceTeamHeal_JK2( gentity_t *self );
+void ForceTeamForceReplenish_JK2( gentity_t *self );
+void ForceGrip_JK2( gentity_t *self );
+void ForceLightning_JK2( gentity_t *self );
+void ForceShootLightning_JK2( gentity_t *self );
+void ForceDrain_JK2( gentity_t *self );
+int ForceShootDrain_JK2( gentity_t *self );
+void ForceTelepathy_JK2( gentity_t *self );
+void ForceThrow_JK2( gentity_t *self, qboolean pull );
+void DoGripAction_JK2( gentity_t *self, forcePowers_t forcePower );
+void WP_ForcePowersUpdate_JK2( gentity_t *self, usercmd_t *ucmd );
+
 gentity_t *G_PreDefSound(vec3_t org, int pdSound)
 {
 	gentity_t	*te;
@@ -199,7 +217,7 @@ void WP_InitForcePowers( gentity_t *ent ) {
 		ent->client->ps.fd.forcePowersKnown &= ~(1<<i);
 	}
 
-	if (!(g_tweakWeapons.integer & WT_TRIBES) || ent->client->sess.raceMode)
+	if (!(JK2O_TWEAKWEAPONS & WT_TRIBES) || ent->client->sess.raceMode)
 		ent->client->ps.fd.forcePowerSelected = -1;
 	ent->client->ps.fd.forceSide = 0;
 
@@ -273,7 +291,7 @@ void WP_InitForcePowers( gentity_t *ent ) {
 	ent->client->ps.fd.forceSide = atoi( readBuf );
 	i++;
 
-	if ( level.gametype != GT_SIEGE && (ent->r.svFlags & SVF_BOT) && botstates[ent->s.number] ) {
+	if ( level.gametype != GT_SIEGE && (ent->r.svFlags & SVF_BOT) && botstates[ent->s.number] && !JK2SABER() ) { // JK2 1.02 takes the bot file's powers as they are (mv w_force.c:228)
 		// hmm..I'm going to cheat here.
 		int oldI = i;
 		i_r = 0;
@@ -408,7 +426,7 @@ void WP_InitForcePowers( gentity_t *ent ) {
 			lastFPKnown = i;
 	}
 
-	if ((g_tweakWeapons.integer & WT_TRIBES) && !ent->client->sess.raceMode) {
+	if ((JK2O_TWEAKWEAPONS & WT_TRIBES) && !ent->client->sess.raceMode) {
 		ent->client->ps.fd.forcePowerSelected = ent->client->sess.selectedFP;
 		if (!ent->client->ps.fd.forcePowerSelected)
 			ent->client->ps.fd.forcePowerSelected = 2;
@@ -554,6 +572,7 @@ extern qboolean BG_InKnockDown( int anim ); //bg_pmove.c
 
 int ForcePowerUsableOn(gentity_t *attacker, gentity_t *other, forcePowers_t forcePower)
 {
+	if ( JK2SABER() ) { return ForcePowerUsableOn_JK2(attacker, other, forcePower); } // JK2 1.02 (w_force_jk2.c)
 	//if (other && other->client && other->client->pers.raceMode)
 		//return 0;
 
@@ -575,7 +594,7 @@ int ForcePowerUsableOn(gentity_t *attacker, gentity_t *other, forcePowers_t forc
 		return 0;
 	if (other && other->client && other->client->sess.raceMode && !other->client->ps.duelInProgress)//fix having forcepowers used on you when in racemode
 		return 0;
-	if (g_godChat.integer && level.gametype == GT_FFA) {
+	if (JK2O_GODCHAT && level.gametype == GT_FFA) {
 		if (attacker && attacker->client && (attacker->client->ps.eFlags & EF_TALK)) //Dont let people in chat use force ever
 			return 0;
 		if (other && other->client && (other->client->ps.eFlags & EF_TALK) && (other->client->pers.lastChatTime + 3000) < level.time)  //Only god chat them 3 seconds after their chatbox goes up to prevent some abuse :/
@@ -628,7 +647,7 @@ int ForcePowerUsableOn(gentity_t *attacker, gentity_t *other, forcePowers_t forc
 	}
 
 //[JAPRO - Serverside - Force - Allow push/pull on knocked down players - Start]
-	if (!(g_tweakForce.integer & FT_PUSHPULLKD) && other && other->client && (forcePower == FP_PUSH ||	forcePower == FP_PULL))
+	if (!(JK2O_TWEAKFORCE & FT_PUSHPULLKD) && other && other->client && (forcePower == FP_PUSH ||	forcePower == FP_PULL))
 	{
 		if (BG_InKnockDown(other->client->ps.legsAnim))
 			return 0;
@@ -659,6 +678,7 @@ int ForcePowerUsableOn(gentity_t *attacker, gentity_t *other, forcePowers_t forc
 
 qboolean WP_ForcePowerAvailable( gentity_t *self, forcePowers_t forcePower, int overrideAmt )
 {
+	if ( JK2SABER() && !self->NPC ) { return WP_ForcePowerAvailable_JK2(self, forcePower); } // JK2 1.02 (w_force_jk2.c)
 	int drain = overrideAmt ? overrideAmt :
 				forcePowerNeeded[self->client->ps.fd.forcePowerLevel[forcePower]][forcePower];
 
@@ -669,13 +689,13 @@ qboolean WP_ForcePowerAvailable( gentity_t *self, forcePowers_t forcePower, int 
 	if (self->client->sess.raceMode && (forcePower == FP_SPEED)) {
 		drain = 75;
 	}
-	else if ((g_tweakWeapons.integer & WT_TRIBES) && (forcePower == FP_PROTECT)) {
+	else if ((JK2O_TWEAKWEAPONS & WT_TRIBES) && (forcePower == FP_PROTECT)) {
 		drain = 50;
 	}
-	else if ((g_tweakWeapons.integer & WT_TRIBES) && (forcePower == FP_PUSH)) {
+	else if ((JK2O_TWEAKWEAPONS & WT_TRIBES) && (forcePower == FP_PUSH)) {
 		drain = 95;
 	}
-	else if ((g_tweakWeapons.integer & WT_TRIBES) && (forcePower == FP_ABSORB)) {//overdrive
+	else if ((JK2O_TWEAKWEAPONS & WT_TRIBES) && (forcePower == FP_ABSORB)) {//overdrive
 		drain = 30;
 	}
 	//Tribes protect? wt_tribes
@@ -715,6 +735,7 @@ qboolean WP_ForcePowerInUse( gentity_t *self, forcePowers_t forcePower )
 
 qboolean WP_ForcePowerUsable( gentity_t *self, forcePowers_t forcePower )
 {
+	if ( JK2SABER() && !self->NPC ) { return WP_ForcePowerUsable_JK2(self, forcePower); } // JK2 1.02 (w_force_jk2.c)
 	if (self->client && self->client->sess.raceMode && !self->client->ps.duelInProgress)
 		return qfalse;
 	
@@ -742,7 +763,7 @@ qboolean WP_ForcePowerUsable( gentity_t *self, forcePowers_t forcePower )
 		return qfalse;
 	}
 
-	if (!self->client->ps.duelInProgress && (g_forcePowerDisableFFA.integer & (1<<forcePower))) {
+	if (!self->client->ps.duelInProgress && (JK2O_FORCEDISABLEFFA & (1<<forcePower))) {
 		return qfalse;//If we are not in a duel, and FFA power cvar disables it, return qfalse
 	}
 
@@ -753,7 +774,7 @@ qboolean WP_ForcePowerUsable( gentity_t *self, forcePowers_t forcePower )
 
 	if ( !(self->client->ps.fd.forcePowersKnown & ( 1 << forcePower )) )
 	{//don't know this power
-		if (g_tweakWeapons.integer & WT_TRIBES) {
+		if (JK2O_TWEAKWEAPONS & WT_TRIBES) {
 			if (forcePower == FP_PROTECT || forcePower == FP_PUSH || forcePower == FP_ABSORB) {
 			}
 			else return qfalse;
@@ -776,7 +797,7 @@ qboolean WP_ForcePowerUsable( gentity_t *self, forcePowers_t forcePower )
 
 	if (!self->client->ps.fd.forcePowerLevel[forcePower])
 	{
-		if (g_tweakWeapons.integer & WT_TRIBES) {
+		if (JK2O_TWEAKWEAPONS & WT_TRIBES) {
 			if (forcePower == FP_PROTECT || forcePower == FP_PUSH || forcePower == FP_ABSORB) {
 			}
 			else return qfalse;
@@ -784,7 +805,7 @@ qboolean WP_ForcePowerUsable( gentity_t *self, forcePowers_t forcePower )
 		else return qfalse;
 	}
 
-	if ( g_debugMelee.integer )
+	if ( JK2O_DEBUGMELEE )
 	{
 		if ( (self->client->ps.pm_flags&PMF_STUCK_TO_WALL) )
 		{//no offensive force powers when stuck to wall
@@ -864,6 +885,7 @@ qboolean WP_ForcePowerUsable( gentity_t *self, forcePowers_t forcePower )
 
 int WP_AbsorbConversion(gentity_t *attacked, int atdAbsLevel, gentity_t *attacker, int atPower, int atPowerLevel, int atForceSpent)
 {
+	if ( JK2SABER() ) { return WP_AbsorbConversion_JK2(attacked, atdAbsLevel, attacker, atPower, atPowerLevel, atForceSpent); } // JK2 1.02 (w_force_jk2.c)
 	int getLevel = 0;
 	int addTot = 0;
 	gentity_t *abSound;
@@ -877,13 +899,13 @@ int WP_AbsorbConversion(gentity_t *attacked, int atdAbsLevel, gentity_t *attacke
 		return -1;
 	}
 
-	if ((g_tweakForce.integer & FT_GRIPABSORB) && atPower == FP_GRIP)//JAPRO - Serverside - Force - Stop failed grips from giving forcepoints to reciever.. why does this work
+	if ((JK2O_TWEAKFORCE & FT_GRIPABSORB) && atPower == FP_GRIP)//JAPRO - Serverside - Force - Stop failed grips from giving forcepoints to reciever.. why does this work
 		return -1;
 
 //[JAPRO - Serverside - Saber - Tweak force lightning - Start]
 	if (!atdAbsLevel)
 	{ //looks like attacker doesn't have any absorb power
-		if (g_fixLightning.integer && atPower == FP_LIGHTNING)
+		if (JK2O_FIXLIGHTNING && atPower == FP_LIGHTNING)
 		{
 			addTot = (atForceSpent);
 
@@ -904,7 +926,7 @@ int WP_AbsorbConversion(gentity_t *attacked, int atdAbsLevel, gentity_t *attacke
 
 	if (!(attacked->client->ps.fd.forcePowersActive & (1 << FP_ABSORB)))
 	{ //absorb is not active
-		if (g_fixLightning.integer && atPower == FP_LIGHTNING)
+		if (JK2O_FIXLIGHTNING && atPower == FP_LIGHTNING)
 		{
 			addTot = (atForceSpent);
 
@@ -938,7 +960,7 @@ int WP_AbsorbConversion(gentity_t *attacked, int atdAbsLevel, gentity_t *attacke
 	if (addTot < 1 && atForceSpent >= 1)
 		addTot = 1;
 	if (OnSameTeam(attacked, attacker))
-		addTot *= g_teamAbsorbScale.value;
+		addTot *= JK2O_TEAMABSORBSCALE;
 
 	attacked->client->ps.fd.forcePower += addTot;
 	if (attacked->client->ps.fd.forcePower > attacked->client->ps.fd.forcePowerMax)
@@ -1109,7 +1131,7 @@ void WP_ForcePowerStart( gentity_t *self, forcePowers_t forcePower, int override
 	case FP_PROTECT:
 		hearable = qtrue;
 		hearDist = 256;
-		if (g_tweakWeapons.integer & WT_TRIBES)
+		if (JK2O_TWEAKWEAPONS & WT_TRIBES)
 			duration = 60000; //unlimited length in tribes?
 		else
 			duration = 20000;
@@ -1137,7 +1159,8 @@ void WP_ForcePowerStart( gentity_t *self, forcePowers_t forcePower, int override
 		duration = overrideAmt;
 		overrideAmt = 0;
 		self->client->ps.fd.forcePowersActive |= ( 1 << forcePower );
-		self->client->ps.fd.forceDrainTime = level.time;
+		if (!JK2SABER()) // not in JK2 1.02 (mv w_force.c:WP_ForcePowerStart)
+			self->client->ps.fd.forceDrainTime = level.time;
 		//self->client->ps.activeForcePass = self->client->ps.fd.forcePowerLevel[FP_DRAIN];
 		break;
 	case FP_SEE:
@@ -1204,6 +1227,7 @@ void WP_ForcePowerStart( gentity_t *self, forcePowers_t forcePower, int override
 
 void ForceHeal( gentity_t *self )
 {
+	if ( JK2SABER() && !self->NPC ) { ForceHeal_JK2(self); return; } // JK2 1.02 (w_force_jk2.c)
 	if ( self->health <= 0 )
 	{
 		return;
@@ -1287,6 +1311,7 @@ void WP_AddToClientBitflags(gentity_t *ent, int entNum)
 
 void ForceTeamHeal( gentity_t *self )
 {
+	if ( JK2SABER() && !self->NPC ) { ForceTeamHeal_JK2(self); return; } // JK2 1.02 (w_force_jk2.c)
 	float radius = 256;
 	int i = 0;
 	gentity_t *ent;
@@ -1346,15 +1371,15 @@ void ForceTeamHeal( gentity_t *self )
 
 	if (numpl == 1)
 	{
-		healthadd = 50 * g_teamHealScale.value;
+		healthadd = 50 * JK2O_TEAMHEALSCALE;
 	}
 	else if (numpl == 2)
 	{
-		healthadd = 33 * g_teamHealScale.value;
+		healthadd = 33 * JK2O_TEAMHEALSCALE;
 	}
 	else
 	{
-		healthadd = 25 * g_teamHealScale.value;
+		healthadd = 25 * JK2O_TEAMHEALSCALE;
 	}
 
 	self->client->ps.fd.forcePowerDebounce[FP_TEAM_HEAL] = level.time + 2000;
@@ -1394,6 +1419,7 @@ void ForceTeamHeal( gentity_t *self )
 
 void ForceTeamForceReplenish( gentity_t *self )
 {
+	if ( JK2SABER() && !self->NPC ) { ForceTeamForceReplenish_JK2(self); return; } // JK2 1.02 (w_force_jk2.c)
 	float radius = 256;
 	int i = 0;
 	gentity_t *ent;
@@ -1453,15 +1479,15 @@ void ForceTeamForceReplenish( gentity_t *self )
 
 	if (numpl == 1)
 	{
-		poweradd = 50 * g_teamEnergizeScale.value;
+		poweradd = 50 * JK2O_TEAMENERGIZESCALE;
 	}
 	else if (numpl == 2)
 	{
-		poweradd = 33 * g_teamEnergizeScale.value;
+		poweradd = 33 * JK2O_TEAMENERGIZESCALE;
 	}
 	else
 	{
-		poweradd = 25 * g_teamEnergizeScale.value;
+		poweradd = 25 * JK2O_TEAMENERGIZESCALE;
 	}
 	self->client->ps.fd.forcePowerDebounce[FP_TEAM_FORCE] = level.time + 2000;
 
@@ -1495,6 +1521,7 @@ void ForceTeamForceReplenish( gentity_t *self )
 
 void ForceGrip( gentity_t *self )
 {
+	if ( JK2SABER() && !self->NPC ) { ForceGrip_JK2(self); return; } // JK2 1.02 (w_force_jk2.c)
 	trace_t tr;
 	vec3_t tfrom, tto, fwd;
 
@@ -1511,10 +1538,10 @@ void ForceGrip( gentity_t *self )
 //[JAPRO - Serverside - Force - Allow grip while in getup - Start]
 	if ((self->client->ps.weaponTime - self->client->saberDelay) > 0)
 	{
-		if (g_fixGetups.integer && (self->client->ps.legsAnim == BOTH_GETUP_BROLL_R || self->client->ps.legsAnim == BOTH_GETUP_BROLL_L || self->client->ps.legsAnim == BOTH_GETUP_BROLL_F || self->client->ps.legsAnim == BOTH_GETUP_BROLL_B))
+		if (JK2O_FIXGETUPS && (self->client->ps.legsAnim == BOTH_GETUP_BROLL_R || self->client->ps.legsAnim == BOTH_GETUP_BROLL_L || self->client->ps.legsAnim == BOTH_GETUP_BROLL_F || self->client->ps.legsAnim == BOTH_GETUP_BROLL_B))
 		{
 		}
-		else if ((g_tweakForce.integer & FT_GRIPDURINGROLL) && ((self->client->ps.legsAnim == BOTH_ROLL_F || self->client->ps.legsAnim == BOTH_ROLL_B || self->client->ps.legsAnim == BOTH_ROLL_R || self->client->ps.legsAnim == BOTH_ROLL_L))) //ahh what the fuck.. i think this is the only case.. FF duels?
+		else if ((JK2O_TWEAKFORCE & FT_GRIPDURINGROLL) && ((self->client->ps.legsAnim == BOTH_ROLL_F || self->client->ps.legsAnim == BOTH_ROLL_B || self->client->ps.legsAnim == BOTH_ROLL_R || self->client->ps.legsAnim == BOTH_ROLL_L))) //ahh what the fuck.. i think this is the only case.. FF duels?
 		{
 		}
 		else 
@@ -1608,6 +1635,10 @@ void ForceSpeed( gentity_t *self, int forceDuration )
 	self->client->ps.forceAllowDeactivateTime = level.time + 1500;
 
 	WP_ForcePowerStart( self, FP_SPEED, forceDuration );
+	if (JK2SABER())
+	{ // mv w_force.c:ForceSpeed: forceSpeedSmash = 2, initial boost (clamped to the level's cap in BG_AdjustClientSpeed)
+		self->client->ps.stats[STAT_DASHTIME] = 2000;
+	}
 	G_Sound( self, CHAN_BODY, G_SoundIndex("sound/weapons/force/speed.wav") );
 	G_Sound( self, TRACK_CHANNEL_2, speedLoopSound );
 }
@@ -1650,7 +1681,7 @@ void ForceProtect( gentity_t *self )
 		(self->client->ps.fd.forcePowersActive & (1 << FP_PROTECT)) )
 	{
 		WP_ForcePowerStop( self, FP_PROTECT );
-		if (g_tweakWeapons.integer & WT_TRIBES) {
+		if (JK2O_TWEAKWEAPONS & WT_TRIBES) {
 			self->client->ps.fd.forcePowerDebounce[FP_PROTECT] = level.time + 1000; //fix that?
 		}
 		return;
@@ -1663,7 +1694,7 @@ void ForceProtect( gentity_t *self )
 
 //JAPRO - Serverside - Allow force combos - Start
 	// Make sure to turn off Force Rage and Force Absorb.
-	if (!(g_tweakForce.integer & FT_FORCECOMBO))
+	if (!(JK2O_TWEAKFORCE & FT_FORCECOMBO))
 	{
 		if (self->client->ps.fd.forcePowersActive & (1 << FP_RAGE) )
 		{
@@ -1677,7 +1708,7 @@ void ForceProtect( gentity_t *self )
 //JAPRO - Serverside - Allow force combos - End
 
 	self->client->ps.forceAllowDeactivateTime = level.time + 1500;
-	if (g_tweakWeapons.integer & WT_TRIBES) {
+	if (JK2O_TWEAKWEAPONS & WT_TRIBES) {
 		if (self->client->ps.fd.forcePowerDebounce[FP_PROTECT] - level.time > 0)
 			return;
 		WP_ForcePowerStart(self, FP_PROTECT, 40);
@@ -1700,7 +1731,7 @@ void ForceAbsorb( gentity_t *self )
 		(self->client->ps.fd.forcePowersActive & (1 << FP_ABSORB)) )
 	{
 		WP_ForcePowerStop( self, FP_ABSORB );
-		if (g_tweakWeapons.integer & WT_TRIBES) {
+		if (JK2O_TWEAKWEAPONS & WT_TRIBES) {
 			self->client->ps.fd.forcePowerDebounce[FP_ABSORB] = level.time + 1000; //fix that?
 		}
 		return;
@@ -1712,7 +1743,7 @@ void ForceAbsorb( gentity_t *self )
 	}
 
 //JAPRO - Serverside - Allow force combos - Start
-	if (!(g_tweakForce.integer & FT_FORCECOMBO))
+	if (!(JK2O_TWEAKFORCE & FT_FORCECOMBO))
 	{// Make sure to turn off Force Rage and Force Protection.
 		if (self->client->ps.fd.forcePowersActive & (1 << FP_RAGE) )
 		{
@@ -1727,7 +1758,7 @@ void ForceAbsorb( gentity_t *self )
 
 	self->client->ps.forceAllowDeactivateTime = level.time + 1500;
 
-	if (g_tweakWeapons.integer & WT_TRIBES) {
+	if (JK2O_TWEAKWEAPONS & WT_TRIBES) {
 		if (self->client->ps.fd.forcePowerDebounce[FP_ABSORB] - level.time > 0) //Bug when forcepowerdebounce is 0.... on first absorb use of thet map
 			return;
 		WP_ForcePowerStart(self, FP_ABSORB, 20); //Overdrive
@@ -1777,7 +1808,7 @@ void ForceRage( gentity_t *self )
 
 //JAPRO - Serverside - Allow force combos - Start
 	//Make sure to turn off Force Protection and Force Absorb.
-	if (!(g_tweakForce.integer & FT_FORCECOMBO))
+	if (!(JK2O_TWEAKFORCE & FT_FORCECOMBO))
 	{
 		if (self->client->ps.fd.forcePowersActive & (1 << FP_PROTECT) )
 		{
@@ -1800,6 +1831,7 @@ void ForceRage( gentity_t *self )
 
 void ForceLightning( gentity_t *self )
 {
+	if ( JK2SABER() && !self->NPC ) { ForceLightning_JK2(self); return; } // JK2 1.02 (w_force_jk2.c)
 	if ( self->health <= 0 )
 	{
 		return;
@@ -1868,7 +1900,7 @@ void ForceLightningDamage(gentity_t* self, gentity_t* traceEnt, vec3_t dir, vec3
 				int	dmg;
 				int modPowerLevel = -1;
 
-				if (g_fixLightning.integer > 1)//2,3 has nerfed dmg
+				if (JK2O_FIXLIGHTNING > 1)//2,3 has nerfed dmg
 					dmg = 1;
 				else
 					dmg = Q_irand(1, 2);
@@ -1909,7 +1941,7 @@ void ForceLightningDamage(gentity_t* self, gentity_t* traceEnt, vec3_t dir, vec3
 				{//2-handed lightning
 					//jackin' 'em up, Palpatine-style
 //[JAPRO - Serverside - Saber - Tweak force lightning - Start]
-					if (g_fixLightning.integer < 3)//0,1,2 has buffed melee dmg
+					if (JK2O_FIXLIGHTNING < 3)//0,1,2 has buffed melee dmg
 						dmg *= 2;
 					//[JAPRO - Serverside - Saber - Tweak force lightning - End]
 				}
@@ -1948,6 +1980,7 @@ void ForceLightningDamage(gentity_t* self, gentity_t* traceEnt, vec3_t dir, vec3
 
 void ForceShootLightning( gentity_t *self )
 {
+	if ( JK2SABER() && !self->NPC ) { ForceShootLightning_JK2(self); return; } // JK2 1.02 (w_force_jk2.c)
 	trace_t	tr;
 	vec3_t	end, forward;
 	gentity_t	*traceEnt;
@@ -2068,6 +2101,7 @@ void ForceShootLightning( gentity_t *self )
 
 void ForceDrain( gentity_t *self )
 {
+	if ( JK2SABER() && !self->NPC ) { ForceDrain_JK2(self); return; } // JK2 1.02 (w_force_jk2.c)
 	if ( self->health <= 0 )
 	{
 		return;
@@ -2144,7 +2178,7 @@ void ForceDrainDamage( gentity_t *self, gentity_t *traceEnt, vec3_t dir, vec3_t 
 #if _draintest
 					dmg = g_forceDrainDamage.integer;//4
 #else
-					if (g_tweakForce.integer & FT_DRAINDMGNERF) {
+					if (JK2O_TWEAKFORCE & FT_DRAINDMGNERF) {
 						healthoverride = 4;
 						dmg = 3;
 					}
@@ -2155,7 +2189,7 @@ void ForceDrainDamage( gentity_t *self, gentity_t *traceEnt, vec3_t dir, vec3_t 
 
 				if (traceEnt->client)
 				{
-					if (g_tweakForce.integer & FT_NODRAINABSORB)
+					if (JK2O_TWEAKFORCE & FT_NODRAINABSORB)
 						modPowerLevel = WP_AbsorbConversion(traceEnt, traceEnt->client->ps.fd.forcePowerLevel[FP_ABSORB], self, FP_DRAIN, self->client->ps.fd.forcePowerLevel[FP_DRAIN], 0);
 					else
 						modPowerLevel = WP_AbsorbConversion(traceEnt, traceEnt->client->ps.fd.forcePowerLevel[FP_ABSORB], self, FP_DRAIN, self->client->ps.fd.forcePowerLevel[FP_DRAIN], 1);
@@ -2220,7 +2254,7 @@ void ForceDrainDamage( gentity_t *self, gentity_t *traceEnt, vec3_t dir, vec3_t 
 #endif
 
 				//JAPRO - Serverside - Fixkillcredit - Start
-				if (dmg && g_fixKillCredit.integer) {
+				if (dmg && JK2O_FIXKILLCREDIT) {
 					traceEnt->client->ps.otherKiller = self->s.number;
 					traceEnt->client->ps.otherKillerTime = level.time + 2000;
 					traceEnt->client->ps.otherKillerDebounceTime = level.time + 100;
@@ -2280,6 +2314,7 @@ void ForceDrainDamage( gentity_t *self, gentity_t *traceEnt, vec3_t dir, vec3_t 
 void G_TestLine(vec3_t start, vec3_t end, int color, int time);
 int ForceShootDrain( gentity_t *self )
 {
+	if ( JK2SABER() && !self->NPC ) { return ForceShootDrain_JK2(self); } // JK2 1.02 (w_force_jk2.c)
 	trace_t	tr;
 	vec3_t	end, forward, center;
 	gentity_t	*traceEnt;
@@ -2293,11 +2328,11 @@ int ForceShootDrain( gentity_t *self )
 	VectorNormalize( forward );
 
 	VectorCopy(self->client->ps.origin, center);
-	if (g_tweakForce.integer & FT_FIXDRAINCOF) {
+	if (JK2O_TWEAKFORCE & FT_FIXDRAINCOF) {
 		center[2] += self->client->ps.viewheight - 16;
 	}
 
-	if ((self->client->ps.fd.forcePowerLevel[FP_DRAIN] > FORCE_LEVEL_2) && !(g_tweakForce.integer & FT_FIXLINEDRAIN))
+	if ((self->client->ps.fd.forcePowerLevel[FP_DRAIN] > FORCE_LEVEL_2) && !(JK2O_TWEAKFORCE & FT_FIXLINEDRAIN))
 	{//arc
 		vec3_t	mins, maxs, dir, ent_org, size, v;
 		float	radius = MAX_DRAIN_DISTANCE, dot, dist, cof;
@@ -2359,7 +2394,7 @@ int ForceShootDrain( gentity_t *self )
 			VectorSubtract( traceEnt->r.absmax, traceEnt->r.absmin, size );
 			VectorMA( traceEnt->r.absmin, 0.5, size, ent_org );
 
-			if (g_tweakForce.integer & FT_FIXDRAINCOF) {
+			if (JK2O_TWEAKFORCE & FT_FIXDRAINCOF) {
 				vec3_t behind;
 
 				VectorCopy(center, behind);
@@ -2407,7 +2442,7 @@ int ForceShootDrain( gentity_t *self )
 	}
 	else
 	{//trace-line
-		if (g_tweakForce.integer & FT_FIXLINEDRAIN) {
+		if (JK2O_TWEAKFORCE & FT_FIXLINEDRAIN) {
 			vec3_t mins = { -6, -6, -6 }, maxs = { 6, 6, 6 };
 			VectorMA(center, MAX_DRAIN_DISTANCE, forward, end);
 			JP_Trace(&tr, center, mins, maxs, end, self->s.number, MASK_SHOT, qfalse, 0, 0);
@@ -2419,7 +2454,7 @@ int ForceShootDrain( gentity_t *self )
 		
 		if ( tr.entityNum == ENTITYNUM_NONE || tr.fraction == 1.0 || tr.allsolid || tr.startsolid || !g_entities[tr.entityNum].client || !g_entities[tr.entityNum].inuse )
 		{
-			if (g_tweakForce.integer & FT_FIXLINEDRAIN) {
+			if (JK2O_TWEAKFORCE & FT_FIXLINEDRAIN) {
 				self->client->ps.fd.forcePowerRegenDebounceTime = level.time + 200;
 				self->client->ps.activeForcePass = 0; //Reset this visual
 				//cost force?
@@ -2431,7 +2466,7 @@ int ForceShootDrain( gentity_t *self )
 		ForceDrainDamage( self, traceEnt, forward, tr.endpos );
 		gotOneOrMore = 1;
 
-		if (traceEnt && traceEnt->client && (g_tweakForce.integer & FT_FIXLINEDRAIN)) { //drain chain
+		if (traceEnt && traceEnt->client && (JK2O_TWEAKFORCE & FT_FIXLINEDRAIN)) { //drain chain
 			int i, numListedEntities, e;
 			vec3_t mins, maxs;
 			float	radius = 128;
@@ -2510,7 +2545,7 @@ int ForceShootDrain( gentity_t *self )
 
 	}
 
-	if ((g_tweakForce.integer & FT_FIXLINEDRAIN) && self->client->ps.fd.forcePowerLevel[FP_DRAIN] == FORCE_LEVEL_3)
+	if ((JK2O_TWEAKFORCE & FT_FIXLINEDRAIN) && self->client->ps.fd.forcePowerLevel[FP_DRAIN] == FORCE_LEVEL_3)
 		self->client->ps.activeForcePass = FORCE_LEVEL_2 + FORCE_LEVEL_3;
 	else
 		self->client->ps.activeForcePass = self->client->ps.fd.forcePowerLevel[FP_DRAIN] + FORCE_LEVEL_3;
@@ -2938,6 +2973,7 @@ qboolean ForceTelepathyCheckDirectNPCTarget( gentity_t *self, trace_t *tr, qbool
 
 void ForceTelepathy(gentity_t *self)
 {
+	if ( JK2SABER() && !self->NPC ) { ForceTelepathy_JK2(self); return; } // JK2 1.02 (w_force_jk2.c)
 	trace_t tr;
 	vec3_t tto, thispush_org, a;
 	vec3_t mins, maxs, fwdangles, forward, right, center;
@@ -3277,6 +3313,7 @@ extern void G_TestLine(vec3_t start, vec3_t end, int color, int time);
 extern void Touch_Button(gentity_t *ent, gentity_t *other, trace_t *trace );
 void ForceThrow( gentity_t *self, qboolean pull )
 {
+	if ( JK2SABER() && !self->NPC ) { ForceThrow_JK2(self, pull); return; } // JK2 1.02 (w_force_jk2.c)
 	//shove things in front of you away
 	float		dist;
 	gentity_t	*ent;
@@ -3303,7 +3340,7 @@ void ForceThrow( gentity_t *self, qboolean pull )
 
 	visionArc = 0;
 
-	if (self->client->ps.forceHandExtend != HANDEXTEND_NONE && ((self->client->ps.forceHandExtend != HANDEXTEND_KNOCKDOWN || !G_InGetUpAnim(&self->client->ps)) || (g_tweakForce.integer & FT_JK2GETUPS)))
+	if (self->client->ps.forceHandExtend != HANDEXTEND_NONE && ((self->client->ps.forceHandExtend != HANDEXTEND_KNOCKDOWN || !G_InGetUpAnim(&self->client->ps)) || (JK2O_TWEAKFORCE & FT_JK2GETUPS)))
 	{
 		return;
 	}
@@ -3316,11 +3353,11 @@ void ForceThrow( gentity_t *self, qboolean pull )
 //[JAPRO - Serverside - Force - Fix push/pull during getup - Start]
 	if ((self->client->ps.weaponTime - self->client->saberDelay) > 0)
 	{
-		if ((g_fixGetups.integer > 1) && (self->client->ps.legsAnim == BOTH_GETUP_BROLL_R || self->client->ps.legsAnim == BOTH_GETUP_BROLL_L || self->client->ps.legsAnim == BOTH_GETUP_BROLL_F || self->client->ps.legsAnim == BOTH_GETUP_BROLL_B))
+		if ((JK2O_FIXGETUPS > 1) && (self->client->ps.legsAnim == BOTH_GETUP_BROLL_R || self->client->ps.legsAnim == BOTH_GETUP_BROLL_L || self->client->ps.legsAnim == BOTH_GETUP_BROLL_F || self->client->ps.legsAnim == BOTH_GETUP_BROLL_B))
 		{
 			//Getting up and allowed to pull
 		}
-		else if ((g_tweakForce.integer & FT_JK2PULLROLL) && (self->client->ps.legsAnim == BOTH_ROLL_R || self->client->ps.legsAnim == BOTH_ROLL_L || self->client->ps.legsAnim == BOTH_ROLL_F || self->client->ps.legsAnim == BOTH_ROLL_B))
+		else if ((JK2O_TWEAKFORCE & FT_JK2PULLROLL) && (self->client->ps.legsAnim == BOTH_ROLL_R || self->client->ps.legsAnim == BOTH_ROLL_L || self->client->ps.legsAnim == BOTH_ROLL_F || self->client->ps.legsAnim == BOTH_ROLL_B))
 		{
 			//Rolling and allowed to pull.
 		}
@@ -3365,9 +3402,9 @@ void ForceThrow( gentity_t *self, qboolean pull )
 		return;
 	}
 
-	if (powerUse == FP_PULL && g_tweakForce.integer & FT_WEAKPULL)
+	if (powerUse == FP_PULL && JK2O_TWEAKFORCE & FT_WEAKPULL)
 		WP_ForcePowerStart( self, powerUse, 60 );
-	else if (powerUse == FP_PUSH && g_tweakWeapons.integer & WT_TRIBES)
+	else if (powerUse == FP_PUSH && JK2O_TWEAKWEAPONS & WT_TRIBES)
 		WP_ForcePowerStart(self, powerUse, 95);
 	else
 		WP_ForcePowerStart( self, powerUse, 0 );
@@ -3424,7 +3461,7 @@ void ForceThrow( gentity_t *self, qboolean pull )
 
 	if (pull)
 	{
-		if (g_tweakForce.integer & FT_WEAKPULL) {
+		if (JK2O_TWEAKFORCE & FT_WEAKPULL) {
 			powerLevel = FORCE_LEVEL_1;
 			pushPower = 64*FORCE_LEVEL_1;
 		}
@@ -3435,7 +3472,7 @@ void ForceThrow( gentity_t *self, qboolean pull )
 	}
 	else
 	{
-		if (g_tweakWeapons.integer & WT_TRIBES) {
+		if (JK2O_TWEAKWEAPONS & WT_TRIBES) {
 			powerLevel = FORCE_LEVEL_2;
 			pushPower = 256 * FORCE_LEVEL_2;
 		}
@@ -3512,7 +3549,7 @@ void ForceThrow( gentity_t *self, qboolean pull )
 
 		e = 0;
 
-		if (g_unlagged.integer & UNLAGGED_PUSHPULL) //Only unlag the in FOV check since effects of pull are movement based and we dont want to pull someone who not LOS
+		if (JK2O_UNLAGGED & UNLAGGED_PUSHPULL) //Only unlag the in FOV check since effects of pull are movement based and we dont want to pull someone who not LOS
 			G_TimeShiftAllClients( self->client->pers.cmd.serverTime, self, qfalse );
 
 		while (e < numListedEntities)
@@ -3533,13 +3570,13 @@ void ForceThrow( gentity_t *self, qboolean pull )
 				{
 					//Com_Printf("ent %i : Ent ps origin: %.2f %.2f %.2f ... Ent r origin: %.2f %.2f %.2f\n", 
 						//ent->client->ps.clientNum, ent->client->ps.origin[0], ent->client->ps.origin[1], ent->client->ps.origin[2], ent->r.currentOrigin[0], ent->r.currentOrigin[1], ent->r.currentOrigin[2]);
-					if (ent != self && (g_unlagged.integer & UNLAGGED_PUSHPULL) && !(ent->r.svFlags & SVF_BOT) && (ent->s.eType != ET_NPC))
+					if (ent != self && (JK2O_UNLAGGED & UNLAGGED_PUSHPULL) && !(ent->r.svFlags & SVF_BOT) && (ent->s.eType != ET_NPC))
 						VectorCopy(ent->r.currentOrigin, thispush_org);
 					else
 						VectorCopy(ent->client->ps.origin, thispush_org);
 
 #if 1
-					if (g_unlagged.integer & (1<<3)) //debug 
+					if (JK2O_UNLAGGED & (1<<3)) //debug 
 					{
 						G_TestLine(self->client->ps.origin, ent->r.currentOrigin, 0x00ff00, 5000); //check trace.fraction? ehh trace.startsolid or whatever?
 						G_TestLine(self->client->ps.origin, ent->client->ps.origin, 0x0000ff, 5000); //check trace.fraction? ehh trace.startsolid or whatever?
@@ -3585,7 +3622,7 @@ void ForceThrow( gentity_t *self, qboolean pull )
 			}
 			e++;
 		}
-		if ( g_unlagged.integer & UNLAGGED_PUSHPULL )
+		if ( JK2O_UNLAGGED & UNLAGGED_PUSHPULL )
 			G_UnTimeShiftAllClients( self, qfalse );
 	}
 
@@ -3606,7 +3643,7 @@ void ForceThrow( gentity_t *self, qboolean pull )
 			continue;
 		if (ent == self)
 			continue;
-		if (ent->client && OnSameTeam(ent, self) && (!g_friendlyFire.value && !(g_tweakWeapons.integer & WT_TRIBES)))//JAPRO - Allow push/pull teammates when friendlyfire is on
+		if (ent->client && OnSameTeam(ent, self) && (!g_friendlyFire.value && !(JK2O_TWEAKWEAPONS & WT_TRIBES)))//JAPRO - Allow push/pull teammates when friendlyfire is on
 		{
 			continue;
 		}
@@ -3748,7 +3785,7 @@ void ForceThrow( gentity_t *self, qboolean pull )
 				}
 			}
 
-			if (g_tweakWeapons.integer & WT_TRIBES) {
+			if (JK2O_TWEAKWEAPONS & WT_TRIBES) {
 				pushPower = 512 * FORCE_LEVEL_2;
 				if (push_list[x]->client && push_list[x]->client->pers.tribesClass == 1)
 					pushPower *= 1.08f;
@@ -3775,7 +3812,7 @@ void ForceThrow( gentity_t *self, qboolean pull )
 				float dirLen = 0;
 				const int CanCounter = CanCounterThrow(push_list[x], self, pull);
 
-				if (g_tweakWeapons.integer & WT_TRIBES && OnSameTeam(self, push_list[x])) {
+				if (JK2O_TWEAKWEAPONS & WT_TRIBES && OnSameTeam(self, push_list[x])) {
 					//push_list[x]->client->ps.powerups[PW_YSALAMIRI] = level.time + 1500;
 					if (!push_list[x]->client->ps.powerups[PW_REDFLAG] && !push_list[x]->client->ps.powerups[PW_BLUEFLAG] && !push_list[x]->client->ps.powerups[PW_NEUTRALFLAG]) {
 						push_list[x]->client->ps.eFlags |= EF_INVULNERABLE;
@@ -3783,7 +3820,7 @@ void ForceThrow( gentity_t *self, qboolean pull )
 					}
 				}
 				else {
-					if ( g_debugMelee.integer )
+					if ( JK2O_DEBUGMELEE )
 					{
 						if ( (push_list[x]->client->ps.pm_flags&PMF_STUCK_TO_WALL) )
 						{//no resistance if stuck to wall
@@ -3865,7 +3902,7 @@ void ForceThrow( gentity_t *self, qboolean pull )
 						}
 						else if (CanCounter == -1) {
 							//What if they are already absorbing tho?
-							if (g_tweakForce.integer & FT_WEAPON_PULLRESIST) //The only reason we cant counter is because of our weapon fire/charge, so weaken the pull/push strength
+							if (JK2O_TWEAKFORCE & FT_WEAPON_PULLRESIST) //The only reason we cant counter is because of our weapon fire/charge, so weaken the pull/push strength
 								pushPowerMod *= 0.5f;
 						}
 					}
@@ -3874,7 +3911,7 @@ void ForceThrow( gentity_t *self, qboolean pull )
 					if ( pull )
 					{
 						int weaponPullDist = 256;
-						if (g_tweakForce.integer & FT_NERFED_WEAPPULL && !(push_list[x]->client->ps.fd.forcePowersActive & (1 << FP_RAGE))) //And they are not in dark rage?
+						if (JK2O_TWEAKFORCE & FT_NERFED_WEAPPULL && !(push_list[x]->client->ps.fd.forcePowersActive & (1 << FP_RAGE))) //And they are not in dark rage?
 							weaponPullDist = 128;
 
 						VectorSubtract( self->client->ps.origin, thispush_org, pushDir );
@@ -3923,7 +3960,7 @@ void ForceThrow( gentity_t *self, qboolean pull )
 							dirLen = VectorLength(pushDir);
 
 							if (BG_KnockDownable(&push_list[x]->client->ps) && 
-								((!(g_tweakForce.integer & FT_JK2KNOCKDOWN) && (dirLen <= (64*((modPowerLevel - otherPushPower)-1)))) || ((g_tweakForce.integer & FT_JK2KNOCKDOWN) && (dirLen <= 128))) )  
+								((!(JK2O_TWEAKFORCE & FT_JK2KNOCKDOWN) && (dirLen <= (64*((modPowerLevel - otherPushPower)-1)))) || ((JK2O_TWEAKFORCE & FT_JK2KNOCKDOWN) && (dirLen <= 128))) )  
 							{ //can only do a knockdown if fairly close
 								push_list[x]->client->ps.forceHandExtend = HANDEXTEND_KNOCKDOWN;
 								push_list[x]->client->ps.forceHandExtendTime = level.time + 700;
@@ -3971,7 +4008,7 @@ void ForceThrow( gentity_t *self, qboolean pull )
 
 						push_list[x]->client->ps.otherKiller = self->s.number;
 						//JAPRO - Serverside - Fixkillcredit - Start
-						if (g_fixKillCredit.integer)
+						if (JK2O_FIXKILLCREDIT)
 							push_list[x]->client->ps.otherKillerTime = level.time + 2000;
 						else
 							push_list[x]->client->ps.otherKillerTime = level.time + 5000;
@@ -3998,7 +4035,7 @@ void ForceThrow( gentity_t *self, qboolean pull )
 							}
 						}
 						else {
-							if (((g_tweakWeapons.integer & WT_TRIBES) && !pull) || ((g_tweakForce.integer & FT_PULLSTRENGTH) && pull)) {
+							if (((JK2O_TWEAKWEAPONS & WT_TRIBES) && !pull) || ((JK2O_TWEAKFORCE & FT_PULLSTRENGTH) && pull)) {
 								push_list[x]->client->ps.velocity[0] += pushDir[0] * pushPowerMod; //FT_WEAKPULL?
 								push_list[x]->client->ps.velocity[1] += pushDir[1] * pushPowerMod;
 							}
@@ -4019,7 +4056,7 @@ void ForceThrow( gentity_t *self, qboolean pull )
 						}
 						else
 						{
-							if ((g_tweakForce.integer & FT_PULLSTRENGTH) && (push_list[x]->client->sess.raceMode || pull))
+							if ((JK2O_TWEAKFORCE & FT_PULLSTRENGTH) && (push_list[x]->client->sess.raceMode || pull))
 								push_list[x]->client->ps.velocity[2] += pushDir[2] * pushPowerMod;
 							else
 								push_list[x]->client->ps.velocity[2] = pushDir[2] * pushPowerMod;
@@ -4069,7 +4106,7 @@ void ForceThrow( gentity_t *self, qboolean pull )
 			}
 //JAPRO - Serverside - Flag push/pull physics - End
 //JAPRO - Serverside - Item push/pull physics - Start
-			else if ( (g_tweakForce.integer & FT_PUSHPULLITEMS) && !(push_list[x]->s.eFlags & EF_NODRAW) && !self->client->ps.duelInProgress && push_list[x]->s.eType == ET_ITEM && (push_list[x]->item->giType == IT_AMMO || push_list[x]->item->giType == IT_ARMOR || push_list[x]->item->giType == IT_HEALTH))
+			else if ( (JK2O_TWEAKFORCE & FT_PUSHPULLITEMS) && !(push_list[x]->s.eFlags & EF_NODRAW) && !self->client->ps.duelInProgress && push_list[x]->s.eType == ET_ITEM && (push_list[x]->item->giType == IT_AMMO || push_list[x]->item->giType == IT_ARMOR || push_list[x]->item->giType == IT_HEALTH))
 			{
 				push_list[x]->nextthink = level.time + 30000;
 				push_list[x]->think = ResetItem;//incase it falls off a cliff
@@ -4338,6 +4375,7 @@ void WP_ForcePowerStop( gentity_t *self, forcePowers_t forcePower )
 
 void DoGripAction(gentity_t *self, forcePowers_t forcePower)
 {
+	if ( JK2SABER() && !self->NPC ) { DoGripAction_JK2(self, forcePower); return; } // JK2 1.02 (w_force_jk2.c)
 	gentity_t *gripEnt;
 	int gripLevel = 0;
 	trace_t tr;
@@ -4397,7 +4435,7 @@ void DoGripAction(gentity_t *self, forcePowers_t forcePower)
 		return;
 	}
 
-	if (!(g_tweakForce.integer & FT_JK2GRIP) && !gripEnt->client->sess.raceMode && tr.fraction != 1.0f && tr.entityNum != gripEnt->s.number)
+	if (!(JK2O_TWEAKFORCE & FT_JK2GRIP) && !gripEnt->client->sess.raceMode && tr.fraction != 1.0f && tr.entityNum != gripEnt->s.number)
 	{
 		WP_ForcePowerStop(self, forcePower);
 		return;
@@ -4420,7 +4458,7 @@ void DoGripAction(gentity_t *self, forcePowers_t forcePower)
 		{
 			WP_ForcePowerStop(self, forcePower);
 		}
-		if (g_fixKillCredit.integer)//JAPRO fixkillcredit
+		if (JK2O_FIXKILLCREDIT)//JAPRO fixkillcredit
 		{
 			gripEnt->client->ps.otherKiller = self->s.number;
 			gripEnt->client->ps.otherKillerTime = level.time + 2000;
@@ -4442,7 +4480,7 @@ void DoGripAction(gentity_t *self, forcePowers_t forcePower)
 
 //JAPRO - Serverside - Remove otherkiller info if fixkillcredit is not on, since we are adding it to g_damage - Start
 		gripEnt->client->ps.otherKiller = self->s.number;
-		if (g_fixKillCredit.integer)
+		if (JK2O_FIXKILLCREDIT)
 			gripEnt->client->ps.otherKillerTime = level.time + 2000;
 		else
 			gripEnt->client->ps.otherKillerTime = level.time + 5000;
@@ -4480,7 +4518,7 @@ void DoGripAction(gentity_t *self, forcePowers_t forcePower)
 
 //JAPRO - Serverside - Remove otherkiller info if fixkillcredit is not on, since we are adding it to g_damage - Start
 		gripEnt->client->ps.otherKiller = self->s.number;
-		if (g_fixKillCredit.integer)
+		if (JK2O_FIXKILLCREDIT)
 			gripEnt->client->ps.otherKillerTime = level.time + 2000;
 		else
 			gripEnt->client->ps.otherKillerTime = level.time + 5000;
@@ -4649,7 +4687,7 @@ static void RemoveTrickedEnt(forcedata_t *fd, int client)
 extern int g_LastFrameTime;
 extern int g_TimeSinceLastFrame;
 
-static void WP_UpdateMindtrickEnts(gentity_t *self)
+void WP_UpdateMindtrickEnts(gentity_t *self)
 {
 	int i = 0;
 
@@ -4668,7 +4706,7 @@ static void WP_UpdateMindtrickEnts(gentity_t *self)
 			{ //Untrick this entity if the tricker (self) fires while in his fov
 				if (trap->InPVS(ent->client->ps.origin, self->client->ps.origin) && OrgVisible(ent->client->ps.origin, self->client->ps.origin, ent->s.number))
 				{
-					if (g_tweakForce.integer & FT_BUFFMINDTRICK) {
+					if (JK2O_TWEAKFORCE & FT_BUFFMINDTRICK) {
 						vec3_t a, tto;
 
 						VectorCopy(self->client->ps.origin, tto);
@@ -4935,7 +4973,7 @@ static void WP_ForcePowerRun( gentity_t *self, forcePowers_t forcePower, usercmd
 	case FP_ABSORB:
 		if (self->client->ps.fd.forcePowerDebounce[forcePower] < level.time)
 		{
-			if (g_tweakWeapons.integer & WT_TRIBES) //Overdrive
+			if (JK2O_TWEAKWEAPONS & WT_TRIBES) //Overdrive
 				BG_ForcePowerDrain(&self->client->ps, forcePower, 5);
 			else
 				BG_ForcePowerDrain(&self->client->ps, forcePower, 1);
@@ -4946,7 +4984,7 @@ static void WP_ForcePowerRun( gentity_t *self, forcePowers_t forcePower, usercmd
 
 			self->client->ps.fd.forcePowerDebounce[forcePower] = level.time + 600;
 		}
-		if (g_tweakWeapons.integer & WT_TRIBES) { //Overdrive
+		if (JK2O_TWEAKWEAPONS & WT_TRIBES) { //Overdrive
 			//Loop through numconnected clients.  Anyone in range on the other team gets their mystery bitmask field updated with our clientnum. To be used in BG_pmove.
 			//Debounce this plz?
 			gentity_t *ent;
@@ -5005,7 +5043,7 @@ int WP_DoSpecificPower( gentity_t *self, usercmd_t *ucmd, forcePowers_t forcepow
 	if ( !WP_ForcePowerAvailable( self, forcepower, 0 ) )
 	{
 		//This is fucked up.  why did they make 2 ways of activating forcepowers
-		if ((g_tweakWeapons.integer & WT_TRIBES) &&
+		if ((JK2O_TWEAKWEAPONS & WT_TRIBES) &&
 			!self->client->sess.raceMode && 
 			((self->client->ps.fd.forcePowersActive & (1 << FP_ABSORB)) || (self->client->ps.fd.forcePowersActive & (1 << FP_PROTECT))) &&
 			forcepower == FP_LIGHTNING)
@@ -5068,7 +5106,7 @@ int WP_DoSpecificPower( gentity_t *self, usercmd_t *ucmd, forcePowers_t forcepow
 		}
 		break;
 	case FP_LIGHTNING:
-		if (g_tweakWeapons.integer & WT_TRIBES) {
+		if (JK2O_TWEAKWEAPONS & WT_TRIBES) {
 			if (self->client->ps.fd.forcePowerSelected == 2) {
 				powerSucceeded = 0; //always 0 for nonhold powers
 				if (self->client->ps.fd.forceButtonNeedRelease)
@@ -5096,7 +5134,7 @@ int WP_DoSpecificPower( gentity_t *self, usercmd_t *ucmd, forcePowers_t forcepow
 		break;
 	case FP_PUSH:
 		powerSucceeded = 0; //always 0 for nonhold powers
-		if (self->client->ps.fd.forceButtonNeedRelease && !(self->r.svFlags & SVF_BOT))
+		if (self->client->ps.fd.forceButtonNeedRelease && (!(self->r.svFlags & SVF_BOT) || JK2SABER())) // JK2 1.02: bots must release push too
 		{ //need to release before we can use nonhold powers again
 			break;
 		}
@@ -5628,6 +5666,7 @@ qboolean G_SpecialRollGetup(gentity_t *self)
 
 void WP_ForcePowersUpdate( gentity_t *self, usercmd_t *ucmd )
 {
+	if ( JK2SABER() && self && !self->NPC ) { WP_ForcePowersUpdate_JK2(self, ucmd); return; } // JK2 1.02 (w_force_jk2.c)
 	int			i;//, holo, holoregen;
 	int			prepower = 0;
 	//see if any force powers are running
@@ -5732,13 +5771,13 @@ void WP_ForcePowersUpdate( gentity_t *self, usercmd_t *ucmd )
 			{
 				self->client->ps.forceHandExtend = HANDEXTEND_NONE;
 			}
-			else if (G_SpecialRollGetup(self) && !(g_tweakForce.integer & FT_JK2GETUPS))
+			else if (G_SpecialRollGetup(self) && !(JK2O_TWEAKFORCE & FT_JK2GETUPS))
 			{
 				self->client->ps.forceHandExtend = HANDEXTEND_NONE;
 			}
 			else
 			{ //hmm.. ok.. no more getting up on your own, you've gotta push something, unless..
-				if (((level.time - self->client->ps.forceHandExtendTime) > 4000) || (g_tweakForce.integer & FT_JK2GETUPS))
+				if (((level.time - self->client->ps.forceHandExtendTime) > 4000) || (JK2O_TWEAKFORCE & FT_JK2GETUPS))
 				{ //4 seconds elapsed, I guess they're too dumb to push something to get up!
 					if (self->client->pers.cmd.upmove &&
 						self->client->ps.fd.forcePowerLevel[FP_LEVITATION] > FORCE_LEVEL_1)
@@ -5747,7 +5786,7 @@ void WP_ForcePowersUpdate( gentity_t *self, usercmd_t *ucmd )
 						self->client->ps.forceDodgeAnim = 2;
 						self->client->ps.forceHandExtendTime = level.time + 500;
 
-						if (g_tweakForce.integer & FT_JK2GETUPS) {
+						if (JK2O_TWEAKFORCE & FT_JK2GETUPS) {
 							self->client->ps.forceHandExtendTime += 300; //Bring this up to 800 like in jk2
 							self->client->ps.velocity[2] = 300;
 						}
@@ -5761,7 +5800,7 @@ void WP_ForcePowersUpdate( gentity_t *self, usercmd_t *ucmd )
 						self->client->ps.forceHandExtendTime = level.time + 500;
 						self->client->ps.velocity[2] = 300;
 
-						if (g_tweakForce.integer & FT_JK2GETUPS) {
+						if (JK2O_TWEAKFORCE & FT_JK2GETUPS) {
 							self->client->ps.forceHandExtendTime += 100; //Bring this up to 600 like in jk2
 							self->client->ps.velocity[2] = 200;
 						}
@@ -6094,7 +6133,7 @@ void WP_ForcePowersUpdate( gentity_t *self, usercmd_t *ucmd )
 
 	//Com_Printf("Forcepowers active %i for %s\n", self->client->ps.fd.forcePowersActive, self->client->pers.netname);
 
-	if ( (!self->client->ps.fd.forcePowersActive || self->client->ps.fd.forcePowersActive == (1 << FP_DRAIN) || (self->client->ps.fd.forceGripBeingGripped && g_tweakForce.integer & FT_FIXGRIPPEDREGEN && self->client->ps.fd.forcePowersActive == (1 << FP_LEVITATION) && self->client->pers.cmd.upmove <= 0)) && //whats up with fp_drain being mentioned here
+	if ( (!self->client->ps.fd.forcePowersActive || self->client->ps.fd.forcePowersActive == (1 << FP_DRAIN) || (self->client->ps.fd.forceGripBeingGripped && JK2O_TWEAKFORCE & FT_FIXGRIPPEDREGEN && self->client->ps.fd.forcePowersActive == (1 << FP_LEVITATION) && self->client->pers.cmd.upmove <= 0)) && //whats up with fp_drain being mentioned here
 		((self->client->sess.movementStyle != MV_TRIBES) || !(self->client->ps.eFlags & EF_JETPACK_ACTIVE)) &&
 		((self->client->sess.movementStyle != MV_TRIBES) || ((self->client->jetPackDebReduce + 250) < level.time)) && //Extra time here?
 			!self->client->ps.saberInFlight && (self->client->ps.stats[STAT_MOVEMENTSTYLE] != MV_SPEED) && (self->client->ps.weapon != WP_SABER || !BG_SaberInSpecial(self->client->ps.saberMove)) )

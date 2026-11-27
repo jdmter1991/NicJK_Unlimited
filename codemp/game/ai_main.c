@@ -53,6 +53,11 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "chars.h"
 #include "inv.h"
 
+// JK2 1.02 mode: heal costs 25 at every rank, so the bots read the force table instead of the JKA threshold
+extern int forcePowerNeeded[NUM_FORCE_POWER_LEVELS][NUM_FORCE_POWERS];
+#define BOT_HEAL_NEED(ps, base) ( g_jk2_102sabersystem.integer ? forcePowerNeeded[(ps)->fd.forcePowerLevel[FP_HEAL]][FP_HEAL] : (base) )
+
+
 // Declarations for functions this file uses that no header declares. MSVC accepts a call to an
 // undeclared function; GCC and Clang then reject the real declaration further down as a conflict.
 qboolean BG_InKnockDown(int anim);
@@ -268,6 +273,11 @@ vmCvar_t bot_abTest;
 //          (attack pressed while guarding, direction keys on the side the swing comes from), aimed for
 //          the perfect block too when read well enough, which disarms the attacker. 1.5 s cooldown.
 #define BOTF_MBLOCK		16777216
+// 33554432: tactics for the JK2 1.02 saber rules (g_jk2_102sabersystem); does nothing without them.
+//          Guard instead of swinging into a swing that lands first, the red DFA, tapping in saber
+//          locks, push knockdowns and heal, back attacks. See Bot_JK2Tactics.
+#define BOTF_JK2		33554432
+static vmCvar_t bot_jk2Tactics;		// which parts of BOTF_JK2 run (testing), see Bot_JK2Tactics
 
 // the distance band a bot wants to fight in with this weapon; qfalse for the saber and melee
 static qboolean Bot_GunBand(int weapon, qboolean enemyHasSaber, float *min, float *max) {
@@ -525,6 +535,67 @@ static int botEvalMb2LowBp, botEvalMb2Manual, botEvalMb2SwingNoGuard;
 extern int g_mb2MbStats[4];
 static int botEvalMb2Guard, botEvalMb2PbTry, botEvalWalkFrames, botEvalRunFrames;
 static int botEvalDuelHold, botEvalDuelCounter, botEvalDuelRiposte, botEvalDuelCircle;
+/*
+==============
+Bot_JK2Tactics  (bot_features 33554432, only while g_jk2_102sabersystem is on)
+
+Tactics for the Jedi Outcast 1.02 saber rules (w_saber_jk2.c, bg_saber_jk2.c, w_force_jk2.c).
+Runs on the finished usercmd, after the duel timing, so it has the last word on attack and the
+movement keys; the cliff check after it can still veto a jump. Everything read here is on the
+screen for a player too: the enemy's animation (which tells his saber move and how far into it he
+is), where he stands and looks, and the bot's own state. bot_jk2Tactics picks the parts (default 15:
+guard, red DFA, lock, heal; the others lost or showed no gain in A/B matches, see docs/NICJK_BOTS.md).
+   1 guard:   1.02 blocks by itself, but only when the defender is not attacking, is in the ready
+              pose or a parry, does not hold attack, and faces the hit (saber defence 3: anything
+              in front; 2: within 53 degrees; 1: within 25). A swing that is about to reach the bot
+              while it stands ready is met by letting go of attack and facing the attacker, instead
+              of starting a swing that cannot land first. Red is never blocked below defence 3, and
+              back attacks and the red DFA never: no guard against those.
+   2 red DFA: the strong style's jump attack (+40 damage, unblockable) comes only from jumping
+              forward off the ground within 500 ms of an attack move starting. With an enemy 100 to
+              200 units ahead the bot starts an overhead swing and jumps as the attack begins.
+   4 lock:    in a saber lock every third new press of attack pushes; the bot taps attack.
+   8 heal:    heal (25 Force at every level in 1.02) when hurt and nothing is about to land.
+ 128 push:    a level 3 push at an enemy within 120 knocks him down when his push level is lower
+              or he is moving; an enemy who is down cannot block and is hit at once.
+ 256 patient: the 1.02 way of fighting: stand ready (which blocks) instead of swinging into an
+              enemy who can block or whose swing will land first, and strike when he cannot block:
+              in a return, a bounce or a broken parry, using a force power, facing away, busy with
+              a swing aimed elsewhere, or in a start or a transition long enough for our swing to
+              land first. Waiting is cut short after 1.5 s so two patient fighters do not freeze.
+  16 back:    an enemy right behind is struck with the back attack (back + attack; +20, unblockable),
+              which the game starts when its 128-unit trace straight back finds him.
+  32 stance:  red as the base style (see Bot_JK2Stance).
+  64 stance:  yellow as the base style (see Bot_JK2Stance).
+==============
+*/
+#define BOTJ2_GUARD		1
+#define BOTJ2_DFA		2
+#define BOTJ2_LOCK		4
+#define BOTJ2_FORCE		8
+#define BOTJ2_BACK		16
+#define BOTJ2_STANCE	32
+#define BOTJ2_YELLOW	64
+#define BOTJ2_PUSH		128
+#define BOTJ2_PATIENT	256
+
+enum {
+	J2E_GUARD_START, J2E_GUARD_BLOCKED, J2E_GUARD_HIT, J2E_GUARD_FRAMES, J2E_GUARD_TURNS, J2E_GUARD_SKIP,
+	J2E_DFA_PREP, J2E_DFA_JUMP, J2E_DFA_START, J2E_DFA_LAND, J2E_DFA_KILL,
+	J2E_LOCK_FRAMES, J2E_LOCK_WON, J2E_LOCK_LOST,
+	J2E_HEAL, J2E_PUSH, J2E_PUSH_DOWN, J2E_DOWN_FRAMES, J2E_DOWN_HIT,
+	J2E_BACK_TRY, J2E_BACK_START, J2E_BACK_LAND,
+	J2E_STANCE_SET, J2E_GUARD_KEPT, J2E_WAIT_FRAMES, J2E_WAIT_STRIKES, J2E_WAIT_TIMEOUTS, J2E_COUNT
+};
+static int botJ2Eval[J2E_COUNT];
+static int botJ2DfaJumps[5], botJ2DfaLands[5];	// red DFA by distance at the jump: 70-100, 100-130, 130-160, 160-190, 190-220
+
+// per-client saber results from w_saber_jk2.c (only for these counters, never for decisions)
+extern int jk2StatHitTime[MAX_CLIENTS], jk2StatHitMove[MAX_CLIENTS], jk2StatHitVictim[MAX_CLIENTS];
+extern int jk2StatBlockTime[MAX_CLIENTS], jk2StatHitsDealt[MAX_CLIENTS], jk2StatHitsTaken[MAX_CLIENTS];
+extern int jk2StatBlocks[MAX_CLIENTS], jk2StatGotBlocked[MAX_CLIENTS];
+extern int jk2BotGuardFrame[MAX_CLIENTS], jk2GuardFail[20];
+
 extern qboolean PM_SaberInReturn( int move );
 extern qboolean PM_SaberInBounce( int move );
 extern qboolean PM_SaberInBrokenParry( int move );
@@ -712,6 +783,54 @@ static void BotEval_Report(void) {
 		deaths[g] += g_entities[i].client->ps.persistant[PERS_KILLED];
 	}
 	trap->Print("BOTEVAL kata rolls: old logic %d, new logic %d of which started %d; targeted style changes completed %d\n", botEvalKataTried[0], botEvalKataTried[1], botEvalKataStarted[1], botEvalStyleSwitches);
+	if (g_jk2_102sabersystem.integer) {
+		char jk2buf[256];
+		{
+			char jk2fbuf[1024];
+			G_JK2ForceStats(jk2fbuf, sizeof(jk2fbuf));
+			trap->Print("BOTEVAL %s\n", jk2fbuf);
+		}
+		G_JK2SaberStats(jk2buf, sizeof(jk2buf));
+		trap->Print("BOTEVAL %s\n", jk2buf);
+	}
+	// JK2 tactics counters, printed in any mode (all zero unless g_jk2_102sabersystem is on)
+	{
+		int sum[2][4], defs[2][4], ci;
+		memset(sum, 0, sizeof(sum));
+		memset(defs, 0, sizeof(defs));
+		for (ci = 0; ci < MAX_CLIENTS; ci++) {
+			int g2 = 1, dl;
+			if (!botstates[ci] || !botstates[ci]->inuse || !g_entities[ci].client) continue;
+			if (bot_abTest.integer > 0) {
+				if (ci >= 2 * bot_abTest.integer) continue;
+				g2 = (ci < bot_abTest.integer) ? 0 : 1;
+			}
+			sum[g2][0] += jk2StatHitsDealt[ci];
+			sum[g2][1] += jk2StatHitsTaken[ci];
+			sum[g2][2] += jk2StatBlocks[ci];
+			sum[g2][3] += jk2StatGotBlocked[ci];
+			dl = g_entities[ci].client->ps.fd.forcePowerLevel[FP_SABER_DEFENSE];
+			if (dl >= 0 && dl <= 3) defs[g2][dl]++;
+		}
+		trap->Print("BOTEVAL jk2 saber by group (full hits dealt / taken, hits blocked / own hits blocked; bots by saber defence 0-3): baseline %d/%d %d/%d (%d %d %d %d) | features %d/%d %d/%d (%d %d %d %d)\n",
+			sum[0][0], sum[0][1], sum[0][2], sum[0][3], defs[0][0], defs[0][1], defs[0][2], defs[0][3],
+			sum[1][0], sum[1][1], sum[1][2], sum[1][3], defs[1][0], defs[1][1], defs[1][2], defs[1][3]);
+	}
+	trap->Print("BOTEVAL jk2 tactics: guard started %d (blocked %d, hit %d), guard frames %d, turns to the attacker %d, red attacks not guarded (defence < 3) %d; "
+		"red DFA swings started for it %d, jumps %d, DFAs started %d, landed %d, kills %d; locks: tapping frames %d, won %d, lost %d\n",
+		botJ2Eval[J2E_GUARD_START], botJ2Eval[J2E_GUARD_BLOCKED], botJ2Eval[J2E_GUARD_HIT], botJ2Eval[J2E_GUARD_FRAMES], botJ2Eval[J2E_GUARD_TURNS], botJ2Eval[J2E_GUARD_SKIP],
+		botJ2Eval[J2E_DFA_PREP], botJ2Eval[J2E_DFA_JUMP], botJ2Eval[J2E_DFA_START], botJ2Eval[J2E_DFA_LAND], botJ2Eval[J2E_DFA_KILL],
+		botJ2Eval[J2E_LOCK_FRAMES], botJ2Eval[J2E_LOCK_WON], botJ2Eval[J2E_LOCK_LOST]);
+	trap->Print("BOTEVAL jk2 tactics: heals %d, pushes %d (knocked down %d), frames going for a fallen enemy %d (hits %d); back attacks tried %d, started %d, landed %d; stance changes %d\n",
+		botJ2Eval[J2E_HEAL], botJ2Eval[J2E_PUSH], botJ2Eval[J2E_PUSH_DOWN], botJ2Eval[J2E_DOWN_FRAMES], botJ2Eval[J2E_DOWN_HIT],
+		botJ2Eval[J2E_BACK_TRY], botJ2Eval[J2E_BACK_START], botJ2Eval[J2E_BACK_LAND], botJ2Eval[J2E_STANCE_SET]);
+	trap->Print("BOTEVAL jk2 tactics: guard frames kept on a swing still under way %d; red DFA jumps / landed by distance 70-100 %d/%d, 100-130 %d/%d, 130-160 %d/%d, 160-190 %d/%d, 190-220 %d/%d\n",
+		botJ2Eval[J2E_GUARD_KEPT], botJ2DfaJumps[0], botJ2DfaLands[0], botJ2DfaJumps[1], botJ2DfaLands[1], botJ2DfaJumps[2], botJ2DfaLands[2],
+		botJ2DfaJumps[3], botJ2DfaLands[3], botJ2DfaJumps[4], botJ2DfaLands[4]);
+	trap->Print("BOTEVAL jk2 guard: saber hits taken while guarding, by the block check that said no: unblockable %d, no client %d, in attack %d, saber busy %d, holstered %d, weapon %d, raising %d, thrown %d, attack held %d, red 20%% %d, red def<3 %d, yellow 40%% %d, yellow def<2 %d, blue def0 %d, attacking %d, not ready %d, block time %d, hand out %d, no defence %d, not in front %d; patient: frames waiting %d, strikes at an opening %d, waits cut short %d\n",
+		jk2GuardFail[0], jk2GuardFail[1], jk2GuardFail[2], jk2GuardFail[3], jk2GuardFail[4], jk2GuardFail[5], jk2GuardFail[6], jk2GuardFail[7], jk2GuardFail[8], jk2GuardFail[9],
+		jk2GuardFail[10], jk2GuardFail[11], jk2GuardFail[12], jk2GuardFail[13], jk2GuardFail[14], jk2GuardFail[15], jk2GuardFail[16], jk2GuardFail[17], jk2GuardFail[18], jk2GuardFail[19],
+		botJ2Eval[J2E_WAIT_FRAMES], botJ2Eval[J2E_WAIT_STRIKES], botJ2Eval[J2E_WAIT_TIMEOUTS]);
 	trap->Print("BOTEVAL navigation: steered around obstacles %d, jumped low obstacles %d, roam goals reached %d\n", botEvalNavSteers, botEvalNavJumps, botEvalNavGoals);
 	trap->Print("BOTEVAL navigation: force jumps over high obstacles %d, jumps across gaps %d, idle bots set moving %d, stuck jump-outs %d, stuck suicides %d\n",
 		botEvalNavHighJumps, botEvalNavGapJumps, botEvalIdleKicks, botEvalStuckJumps, botEvalStuckSuicides);
@@ -757,7 +876,7 @@ static void BotEval_Report(void) {
 	trap->Print("BOTEVAL duel timing: frames held at the edge of reach %d, counters into a recovering enemy %d, ripostes after a block %d, frames circling %d\n",
 		botEvalDuelHold, botEvalDuelCounter, botEvalDuelRiposte, botEvalDuelCircle);
 	trap->Print("BOTEVAL combat walking: frames walked %d, frames run while an enemy was close %d\n", botEvalWalkFrames, botEvalRunFrames);
-	if (g_mb2manualblock.integer) {
+	if ((g_mb2manualblock.integer && !g_jk2_102sabersystem.integer)) {
 		trap->Print("BOTEVAL mb2 block: guarded hits blocked %d of which perfect blocks %d, guarded hits that got through %d, disarms %d, hits on players not guarding %d, from behind %d; bot guard frames %d, perfect-block aims %d\n",
 			g_mb2Stats[0], g_mb2Stats[1], g_mb2Stats[2], g_mb2Stats[3], g_mb2Stats[4], g_mb2Stats[5], botEvalMb2Guard, botEvalMb2PbTry);
 		trap->Print("BOTEVAL mb2 block: bot frames backing off with no block points left %d\n", botEvalMb2LowBp);
@@ -822,6 +941,7 @@ static double BotProf_FrameBegin(void) {
 	trap->Cvar_Update(&bot_profile);
 	trap->Cvar_Update(&bot_fixes);
 	trap->Cvar_Update(&bot_features);
+	trap->Cvar_Update(&bot_jk2Tactics);
 	trap->Cvar_Update(&bot_abTest);
 	trap->Cvar_Update(&bot_tuneExplore);
 	trap->Cvar_Update(&bot_tuneEpisode);
@@ -1676,9 +1796,482 @@ static void Bot_ForceTactics(bot_state_t* bs) {
 		}
 	} else if ((known & (1 << FP_SABERTHROW)) && ps->weapon == WP_SABER && ps->fd.saberAnimLevel != SS_STAFF && !ps->saberInFlight
 		&& !ps->saberHolstered && ps->fd.forcePower >= 30 && Bot_ForceOK(bs, FP_SABERTHROW, qfalse) && Q_irand(1, 100) <= BT(bs, BT_THROW_CHANCE)) {
-		Bot_HoldButtons(bs, g_mb2manualblock.integer ? (BUTTON_ALT_ATTACK | BUTTON_USE) : BUTTON_ALT_ATTACK, 800);	// with MB2 blocking alt attack alone is the guard
+		Bot_HoldButtons(bs, (g_mb2manualblock.integer && !g_jk2_102sabersystem.integer) ? (BUTTON_ALT_ATTACK | BUTTON_USE) : BUTTON_ALT_ATTACK, 800);	// with MB2 blocking alt attack alone is the guard
 		nextUse[bs->client] = level.time + Q_irand(5000, 9000) * pause / 100;
 		botEvalForceUse[4]++;
+	}
+}
+
+static qboolean BotJ2_MoveIsStart(int m) { return (m >= LS_S_TL2BR && m <= LS_S_T2B) ? qtrue : qfalse; }
+static qboolean BotJ2_MoveIsTrans(int m) { return (m >= LS_T1_BR__R && m <= LS_T1_BL__L) ? qtrue : qfalse; }
+static qboolean BotJ2_Unblockable(int m) {
+	return (m == LS_A_BACK || m == LS_A_BACK_CR || m == LS_A_BACKSTAB || m == LS_A_JUMP_T__B_) ? qtrue : qfalse;
+}
+
+// 1.02 WP_SaberCanBlock, the parts the defender controls: ready pose or a parry, not attacking,
+// no hand extended for a force power, some saber defence
+static qboolean BotJ2_CanBlockNow(const playerState_t *ps) {
+	if (ps->weapon != WP_SABER || ps->saberHolstered || ps->saberInFlight || ps->fd.forcePowerLevel[FP_SABER_DEFENSE] < 1) {
+		return qfalse;
+	}
+	if (BG_SaberInAttack(ps->saberMove) || BG_SaberInSpecial(ps->saberMove) || ps->forceHandExtend != HANDEXTEND_NONE) {
+		return qfalse;
+	}
+	return (ps->saberMove == LS_READY || ps->saberMove == LS_NONE || (ps->saberMove >= LS_PARRY_UP && ps->saberMove <= LS_REFLECT_LL)) ? qtrue : qfalse;
+}
+
+// how much "e" faces the point "at" (1 = straight at it)
+static float BotJ2_Facing(const playerState_t *e, const vec3_t at) {
+	vec3_t a, fw, to;
+	VectorSet(a, 0, e->viewangles[YAW], 0);
+	AngleVectors(a, fw, NULL, NULL);
+	VectorSubtract(at, e->origin, to);
+	to[2] = 0;
+	if (VectorNormalize(to) < 1.0f) return 1.0f;
+	return DotProduct(fw, to);
+}
+
+// ms until "e"'s saber can do full damage to "me", or -1
+static int BotJ2_Incoming(gentity_t *me, gentity_t *e, float d) {
+	const playerState_t *ep = &e->client->ps;
+	const int m = ep->saberMove;
+	if (ep->weapon != WP_SABER || ep->saberHolstered || ep->saberInFlight || d > 170.0f) {
+		return -1;
+	}
+	if (BG_SaberInAttack(m) || BG_SaberInSpecial(m)) {
+		return BotPred_BladeHits(e, me, 150);
+	}
+	// a start or a transition runs into an attack when its animation ends
+	if ((BotJ2_MoveIsStart(m) || BotJ2_MoveIsTrans(m)) && d < 110.0f && ep->torsoTimer <= 100
+		&& BotJ2_Facing(ep, me->client->ps.origin) > 0.5f) {
+		return ep->torsoTimer;
+	}
+	return -1;
+}
+
+static qboolean BotJ2_Visible(bot_state_t* bs, gentity_t *e) {
+	trace_t tr;
+	vec3_t eye;
+	if (e == bs->currentEnemy) {
+		return bs->frame_Enemy_Vis ? qtrue : qfalse;
+	}
+	VectorCopy(e->client->ps.origin, eye);
+	eye[2] += e->client->ps.viewheight;
+	trap->Trace(&tr, bs->eye, NULL, NULL, eye, bs->client, MASK_SOLID, qfalse, 0, 0);
+	return (tr.fraction >= 1.0f) ? qtrue : qfalse;
+}
+
+/*
+Stance (bot_jk2Tactics 32 = red, 64 = yellow as the base style). 1.02 damage is per hit: blue 35,
+yellow 60, red 100, repeated every 100 ms while the blade stays in a body. Players spawn with 125
+health and 25 armour, so red needs two hits, yellow three, blue five. Red is the only style that
+gets through a saber defence 3 guard (one in five); yellow gets through only below defence 3;
+blue never. Red starts slowly (0.4-0.8 s) and stops chaining after one or two swings, yellow after
+three to six, blue never. Blue is taken only at very close range against an enemy who is already
+swinging at us, when we are hurt.
+*/
+// a generic command (force power, style cycle) in this very usercmd, as a client sends it
+static qboolean BotJ2_GenCmdNow(bot_state_t* bs, usercmd_t* ucmd, int genCmd, int debounceMs) {
+	if (ucmd->generic_cmd || bs->inputGenCmd || level.time < bs->inputGenCmdTime) {
+		return qfalse;
+	}
+	ucmd->generic_cmd = (byte)genCmd;
+	bs->inputGenCmdTime = level.time + debounceMs;
+	return qtrue;
+}
+
+static int Bot_JK2Stance(bot_state_t* bs, int mask) {
+	gclient_t *cl = g_entities[bs->client].client;
+	const playerState_t *ep;
+	const int off = cl->ps.fd.forcePowerLevel[FP_SABER_OFFENSE];
+	int want = (mask & BOTJ2_YELLOW) ? FORCE_LEVEL_2 : FORCE_LEVEL_3;
+	float d;
+	if (!bs->currentEnemy || !bs->currentEnemy->client) {
+		return 0;
+	}
+	ep = &bs->currentEnemy->client->ps;
+	d = bs->frame_Enemy_Len;
+	if (d < 70.0f && g_entities[bs->client].health <= 35 && (BG_SaberInAttack(ep->saberMove) || BotJ2_MoveIsTrans(ep->saberMove))) {
+		want = FORCE_LEVEL_1;
+	}
+	if (want > off) want = off;
+	if (want < FORCE_LEVEL_1) want = FORCE_LEVEL_1;
+	return want;
+}
+
+static void Bot_JK2Tactics(bot_state_t* bs, usercmd_t* ucmd) {
+	static int guardUntil[MAX_CLIENTS], guardStart[MAX_CLIENTS], guardHealth[MAX_CLIENTS], guardDone[MAX_CLIENTS];
+	static int atkMove[MAX_CLIENTS], atkStart[MAX_CLIENTS], dfaPrepUntil[MAX_CLIENTS], dfaNext[MAX_CLIENTS], dfaJump[MAX_CLIENTS], dfaFlags[MAX_CLIENTS];
+	static int lockOn[MAX_CLIENTS], pushTime[MAX_CLIENTS], pushVictim[MAX_CLIENTS], lastHitSeen[MAX_CLIENTS];
+	static int backTime[MAX_CLIENTS], backFlags[MAX_CLIENTS], healNext[MAX_CLIENTS], stanceNext[MAX_CLIENTS];
+	static int waitSince[MAX_CLIENTS], waitFreeUntil[MAX_CLIENTS], waitOpen[MAX_CLIENTS];
+	static int guardAtt[MAX_CLIENTS], guardHits[MAX_CLIENTS], guardThreat[MAX_CLIENTS], dfaBucket[MAX_CLIENTS], downStart[MAX_CLIENTS], downFlags[MAX_CLIENTS];
+	gentity_t *me = &g_entities[bs->client];
+	gclient_t *cl = me->client;
+	const int c = bs->client;
+	const int mask = bot_jk2Tactics.integer;
+	playerState_t *ps;
+	gentity_t *en = bs->currentEnemy;
+	qboolean guarding = qfalse;
+	int m, i;
+
+	if (!cl || me->health <= 0 || cl->ps.weapon != WP_SABER || cl->sess.sessionTeam == TEAM_SPECTATOR) {
+		lockOn[c] = 0;
+		return;
+	}
+	ps = &cl->ps;
+	m = ps->saberMove;
+	// map restarts: stamps from the future
+	if (guardUntil[c] > level.time + 5000) guardUntil[c] = guardStart[c] = 0;
+	if (dfaNext[c] > level.time + 20000) dfaNext[c] = dfaPrepUntil[c] = dfaJump[c] = 0;
+	if (healNext[c] > level.time + 20000) healNext[c] = 0;
+	if (stanceNext[c] > level.time + 20000) stanceNext[c] = 0;
+	if (pushTime[c] > level.time) pushTime[c] = 0;
+	if (backTime[c] > level.time) backTime[c] = 0;
+
+	// when did our current attack move begin (the red DFA window counts from there)
+	if (BG_SaberInAttack(m) && m != atkMove[c]) {
+		atkStart[c] = level.time;
+	}
+	atkMove[c] = m;
+
+	// ---- saber lock: tap attack (3 new presses = one push) ----
+	if (mask & BOTJ2_LOCK) {
+		if (ps->saberLockTime > level.time && ps->saberLockEnemy >= 0 && ps->saberLockEnemy < MAX_CLIENTS) {
+			if ((level.framenum & 1) == 0) ucmd->buttons |= BUTTON_ATTACK;
+			else ucmd->buttons &= ~BUTTON_ATTACK;
+			ucmd->buttons &= ~(BUTTON_ALT_ATTACK | BUTTON_FORCEPOWER | BUTTON_FORCEGRIP | BUTTON_FORCE_LIGHTNING | BUTTON_FORCE_DRAIN);
+			botJ2Eval[J2E_LOCK_FRAMES]++;
+			lockOn[c] = ps->saberLockEnemy + 1;
+			return;
+		}
+		if (lockOn[c]) {
+			// the lock just ended: the loser is knocked down
+			gentity_t *o = &g_entities[lockOn[c] - 1];
+			if (BG_InKnockDown(ps->legsAnim) || ps->forceHandExtend == HANDEXTEND_KNOCKDOWN) botJ2Eval[J2E_LOCK_LOST]++;
+			else if (o->client && (BG_InKnockDown(o->client->ps.legsAnim) || o->client->ps.forceHandExtend == HANDEXTEND_KNOCKDOWN)) botJ2Eval[J2E_LOCK_WON]++;
+			lockOn[c] = 0;
+		}
+	}
+
+	// ---- outcome of the last guard (counters only) ----
+	if (guardStart[c] && !guardDone[c]) {
+		if (jk2StatBlockTime[c] >= guardStart[c]) {
+			botJ2Eval[J2E_GUARD_BLOCKED]++;
+			guardDone[c] = 1;
+		} else if (jk2StatHitsTaken[c] > guardHits[c]) {
+			botJ2Eval[J2E_GUARD_HIT]++;
+			guardDone[c] = 1;
+		} else if (level.time > guardUntil[c] + 300) {
+			guardDone[c] = 1;
+		}
+	}
+
+	// ---- guard ----
+	if ((mask & BOTJ2_GUARD) && BotJ2_CanBlockNow(ps) && !bs->seqType) {
+		const int def = ps->fd.forcePowerLevel[FP_SABER_DEFENSE];
+		gentity_t *att = NULL;
+		int best = 99999;
+		for (i = 0; i < MAX_CLIENTS; i++) {
+			gentity_t *o = &g_entities[i];
+			float d;
+			int t;
+			if (i == c || !o->inuse || !o->client || o->health <= 0 || o->client->sess.sessionTeam == TEAM_SPECTATOR
+				|| OnSameTeam(me, o) || o->client->ps.weapon != WP_SABER) {
+				continue;
+			}
+			if ((o->client->ps.duelInProgress && o->client->ps.duelIndex != c) || (ps->duelInProgress && ps->duelIndex != i)) {
+				continue;	// a private duel: neither can hurt anyone else
+			}
+			d = Distance(o->client->ps.origin, ps->origin);
+			if (d > 170.0f) {
+				continue;
+			}
+			t = BotJ2_Incoming(me, o, d);
+			if (t < 0 || t >= best || BotJ2_Unblockable(o->client->ps.saberMove)) {
+				continue;
+			}
+			if (o->client->ps.fd.saberAnimLevel >= FORCE_LEVEL_3 && def < FORCE_LEVEL_3) {
+				botJ2Eval[J2E_GUARD_SKIP]++;
+				continue;	// red is not blocked below defence 3
+			}
+			if (!BotJ2_Visible(bs, o)) {
+				continue;
+			}
+			att = o;
+			best = t;
+		}
+		if (att) {
+			guardThreat[c] = level.time;
+		}
+		if (guardThreat[c] > level.time) guardThreat[c] = 0;
+		if (!att && guardAtt[c] && level.time - guardThreat[c] <= 100) {
+			// the swing we were guarding against is still going (its blade may only be off its
+			// path to us for a moment): keep the guard while he is in it and close
+			gentity_t *o = &g_entities[guardAtt[c] - 1];
+			if (o->inuse && o->client && o->health > 0 && o->client->ps.weapon == WP_SABER
+				&& (BG_SaberInAttack(o->client->ps.saberMove) || BotJ2_MoveIsTrans(o->client->ps.saberMove))
+				&& !BotJ2_Unblockable(o->client->ps.saberMove)
+				&& Distance(o->client->ps.origin, ps->origin) < 150.0f) {
+				att = o;
+				botJ2Eval[J2E_GUARD_KEPT]++;
+			}
+		}
+		if (att) {
+			vec3_t to, ang;
+			float dyaw;
+			guarding = qtrue;
+			ucmd->buttons &= ~(BUTTON_ATTACK | BUTTON_ALT_ATTACK | BUTTON_FORCEPOWER | BUTTON_FORCEGRIP | BUTTON_FORCE_LIGHTNING | BUTTON_FORCE_DRAIN);
+			// face him: the hit has to be in front (defence 3 takes anything in front)
+			VectorSubtract(att->client->ps.origin, ps->origin, to);
+			vectoangles(to, ang);
+			dyaw = AngleNormalize180(ang[YAW] - ps->viewangles[YAW]);
+			if (fabs(dyaw) > 10.0f && fabs(dyaw) <= 110.0f) {
+				ucmd->angles[YAW] = (short)(ANGLE2SHORT(ang[YAW]) - ps->delta_angles[YAW]);
+				botJ2Eval[J2E_GUARD_TURNS]++;
+			}
+			if (guardUntil[c] < level.time - 150 || !guardStart[c]) {
+				guardStart[c] = level.time;
+				guardHealth[c] = me->health + ps->stats[STAT_ARMOR];
+				guardHits[c] = jk2StatHitsTaken[c];
+				guardDone[c] = 0;
+				botJ2Eval[J2E_GUARD_START]++;
+			}
+			guardUntil[c] = level.time;
+			guardAtt[c] = att->s.number + 1;
+			jk2BotGuardFrame[c] = level.time;
+			botJ2Eval[J2E_GUARD_FRAMES]++;
+		}
+	}
+
+	// ---- saber lock pushes and guard come first; the rest needs a visible enemy ----
+	if (!en || !en->client || en->health <= 0 || !bs->frame_Enemy_Vis) {
+		waitSince[c] = 0;
+		return;
+	}
+
+	// ---- patience ----
+	if (waitFreeUntil[c] > level.time + 5000) waitFreeUntil[c] = 0;
+	if ((mask & BOTJ2_PATIENT) && !guarding && !bs->seqType && BotJ2_CanBlockNow(ps) && level.time >= waitFreeUntil[c]) {
+		const playerState_t *ep = &en->client->ps;
+		const float d = bs->frame_Enemy_Len;
+		qboolean waitNow = qfalse;
+		if (d < 140.0f && ep->weapon == WP_SABER && !ep->saberHolstered && !ep->saberInFlight
+			&& !BG_InKnockDown(ep->legsAnim) && ep->forceHandExtend == HANDEXTEND_NONE) {
+			const int em = ep->saberMove;
+			const int style = ps->fd.saberAnimLevel;
+			// time from pressing attack in the ready pose to the blade doing damage: the start
+			// animation and the first part of the attack (1.02 timings, bg_saber_jk2.c)
+			const int ourTime = (style >= FORCE_LEVEL_3) ? 650 : ((style == FORCE_LEVEL_2) ? 300 : 220);
+			qboolean open = qfalse;
+			if (BotJ2_Facing(ep, ps->origin) < 0.3f) {
+				open = qtrue;									// looking elsewhere: a hit from the side or behind is not blocked
+			} else if (PM_SaberInReturn(em) || PM_SaberInBounce(em) || PM_SaberInBrokenParry(em)) {
+				open = qtrue;									// cannot block until he is back in the ready pose
+			} else if ((BotJ2_MoveIsStart(em) || BotJ2_MoveIsTrans(em)) && ep->torsoTimer > ourTime) {
+				open = qtrue;									// his attack is further away than ours
+			} else if ((BG_SaberInAttack(em) || BG_SaberInSpecial(em)) && BotPred_BladeHits(en, me, 300) < 0 && !BotJ2_Unblockable(em)) {
+				open = qtrue;									// swinging, but not at us: he cannot block now
+			}
+			if (!open) {
+				waitNow = qtrue;
+			} else {
+				if (!waitOpen[c]) botJ2Eval[J2E_WAIT_STRIKES]++;
+				waitOpen[c] = 1;
+			}
+		}
+		if (waitNow) {
+			waitOpen[c] = 0;
+			if (!waitSince[c] || waitSince[c] > level.time) waitSince[c] = level.time;
+			if (level.time - waitSince[c] > 1500) {
+				waitFreeUntil[c] = level.time + 600;		// he will not open up: take the initiative for a moment
+				waitSince[c] = 0;
+				botJ2Eval[J2E_WAIT_TIMEOUTS]++;
+			} else {
+				ucmd->buttons &= ~(BUTTON_ATTACK | BUTTON_ALT_ATTACK);
+				jk2BotGuardFrame[c] = level.time;
+				botJ2Eval[J2E_WAIT_FRAMES]++;
+				guarding = qtrue;								// no specials out of the guard
+			}
+		} else {
+			waitSince[c] = 0;
+		}
+	}
+
+	// ---- stance ----
+	if ((mask & (BOTJ2_STANCE | BOTJ2_YELLOW)) && level.time >= stanceNext[c] && !BG_SaberInAttack(m) && ps->weaponTime <= 0) {
+		const int want = Bot_JK2Stance(bs, mask);
+		const int cur = cl->saberCycleQueue ? cl->saberCycleQueue : ps->fd.saberAnimLevel;
+		if (want && want != cur && BotJ2_GenCmdNow(bs, ucmd, GENCMD_SABERATTACKCYCLE, 340)) {
+			botJ2Eval[J2E_STANCE_SET]++;
+			stanceNext[c] = level.time + 350;
+		} else if (want == cur) {
+			stanceNext[c] = level.time + 1000;
+		}
+	}
+
+	{
+		const playerState_t *ep = &en->client->ps;
+		const int hitSeen = lastHitSeen[c];
+		const qboolean enemyDown = (BG_InKnockDown(ep->legsAnim) || ep->forceHandExtend == HANDEXTEND_KNOCKDOWN) ? qtrue : qfalse;
+		vec3_t to, fw, a;
+		float hd, dz, dot;
+		VectorSubtract(ep->origin, ps->origin, to);
+		dz = to[2];
+		to[2] = 0;
+		hd = VectorNormalize(to);
+		VectorSet(a, 0, ps->viewangles[YAW], 0);
+		AngleVectors(a, fw, NULL, NULL);
+		dot = DotProduct(fw, to);
+
+		// ---- red DFA ----
+		if (dfaJump[c] && !(dfaFlags[c] & 1) && m == LS_A_JUMP_T__B_) {
+			dfaFlags[c] |= 1;
+			botJ2Eval[J2E_DFA_START]++;
+		}
+		if (dfaJump[c] && !(dfaFlags[c] & 2) && jk2StatHitMove[c] == LS_A_JUMP_T__B_ && jk2StatHitTime[c] >= dfaJump[c]) {
+			dfaFlags[c] |= 2;
+			botJ2Eval[J2E_DFA_LAND]++;
+			botJ2DfaLands[dfaBucket[c]]++;
+			if (g_entities[jk2StatHitVictim[c]].health <= 0) botJ2Eval[J2E_DFA_KILL]++;
+		}
+		if ((mask & BOTJ2_DFA) && !guarding && ps->fd.saberAnimLevel == FORCE_LEVEL_3 && ps->groundEntityNum != ENTITYNUM_NONE
+			&& !bs->seqType && !enemyDown && ep->weapon == WP_SABER) {
+			// the leap carries 300 u/s forward for about 0.7 s and the blade comes down in its second
+			// half; a target that is not getting away is reached from about 100 to 200 units
+			const qboolean inRange = (hd >= 100.0f && hd <= 200.0f && fabs(dz) < 48.0f && dot > 0.92f
+				&& DotProduct(ep->velocity, to) < 150.0f) ? qtrue : qfalse;
+			const qboolean clear = inRange ? BotNav_PathClear(bs, to, hd > 120.0f ? hd - 40.0f : 80.0f, 0) : qfalse;
+			if (inRange && clear && BG_SaberInAttack(m) && !BG_SaberInSpecial(m) && level.time - atkStart[c] <= 350
+				&& !(ps->pm_flags & PMF_JUMP_HELD) && (dfaPrepUntil[c] > level.time || level.time >= dfaNext[c])) {
+				// the attack has just begun: jump forward now
+				ucmd->upmove = 127;
+				ucmd->forwardmove = 127;
+				ucmd->rightmove = 0;
+				ucmd->buttons |= BUTTON_ATTACK;
+				ucmd->buttons &= ~(BUTTON_ALT_ATTACK | BUTTON_FORCEPOWER | BUTTON_FORCEGRIP | BUTTON_FORCE_LIGHTNING | BUTTON_FORCE_DRAIN);
+				dfaJump[c] = level.time;
+				dfaFlags[c] = 0;
+				dfaPrepUntil[c] = 0;
+				dfaNext[c] = level.time + Q_irand(2500, 4000);
+				dfaBucket[c] = (int)((hd - 70.0f) / 30.0f);
+				if (dfaBucket[c] < 0) dfaBucket[c] = 0;
+				if (dfaBucket[c] > 4) dfaBucket[c] = 4;
+				botJ2DfaJumps[dfaBucket[c]]++;
+				botJ2Eval[J2E_DFA_JUMP]++;
+			} else if (dfaPrepUntil[c] > level.time) {
+				// swing under way: keep the keys of an overhead swing and jump free for the press
+				if (inRange) {
+					ucmd->forwardmove = 127;
+					ucmd->rightmove = 0;
+					ucmd->upmove = 0;
+					ucmd->buttons |= BUTTON_ATTACK;
+				} else {
+					dfaPrepUntil[c] = 0;
+				}
+			} else if (inRange && clear && hd >= 120.0f && level.time >= dfaNext[c] && ps->saberMove == LS_READY && ps->weaponTime <= 0) {
+				// start an overhead swing; the jump follows when its attack part begins
+				ucmd->forwardmove = 127;
+				ucmd->rightmove = 0;
+				ucmd->upmove = 0;
+				ucmd->buttons |= BUTTON_ATTACK;
+				ucmd->buttons &= ~(BUTTON_ALT_ATTACK | BUTTON_FORCEPOWER | BUTTON_FORCEGRIP | BUTTON_FORCE_LIGHTNING | BUTTON_FORCE_DRAIN);
+				dfaPrepUntil[c] = level.time + 1000;
+				dfaNext[c] = level.time + 1500;
+				botJ2Eval[J2E_DFA_PREP]++;
+			}
+		}
+
+		// ---- back attack ----
+		if (backTime[c] && !(backFlags[c] & 1) && (m == LS_A_BACK || m == LS_A_BACK_CR || m == LS_A_BACKSTAB)) {
+			backFlags[c] |= 1;
+			botJ2Eval[J2E_BACK_START]++;
+		}
+		if (backTime[c] && !(backFlags[c] & 2) && jk2StatHitTime[c] >= backTime[c]
+			&& (jk2StatHitMove[c] == LS_A_BACK || jk2StatHitMove[c] == LS_A_BACK_CR || jk2StatHitMove[c] == LS_A_BACKSTAB)) {
+			backFlags[c] |= 2;
+			botJ2Eval[J2E_BACK_LAND]++;
+		}
+		if ((mask & BOTJ2_BACK) && !guarding && ps->groundEntityNum != ENTITYNUM_NONE && !bs->seqType && level.time - backTime[c] > 1200
+			&& (ps->saberMove == LS_READY || (BG_SaberInAttack(m) && ps->torsoTimer < 100))) {
+			for (i = 0; i < MAX_CLIENTS; i++) {
+				gentity_t *o = &g_entities[i];
+				vec3_t ob;
+				float along, side;
+				if (i == c || !o->inuse || !o->client || o->health <= 0 || o->client->sess.sessionTeam == TEAM_SPECTATOR || OnSameTeam(me, o)) {
+					continue;
+				}
+				if ((o->client->ps.duelInProgress && o->client->ps.duelIndex != c) || (ps->duelInProgress && ps->duelIndex != i)) {
+					continue;
+				}
+				VectorSubtract(o->client->ps.origin, ps->origin, ob);
+				if (fabs(ob[2]) > 24.0f) {
+					continue;
+				}
+				along = -DotProduct(ob, fw);					// distance behind us
+				side = fabs(ob[0] * fw[1] - ob[1] * fw[0]);		// distance off our back line
+				if (along > 20.0f && along < 120.0f && side < 26.0f && (o == en || BotJ2_Visible(bs, o) || along < 80.0f)) {
+					ucmd->forwardmove = -127;
+					ucmd->rightmove = 0;
+					ucmd->upmove = 0;
+					ucmd->buttons |= BUTTON_ATTACK;
+					ucmd->buttons &= ~(BUTTON_ALT_ATTACK | BUTTON_FORCEPOWER | BUTTON_FORCEGRIP | BUTTON_FORCE_LIGHTNING | BUTTON_FORCE_DRAIN);
+					backTime[c] = level.time;
+					backFlags[c] = 0;
+					botJ2Eval[J2E_BACK_TRY]++;
+					break;
+				}
+			}
+		}
+
+		// ---- force: push to knock down, hit the fallen, heal ----
+		if (pushTime[c] && !(pushVictim[c] & 0x100) && level.time - pushTime[c] < 1200) {
+			gentity_t *v = &g_entities[pushVictim[c] & 0xff];
+			if (v->client && v->client->ps.forceHandExtend == HANDEXTEND_KNOCKDOWN) {
+				pushVictim[c] |= 0x100;
+				botJ2Eval[J2E_PUSH_DOWN]++;
+			}
+		}
+		if (mask & (BOTJ2_FORCE | BOTJ2_PUSH)) {
+			const int known = ps->fd.forcePowersKnown;
+			if ((mask & BOTJ2_PUSH) && enemyDown && hd < 100.0f && fabs(dz) < 48.0f && !guarding && !bs->seqType) {
+				// he cannot block or get away while he is down: an overhead swing into him
+				ucmd->forwardmove = (hd > 40.0f) ? 127 : 0;
+				ucmd->rightmove = 0;
+				if (ucmd->upmove > 0) ucmd->upmove = 0;
+				ucmd->buttons |= BUTTON_ATTACK;
+				botJ2Eval[J2E_DOWN_FRAMES]++;
+				if (level.time - downStart[c] > 1500 || downFlags[c] != en->s.number + 1) {
+					downStart[c] = level.time;
+					downFlags[c] = en->s.number + 1;
+				}
+				if (jk2StatHitTime[c] >= downStart[c] && jk2StatHitVictim[c] == en->s.number && !(downFlags[c] & 0x1000)) {
+					downFlags[c] |= 0x1000;
+					botJ2Eval[J2E_DOWN_HIT]++;
+				}
+			} else if ((mask & BOTJ2_PUSH) && !guarding && !bs->seqType && (known & (1 << FP_PUSH)) && ps->fd.forcePowerLevel[FP_PUSH] >= FORCE_LEVEL_3
+				&& !(g_forcePowerDisable.integer & (1 << FP_PUSH)) && hd < 120.0f && fabs(dz) < 40.0f && dot > 0.85f && !enemyDown
+				&& ps->fd.forcePower >= forcePowerNeeded[ps->fd.forcePowerLevel[FP_PUSH]][FP_PUSH] && ps->forceHandExtend == HANDEXTEND_NONE
+				&& ps->weaponTime <= 0 && ps->powerups[PW_DISINT_4] <= level.time && level.time - pushTime[c] > 2500
+				&& (ep->fd.forcePowerLevel[FP_PUSH] < FORCE_LEVEL_3 || VectorLength(ep->velocity) > 40.0f)) {
+				if (BotJ2_GenCmdNow(bs, ucmd, GENCMD_FORCE_THROW, 300)) {
+					ucmd->buttons &= ~BUTTON_ATTACK;	// stay out of a swing for the push
+					pushTime[c] = level.time;
+					pushVictim[c] = en->s.number;
+					botJ2Eval[J2E_PUSH]++;
+				}
+			} else if ((mask & BOTJ2_FORCE) && !guarding && (known & (1 << FP_HEAL)) && !(g_forcePowerDisable.integer & (1 << FP_HEAL)) && level.time >= healNext[c]
+				&& ps->fd.forcePowerLevel[FP_HEAL] >= FORCE_LEVEL_2 && ps->fd.forcePower >= forcePowerNeeded[ps->fd.forcePowerLevel[FP_HEAL]][FP_HEAL]
+				&& me->health <= ps->stats[STAT_MAX_HEALTH] - ((ps->fd.forcePowerLevel[FP_HEAL] >= FORCE_LEVEL_3) ? 50 : 25)
+				&& !(BG_SaberInAttack(ep->saberMove) && hd < 140.0f)) {
+				if (BotJ2_GenCmdNow(bs, ucmd, GENCMD_FORCE_HEAL, 300)) {
+					healNext[c] = level.time + 1000;
+					botJ2Eval[J2E_HEAL]++;
+				}
+			}
+		}
+		(void)hitSeen;
+		lastHitSeen[c] = jk2StatHitTime[c];
 	}
 }
 
@@ -1736,6 +2329,11 @@ void BotInputToUserCommand(bot_state_t* bs, bot_input_t* bi, usercmd_t* ucmd, in
 		}
 	}
 
+	// JK2 1.02 saber rules (bot_features 33554432)
+	if ((bs->features & BOTF_JK2) && g_jk2_102sabersystem.integer) {
+		Bot_JK2Tactics(bs, ucmd);
+	}
+
 	// walking in a saber fight (bot_features 4194304)
 	if ((bs->features & BOTF_WALK) && cl && cl->ps.weapon == WP_SABER && cl->ps.stats[STAT_HEALTH] > 0
 		&& cl->ps.groundEntityNum != ENTITYNUM_NONE && bs->currentEnemy && bs->currentEnemy->client && bs->frame_Enemy_Vis
@@ -1771,14 +2369,14 @@ void BotInputToUserCommand(bot_state_t* bs, bot_input_t* bi, usercmd_t* ucmd, in
 	// MB2-style manual blocking (g_mb2manualblock): hold the guard when a saber can reach us, and
 	// aim at the side an incoming swing comes from to perfect-block it. Higher skill reads more
 	// swings and reacts sooner. Alt attack together with use stays the saber throw.
-	if (g_mb2manualblock.integer && cl && cl->ps.weapon == WP_SABER && (ucmd->buttons & BUTTON_USE)
+	if ((g_mb2manualblock.integer && !g_jk2_102sabersystem.integer) && cl && cl->ps.weapon == WP_SABER && (ucmd->buttons & BUTTON_USE)
 		&& !(bs->inputHoldUntil > level.time && (bs->inputHoldButtons & BUTTON_USE))
 		&& !(botUsePress[bs->client] > level.time && botUsePress[bs->client] < level.time + 3000)) {
 		// the old "press use now and then in case something is usable" would turn a guard into a saber
 		// throw (alt attack + use): with MB2 blocking, use is only pressed when meant
 		ucmd->buttons &= ~BUTTON_USE;
 	}
-	if (g_mb2manualblock.integer && cl && cl->ps.weapon == WP_SABER && cl->ps.stats[STAT_HEALTH] > 0
+	if ((g_mb2manualblock.integer && !g_jk2_102sabersystem.integer) && cl && cl->ps.weapon == WP_SABER && cl->ps.stats[STAT_HEALTH] > 0
 		&& !(ucmd->buttons & BUTTON_USE) && !(bs->currentEnemy && bs->currentEnemy->client && bs->frame_Enemy_Vis)) {
 		// no enemy chosen, or not in sight: still guard against anyone swinging a saber close by
 		int i;
@@ -1796,7 +2394,7 @@ void BotInputToUserCommand(bot_state_t* bs, bot_input_t* bi, usercmd_t* ucmd, in
 			}
 		}
 	}
-	if (g_mb2manualblock.integer && cl && cl->ps.weapon == WP_SABER && cl->ps.stats[STAT_HEALTH] > 0
+	if ((g_mb2manualblock.integer && !g_jk2_102sabersystem.integer) && cl && cl->ps.weapon == WP_SABER && cl->ps.stats[STAT_HEALTH] > 0
 		&& bs->currentEnemy && bs->currentEnemy->client && bs->frame_Enemy_Vis && !(ucmd->buttons & BUTTON_USE)) {
 		static int pbMove[MAX_CLIENTS], pbGo[MAX_CLIENTS], mbGo[MAX_CLIENTS];
 		const qboolean wantsSwing = (ucmd->buttons & BUTTON_ATTACK) ? qtrue : qfalse;
@@ -3054,6 +3652,11 @@ int BotAISetupClient(int client, struct bot_settings_s* settings, qboolean resta
 	bs->botWeaponWeights[WP_MELEE] = 1;
 
 	BotUtilizePersonality(bs);
+
+	if (g_jk2_102sabersystem.integer)
+	{ // JK2 1.02 mode: the pistol is WP_BRYAR_OLD (JK2's charging pistol), weighted like the pistol
+		bs->botWeaponWeights[WP_BRYAR_OLD] = bs->botWeaponWeights[WP_BRYAR_PISTOL];
+	}
 
 	if (level.gametype == GT_DUEL || level.gametype == GT_POWERDUEL)
 	{
@@ -7636,7 +8239,7 @@ float BotWeaponCanLead(bot_state_t* bs)
 	case WP_FLECHETTE:
 		return 0.3f;
 	case WP_DISRUPTOR:
-		if (g_tweakWeapons.integer & WT_PROJ_SNIPER)
+		if (JK2O_TWEAKWEAPONS & WT_PROJ_SNIPER)
 			return 0.08f;
 		else
 			return 0.03f;
@@ -7650,50 +8253,50 @@ float G_NewBotAIGetProjectileSpeed(int weapon, qboolean altFire) {
 
 	if (weapon == WP_BRYAR_OLD || weapon == WP_BRYAR_PISTOL || (weapon == WP_REPEATER && !altFire))
 		projectileSpeed = 1600;
-	else if (weapon == WP_BLASTER && (g_tweakWeapons.integer & WT_TRIBES))
+	else if (weapon == WP_BLASTER && (JK2O_TWEAKWEAPONS & WT_TRIBES))
 		projectileSpeed = 10440;
 	else if (weapon == WP_BLASTER)
 		projectileSpeed = 2300;
-	else if (weapon == WP_DISRUPTOR && (g_tweakWeapons.integer & WT_PROJ_SNIPER))
+	else if (weapon == WP_DISRUPTOR && (JK2O_TWEAKWEAPONS & WT_PROJ_SNIPER))
 		projectileSpeed = 9000;
 	else if (weapon == WP_BOWCASTER)
 		projectileSpeed = 1300;
 	else if (weapon == WP_DEMP2 && !altFire) {
-		if (g_tweakWeapons.integer & WT_TRIBES)
+		if (JK2O_TWEAKWEAPONS & WT_TRIBES)
 			projectileSpeed = 2200;
 		else
 			projectileSpeed = 1800;
 	}
 	else if (weapon == WP_REPEATER && altFire) {
-		if (g_tweakWeapons.integer & WT_TRIBES)
+		if (JK2O_TWEAKWEAPONS & WT_TRIBES)
 			projectileSpeed = 1400;
 		else
 			projectileSpeed = 1100;
 	}
-	else if (weapon == WP_FLECHETTE && (g_tweakWeapons.integer & WT_STAKE_GUN))
+	else if (weapon == WP_FLECHETTE && (JK2O_TWEAKWEAPONS & WT_STAKE_GUN))
 		projectileSpeed = 3000;
 	else if ((weapon == WP_FLECHETTE) && altFire)
 		projectileSpeed = 1150;
 	else if (weapon == WP_FLECHETTE && !altFire)
 		projectileSpeed = 3500;
-	else if (weapon == WP_REPEATER && (g_tweakWeapons.integer & WT_TRIBES) && altFire)
+	else if (weapon == WP_REPEATER && (JK2O_TWEAKWEAPONS & WT_TRIBES) && altFire)
 		projectileSpeed = 2000;
 	else if (weapon == WP_ROCKET_LAUNCHER && !altFire) {
-		if (g_tweakWeapons.integer & WT_TRIBES)
+		if (JK2O_TWEAKWEAPONS & WT_TRIBES)
 			projectileSpeed = 2040;
 		else
 			projectileSpeed = 900;
 	}
 	else if (weapon == WP_ROCKET_LAUNCHER && altFire)
 		projectileSpeed = 450;
-	else if (weapon == WP_CONCUSSION && !altFire && (g_tweakWeapons.integer & WT_TRIBES))
+	else if (weapon == WP_CONCUSSION && !altFire && (JK2O_TWEAKWEAPONS & WT_TRIBES))
 		projectileSpeed = 2275;
 	else if (weapon == WP_CONCUSSION && !altFire)
 		projectileSpeed = 3000;
 	else if (weapon == WP_THERMAL)
 		projectileSpeed = 900;
 
-	return projectileSpeed * g_projectileVelocityScale.value;
+	return projectileSpeed * JK2O_PROJVELOCITYSCALE;
 }
 
 /*
@@ -7770,21 +8373,21 @@ void G_NewBotAIAimLeading(bot_state_t* bs, vec3_t headlevel) {
 	projectileSpeed = G_NewBotAIGetProjectileSpeed(bs->cur_ps.weapon, bs->doAltAttack);
 
 	if (projectileSpeed) { //this should be done after playr movement
-		if (g_projectileInheritance.value) { //todo still have to teach brodie full inheritence projectiles
+		if (JK2O_PROJINHERITANCE) { //todo still have to teach brodie full inheritence projectiles
 			vec3_t botforward;
 			AngleVectors(bs->viewangles, botforward, NULL, NULL);
-			projectileSpeed += DotProduct(botforward, g_entities[bs->client].client->ps.velocity) * g_projectileInheritance.value;
+			projectileSpeed += DotProduct(botforward, g_entities[bs->client].client->ps.velocity) * JK2O_PROJINHERITANCE;
 		}
 
 		eta = (bs->frame_Enemy_Len / projectileSpeed); //TODO: Adjust if its a curved projectile arc
 		VectorMA(headlevel, eta, bs->currentEnemy->client->ps.velocity, predictedSpot); //Multiple vel by eta, and add it to their origin to get predicted spot
 		if (((bs->cur_ps.weapon == WP_REPEATER) && bs->doAltAttack) ||
-			((bs->cur_ps.weapon == WP_DISRUPTOR) && (g_tweakWeapons.integer & WT_PROJ_SNIPER)) ||
-			((bs->cur_ps.weapon == WP_ROCKET_LAUNCHER) && !bs->doAltAttack && (g_tweakWeapons.integer & WT_TRIBES)) ||
-			((bs->cur_ps.weapon == WP_FLECHETTE) && (g_tweakWeapons.integer & WT_STAKE_GUN)) ||
-			((bs->cur_ps.weapon == WP_FLECHETTE) && !(g_tweakWeapons.integer & WT_STAKE_GUN) && bs->doAltAttack) ||
+			((bs->cur_ps.weapon == WP_DISRUPTOR) && (JK2O_TWEAKWEAPONS & WT_PROJ_SNIPER)) ||
+			((bs->cur_ps.weapon == WP_ROCKET_LAUNCHER) && !bs->doAltAttack && (JK2O_TWEAKWEAPONS & WT_TRIBES)) ||
+			((bs->cur_ps.weapon == WP_FLECHETTE) && (JK2O_TWEAKWEAPONS & WT_STAKE_GUN)) ||
+			((bs->cur_ps.weapon == WP_FLECHETTE) && !(JK2O_TWEAKWEAPONS & WT_STAKE_GUN) && bs->doAltAttack) ||
 			(bs->cur_ps.weapon == WP_THERMAL) ||
-			(g_tweakWeapons.integer & WT_PROJECTILE_GRAVITY)) {
+			(JK2O_TWEAKWEAPONS & WT_PROJECTILE_GRAVITY)) {
 			projectileDrop = (0.5) * (800) * (eta * eta); //If weapon has gravity, compensate to aim higher
 			predictedSpot[2] += projectileDrop;
 		}
@@ -11243,7 +11846,7 @@ int NewBotAI_GetWeapon(bot_state_t* bs)
 				bestWeapon = WP_REPEATER;
 				bs->doAltAttack = 1;
 			}
-			else if (distance < 768 && BotWeaponSelectableAltFire(bs, WP_STUN_BATON) && (g_tweakWeapons.integer & WT_STUN_LG) && !(g_tweakWeapons.integer & WT_STUN_HEAL)) {
+			else if (distance < 768 && BotWeaponSelectableAltFire(bs, WP_STUN_BATON) && (JK2O_TWEAKWEAPONS & WT_STUN_LG) && !(JK2O_TWEAKWEAPONS & WT_STUN_HEAL)) {
 				bestWeapon = WP_STUN_BATON;
 			}
 			else if (BotWeaponSelectable(bs, WP_DISRUPTOR))
@@ -11281,7 +11884,7 @@ int NewBotAI_GetWeapon(bot_state_t* bs)
 		else if (distance < 200) {
 			if (BotWeaponSelectableAltFire(bs, WP_FLECHETTE)) {
 				bestWeapon = WP_FLECHETTE;
-				if (!(g_tweakWeapons.integer & WT_STAKE_GUN))
+				if (!(JK2O_TWEAKWEAPONS & WT_STAKE_GUN))
 					bs->doAltAttack = 1;
 			}
 			else if (BotWeaponSelectable(bs, WP_ROCKET_LAUNCHER) && forcedFireMode != 2)
@@ -11292,7 +11895,7 @@ int NewBotAI_GetWeapon(bot_state_t* bs)
 			}
 			else if (BotWeaponSelectable(bs, WP_CONCUSSION) && forcedFireMode != 2)
 				bestWeapon = WP_CONCUSSION;
-			else if (BotWeaponSelectableAltFire(bs, WP_STUN_BATON) && (g_tweakWeapons.integer & WT_STUN_SHOCKLANCE)) {
+			else if (BotWeaponSelectableAltFire(bs, WP_STUN_BATON) && (JK2O_TWEAKWEAPONS & WT_STUN_SHOCKLANCE)) {
 				bestWeapon = WP_STUN_BATON;
 				bs->doAltAttack = 1;
 			}
@@ -11351,7 +11954,7 @@ int NewBotAI_GetWeapon(bot_state_t* bs)
 				bestWeapon = WP_REPEATER;
 			else if (BotWeaponSelectable(bs, WP_DISRUPTOR))
 				bestWeapon = WP_DISRUPTOR;
-			else if (distance < 768 && BotWeaponSelectableAltFire(bs, WP_STUN_BATON) && (g_tweakWeapons.integer & WT_STUN_LG) && !(g_tweakWeapons.integer & WT_STUN_HEAL)) {
+			else if (distance < 768 && BotWeaponSelectableAltFire(bs, WP_STUN_BATON) && (JK2O_TWEAKWEAPONS & WT_STUN_LG) && !(JK2O_TWEAKWEAPONS & WT_STUN_HEAL)) {
 				bestWeapon = WP_STUN_BATON;
 			}
 			else if (BotWeaponSelectableAltFire(bs, WP_BOWCASTER)) {
@@ -11399,7 +12002,7 @@ int NewBotAI_GetWeapon(bot_state_t* bs)
 				bestWeapon = WP_BOWCASTER;
 				bs->doAltAttack = 1;
 			}
-			else if (BotWeaponSelectableAltFire(bs, WP_STUN_BATON) && (g_tweakWeapons.integer & WT_STUN_SHOCKLANCE)) {
+			else if (BotWeaponSelectableAltFire(bs, WP_STUN_BATON) && (JK2O_TWEAKWEAPONS & WT_STUN_SHOCKLANCE)) {
 				bestWeapon = WP_STUN_BATON;
 				bs->doAltAttack = 1;
 			}
@@ -11465,7 +12068,7 @@ int NewBotAI_GetWeapon(bot_state_t* bs)
 				bestWeapon = WP_REPEATER;
 			else if (BotWeaponSelectable(bs, WP_DISRUPTOR))
 				bestWeapon = WP_DISRUPTOR;
-			else if (BotWeaponSelectableAltFire(bs, WP_STUN_BATON) && (g_tweakWeapons.integer & WT_STUN_LG) && !(g_tweakWeapons.integer & WT_STUN_HEAL)) {
+			else if (BotWeaponSelectableAltFire(bs, WP_STUN_BATON) && (JK2O_TWEAKWEAPONS & WT_STUN_LG) && !(JK2O_TWEAKWEAPONS & WT_STUN_HEAL)) {
 				bestWeapon = WP_STUN_BATON;
 			}
 			else if (bs->cur_ps.stats[STAT_WEAPONS] & (1 << WP_SABER))
@@ -11505,10 +12108,10 @@ int NewBotAI_GetWeapon(bot_state_t* bs)
 				bestWeapon = WP_CONCUSSION;
 			else if (BotWeaponSelectable(bs, WP_DISRUPTOR))
 				bestWeapon = WP_DISRUPTOR;
-			else if (BotWeaponSelectableAltFire(bs, WP_STUN_BATON) && (g_tweakWeapons.integer & WT_STUN_LG) && !(g_tweakWeapons.integer & WT_STUN_HEAL)) {
+			else if (BotWeaponSelectableAltFire(bs, WP_STUN_BATON) && (JK2O_TWEAKWEAPONS & WT_STUN_LG) && !(JK2O_TWEAKWEAPONS & WT_STUN_HEAL)) {
 				bestWeapon = WP_STUN_BATON;
 			}
-			else if (BotWeaponSelectableAltFire(bs, WP_STUN_BATON) && (g_tweakWeapons.integer & WT_STUN_SHOCKLANCE)) {
+			else if (BotWeaponSelectableAltFire(bs, WP_STUN_BATON) && (JK2O_TWEAKWEAPONS & WT_STUN_SHOCKLANCE)) {
 				bestWeapon = WP_STUN_BATON;
 				bs->doAltAttack = 1;
 			}
@@ -12911,6 +13514,9 @@ void Bot_SelectOptimalSaberStyle(bot_state_t* bs) {
 	// ================================ // Niksata Edit
 	// Niksata Edit - KATA PROTECTION CHECK
 	// ================================
+	if ((bs->features & BOTF_JK2) && g_jk2_102sabersystem.integer && (bot_jk2Tactics.integer & (BOTJ2_STANCE | BOTJ2_YELLOW))) {
+		return;	// JK2 1.02: the stance is chosen in Bot_JK2Tactics
+	}
 	if (bs->features & BOTF_STYLE) {
 		Bot_SelectStyleTargeted(bs);
 		return;
@@ -13878,7 +14484,7 @@ static qboolean Bot_DefensiveReaction(bot_state_t* bs) {
 	if (myHealth > 0 && myHealth < BT(bs, BT_RETREAT_HEALTH) && bs->currentEnemy->health > myHealth + 15 && dist < 220 && bs->frame_Enemy_Vis) {
 		if (level.time >= bs->defNextHealTime) {
 			int cmd = 0;
-			if ((cl->ps.fd.forcePowersKnown & (1 << FP_HEAL)) && cl->ps.fd.forcePower >= 50 && dist > 100) {
+			if ((cl->ps.fd.forcePowersKnown & (1 << FP_HEAL)) && cl->ps.fd.forcePower >= BOT_HEAL_NEED(&cl->ps, 50) && dist > 100) {
 				cmd = GENCMD_FORCE_HEAL;
 			} else if ((cl->ps.fd.forcePowersKnown & (1 << FP_PROTECT)) && cl->ps.fd.forcePower >= 50 && !(cl->ps.fd.forcePowersActive & (1 << FP_PROTECT))) {
 				cmd = GENCMD_FORCE_PROTECT;
@@ -14353,6 +14959,13 @@ void Bot_ExecuteSaberCombat(bot_state_t* bs) {
 				}
 			}
 		}
+		if (g_jk2_102sabersystem.integer && (want == BOTSEQ_ROLLSTAB || want == BOTSEQ_STABDOWN)) {
+			want = 0;	// JK2 1.02 saber system: these JKA moves do not exist in JK2
+		}
+		if (g_jk2_102sabersystem.integer && (bs->features & BOTF_JK2) && (bot_jk2Tactics.integer & BOTJ2_DFA)
+			&& want == BOTSEQ_JUMPATTACK && style == SS_STRONG) {
+			want = 0;	// JK2 1.02: the red DFA comes only from a jump at the start of a swing (Bot_JK2Tactics)
+		}
 		if (want && !ready && want != BOTSEQ_ROLLSTAB) {
 			// the saber is mid-swing: stop pressing attack for a moment so it returns to ready
 			bs->seqPrepType = want;
@@ -14386,7 +14999,10 @@ void Bot_ExecuteSaberCombat(bot_state_t* bs) {
 	}
 
 	// KATA ATTACK (45% + priority) - DYNAMIC RANGE
-	if (bs->features & BOTF_KATA) {
+	if (g_jk2_102sabersystem.integer) {
+		// JK2 1.02 saber system: JK2 has no katas (attack + alt attack would throw the saber)
+	}
+	else if (bs->features & BOTF_KATA) {
 		// Deliberate kata: only when the engine would accept it (PM_CanDoKata: grounded, saber not
 		// thrown and not mid-move, 50 force) and it has a chance to connect, then hold exactly the
 		// input a kata needs until it starts. If it cannot start, fall through to the other moves
@@ -14666,7 +15282,7 @@ void NewBotAI_GetAttack(bot_state_t* bs) // Niksata Edit
 	if (!bs->client || !bs->currentEnemy || !bs->currentEnemy->client)
 		return;
 
-	if (g_tweakWeapons.integer & WT_TRIBES)
+	if (JK2O_TWEAKWEAPONS & WT_TRIBES)
 		weapon = NewBotAI_GetTribesWeapon(bs);
 	else
 		weapon = NewBotAI_GetWeapon(bs);
@@ -14708,7 +15324,7 @@ void NewBotAI_GetAttack(bot_state_t* bs) // Niksata Edit
 
 		if (bs->doAltAttack) {
 			const int altCharge = NewBotAI_GetAltCharge(bs);
-			if (weapon == WP_STUN_BATON && bs->frame_Enemy_Len > 240 && (g_tweakWeapons.integer & WT_STUN_SHOCKLANCE)) { //Weird case for stun baton since low range and low firerate, dont bother until they are in range
+			if (weapon == WP_STUN_BATON && bs->frame_Enemy_Len > 240 && (JK2O_TWEAKWEAPONS & WT_STUN_SHOCKLANCE)) { //Weird case for stun baton since low range and low firerate, dont bother until they are in range
 			}
 			else if (altCharge == 1) {
 				trap->EA_Alt_Attack(bs->client);
@@ -15450,7 +16066,7 @@ int NewBotAI_GetPull(bot_state_t* bs) {
 			return 100;
 	}
 
-	if (NewBotAI_IsEnemyPullable(bs) && (bs->cur_ps.weapon == WP_SABER || bs->cur_ps.weapon == WP_MELEE) && g_flipKick.integer) {
+	if (NewBotAI_IsEnemyPullable(bs) && (bs->cur_ps.weapon == WP_SABER || bs->cur_ps.weapon == WP_MELEE) && JK2O_FLIPKICK) {
 		if (hisHealth <= 20 && bs->frame_Enemy_Len < 250) {//Check for the insta kill, this should be better maybe... on ground pullablable should be a diff range than in air pullable
 			//Com_Printf("pullable 2\n");
 			return 100;
@@ -15900,7 +16516,7 @@ int NewBotAI_GetHeal(bot_state_t* bs) {
 
 	if (ourHealth >= 100)
 		return 0;
-	if (ourForce < 50)
+	if (ourForce < BOT_HEAL_NEED(&bs->cur_ps, 50))
 		return 0;
 	return diff;
 }
@@ -16370,7 +16986,7 @@ void NewBotAI_NF(bot_state_t* bs)
 			}
 			trap->EA_MoveForward(bs->client);
 		}
-		else if ((g_tweakSaber.integer & ST_EASYBACKSLASH) && (bs->frame_Enemy_Len < 128) && (g_backslashDamageScale.value >= 5 || (g_backslashDamageScale.value >= 3 && (g_tweakSaber.integer & ST_SPINBACKSLASH)))) {
+		else if ((JK2O_TWEAKSABER & ST_EASYBACKSLASH) && (bs->frame_Enemy_Len < 128) && (g_backslashDamageScale.value >= 5 || (g_backslashDamageScale.value >= 3 && (JK2O_TWEAKSABER & ST_SPINBACKSLASH)))) {
 			//Do a backslash 
 			//bs->ideal_viewangles[YAW] += 180;
 			/*if (BS_GroundDistance(bs) < 20)
@@ -16710,7 +17326,7 @@ void NewBotAI_DoAloneStuff(bot_state_t* bs, float thinktime) {
 				level.clients[bs->client].ps.fd.forcePowerSelected = FP_ABSORB;
 				useTheForce = qtrue;
 			}
-			else if ((bs->cur_ps.fd.forcePowersKnown & (1 << FP_HEAL)) && (ourHealth < 100) && (bs->cur_ps.fd.forcePower > 50)) {
+			else if ((bs->cur_ps.fd.forcePowersKnown & (1 << FP_HEAL)) && (ourHealth < 100) && (bs->cur_ps.fd.forcePower > BOT_HEAL_NEED(&bs->cur_ps, 50))) {
 				level.clients[bs->client].ps.fd.forcePowerSelected = FP_HEAL;
 				useTheForce = qtrue;
 			}
@@ -17207,7 +17823,7 @@ void NewBotAI(bot_state_t* bs, float thinktime) //BOT START // Niksata Edit - FI
 	// ========================================
 	// COMBAT SYSTEM - UNIFIED MOVEMENT HANDLING
 	// ========================================
-	if ((g_forcePowerDisable.integer != 163837 && g_forcePowerDisable.integer != 163839) || (g_flipKick.integer) || (bs->cur_ps.weapon != WP_SABER)) {
+	if ((g_forcePowerDisable.integer != 163837 && g_forcePowerDisable.integer != 163839) || (JK2O_FLIPKICK) || (bs->cur_ps.weapon != WP_SABER)) {
 		if (bs->currentEnemy->client->ps.fd.forceSide == FORCE_LIGHTSIDE) { // They are LS.
 			if (bs->cur_ps.fd.forceSide == FORCE_LIGHTSIDE)
 				NewBotAI_LSvLS(bs);  // KEEP SEPARATE
@@ -17761,7 +18377,7 @@ void StandardBotAI(bot_state_t* bs, float thinktime)
 #else
 	if (bs->currentEnemy && bs->currentEnemy->client && bs->frame_Enemy_Vis)
 #endif
-		if ((g_forcePowerDisable.integer != 163837 && g_forcePowerDisable.integer != 163839) || (g_flipKick.integer) || (bs->cur_ps.weapon != WP_SABER)) {
+		if ((g_forcePowerDisable.integer != 163837 && g_forcePowerDisable.integer != 163839) || (JK2O_FLIPKICK) || (bs->cur_ps.weapon != WP_SABER)) {
 			// Then do normal combat
 			if (bs->currentEnemy->client->ps.fd.forceSide == FORCE_LIGHTSIDE) { // They are LS.
 				if (bs->cur_ps.fd.forceSide == FORCE_LIGHTSIDE)
@@ -19215,8 +19831,9 @@ int BotAISetup(int restart) {
 	trap->Cvar_Register(&bot_profile, "bot_profile", "0", 0);
 	trap->Cvar_Register(&bot_fixes, "bot_fixes", "1", CVAR_ARCHIVE);
 	trap->Cvar_Register(&bot_abBase, "bot_abBase", "0", 0);	// features of the baseline group in an A/B test
-	trap->Cvar_Register(&bot_features, "bot_features", "12577279", CVAR_ARCHIVE);	// everything measured to help or do no harm; off: 512 (guide tactics), 1024 (counters), 4096 (swing table), 4194304 (combat walking), which lost or showed no gain
+	trap->Cvar_Register(&bot_features, "bot_features", "46131711", CVAR_ARCHIVE);	// everything measured to help or do no harm (33554432 acts only in JK2 1.02 mode); off: 512 (guide tactics), 1024 (counters), 4096 (swing table), 4194304 (combat walking), which lost or showed no gain
 	trap->Cvar_Register(&bot_abTest, "bot_abTest", "0", 0);
+	trap->Cvar_Register(&bot_jk2Tactics, "bot_jk2Tactics", "15", 0);	// parts of bot_features 33554432: guard, red DFA, lock, heal won their A/B; 16, 32, 64, 128, 256 did not
 	trap->Cvar_Register(&bot_attachments, "bot_attachments", "1", 0);
 	trap->Cvar_Register(&bot_camp, "bot_camp", "1", 0);
 
