@@ -4195,7 +4195,7 @@ void G_RunFrame( int levelTime ) {
 				}
 			}
 			else if (ent->client->ps.cloakFuel < 100
-				&& !(g_mb2manualblock.integer && !(ent->client->ps.stats[STAT_HOLDABLE_ITEMS] & (1 << HI_CLOAK))))
+				&& !((g_mb2manualblock.integer && !g_jk2_102sabersystem.integer) && !(ent->client->ps.stats[STAT_HOLDABLE_ITEMS] & (1 << HI_CLOAK))))
 			{ //recharge cloak (with MB2 blocking on, a player without a cloak shows block points there)
 				if (ent->client->cloakDebRecharge < level.time)
 				{

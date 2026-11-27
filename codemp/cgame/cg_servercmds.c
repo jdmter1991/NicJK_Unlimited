@@ -248,7 +248,10 @@ void CG_ParseServerinfo( void ) {
 	cgs.jpDuelAlpha = 0;
 	cgs.restricts = 0;
 	cgs.taystJKinfo =  atoi(Info_ValueForKey(info, "taystJKinfo")); // taystjk feature flags
+	cgs.jk2_102sabersystem = atoi(Info_ValueForKey(info, "g_jk2_102sabersystem"));
 	cgs.mb2manualblock = atoi(Info_ValueForKey(info, "g_mb2manualblock"));
+	if (cgs.jk2_102sabersystem)
+		cgs.mb2manualblock = 0; // the JK2 1.02 saber system overrides MB2 blocking
 
 	gamename = Info_ValueForKey(info, "gamename");
 	if (gamename) {
