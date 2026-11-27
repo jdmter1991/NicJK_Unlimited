@@ -1,5 +1,70 @@
 # NicJK humanoid (_humanoid.gla) frame map
 
+## Current clean humanoid (22438 frames, 12.4 MB)
+
+Rebuilt with `tools/animremap/gla_build.py` from the stock JKA humanoid (`gla_merge/basejka humanoid`,
+identical to the game's assets1.pk3), then Niksata's custom animations and the Yoda attacks copied frame for frame
+from the previous NicJK humanoid (byte-identical, verified), then the 23.04.2019 versions of four Palpatine
+animations, which differ from the merged ones (verified: up to 23-68 degrees), from
+`niksata_anims23.04.2019.gla`. The SJE pack (26273 frames that NicJK's animation.cfg never used) is gone, so every
+custom frame number moved down by 26273 (old 47649 = new 21376).
+
+| Frames | Content |
+|---|---|
+| 0 - 21375 | stock Jedi Academy humanoid |
+| 21376 - 21965 | Niksata custom animations (old 47649 - 48238) |
+| 21966 - 22317 | Yoda attacks (old 48239 - 48590) |
+| 22318 - 22437 | 23.04.2019 versions: Palpatine stance 2 + overhead, l_r, tr_bl, full 40-frame t_rl |
+
+`animation.cfg` is now the stock one (plus stock stand-ins for NicJK's three extra names, BOTH_SABERTAVION_STANCE,
+BOTH_SABERDESANN_STANCE and BOTH_A1_SPECIAL_YODA), with every custom animation listed as comments at the end.
+NicJK's previous versions of the 17 entries that differed from stock are in `animation_nicjk.cfg`
+(renumbered); `docs/animremap.cfg` gives them to Niksata's models (NikolayAngelov*, DarkNicangell*) through
+animremap, so with `cg_animRemap 1` / `g_animRemap 1` those models play exactly what NicJK played before and
+every other model plays the stock animations.
+
+| Frames | Count | Name in animation.cfg comments |
+|---|---|---|
+| 21376 - 21377 | 2 | NIK_WARRIOR_STANCE_SINGLE |
+| 21378 - 21378 | 1 | NIK_WARRIOR_STANCE_DUAL |
+| 21379 - 21401 | 23 | NIK_FORCE_CHARGE |
+| 21402 - 21412 | 11 | NIK_FORCE_CHARGE_ATTACK |
+| 21413 - 21442 | 30 | NIK_SMASH |
+| 21443 - 21486 | 44 | NIK_ASSAULT |
+| 21487 - 21516 | 30 | NIK_VICIOUS_SLASH |
+| 21517 - 21550 | 34 | NIK_OBLITERATE |
+| 21551 - 21581 | 31 | NIK_AEGIS_ASSAULT |
+| 21582 - 21622 | 41 | NIK_CRUSHING_BLOW |
+| 21623 - 21623 | 1 | NIK_GUARDIAN_STANCE |
+| 21624 - 21662 | 39 | NIK_DUAL_FURIOUS_STRIKE |
+| 21663 - 21705 | 43 | NIK_PALPATINE_CHARGE |
+| 21706 - 21746 | 41 | NIK_ANNIHILATE |
+| 21747 - 21760 | 14 | NIK_PALPATINE_TURN_L_R |
+| 21761 - 21800 | 40 | NIK_PALPATINE_STANCE1_STAB |
+| 21801 - 21829 | 29 | NIK_PALPATINE_R_L |
+| 21830 - 21871 | 42 | NIK_PALPATINE_STANCE2_OVERHEAD |
+| 21872 - 21889 | 18 | NIK_PALPATINE_BR_TL |
+| 21890 - 21908 | 19 | NIK_PALPATINE_L_R |
+| 21909 - 21922 | 14 | NIK_PALPATINE_TL_BR |
+| 21923 - 21941 | 19 | NIK_PALPATINE_TR_BL |
+| 21942 - 21965 | 24 | NIK_PALPATINE_T_RL |
+| 21966 - 22020 | 55 | NIK_YODA_A1_SPECIAL |
+| 22021 - 22065 | 45 | NIK_YODA_BL_TR |
+| 22066 - 22115 | 50 | NIK_YODA__L__R |
+| 22116 - 22164 | 49 | NIK_YODA_TL_BR |
+| 22165 - 22215 | 51 | NIK_YODA_BR_TL |
+| 22216 - 22270 | 55 | NIK_YODA_BL__R |
+| 22271 - 22315 | 45 | NIK_YODA__R__L |
+| 22316 - 22317 | 2 | NIK_YODA_END |
+| 22318 - 22359 | 42 | NIK_PALPATINE_STANCE2_OVERHEAD_2019 |
+| 22360 - 22378 | 19 | NIK_PALPATINE_L_R_2019 |
+| 22379 - 22397 | 19 | NIK_PALPATINE_TR_BL_2019 |
+| 22398 - 22437 | 40 | NIK_PALPATINE_T_RL_2019 |
+
+---
+
+# Previous NicJK humanoid (48591 frames) - kept for reference
+
 Generated from `assets/japro/models/players/_humanoid/_humanoid.gla` (48591 frames, the GLA in `japro-assets.pk3`), the source GLAs in `gla_merge` and the coordinate notes. Frames were matched bone by bone (by bone name; the source files store the same 53 bones in another order).
 
 ## Layers

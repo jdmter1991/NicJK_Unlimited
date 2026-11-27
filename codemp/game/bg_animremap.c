@@ -705,6 +705,14 @@ static animation_t AR_MakeEntry( const animation_t *a, const animation_t *b, int
 	return e;
 }
 
+// "model" matches exactly; "model*" matches every model whose name starts with "model"
+static qboolean AR_ModelMatch( const char *pattern, const char *model ) {
+	int len = strlen( pattern );
+	if ( len > 1 && pattern[len - 1] == '*' )
+		return Q_stricmpn( pattern, model, len - 1 ) ? qfalse : qtrue;
+	return Q_stricmp( pattern, model ) ? qfalse : qtrue;
+}
+
 static int AR_FindOrBuildSet( const char *model, const char *skin, const char *gla ) {
 	static short map[MAX_TOTALANIMATIONS];	// index into ar_entries
 	const animation_t *base = bgAllAnims[0].anims;
@@ -746,7 +754,7 @@ static int AR_FindOrBuildSet( const char *model, const char *skin, const char *g
 			const arEntry_t *e = &ar_entries[i];
 			if ( e->source != src )
 				continue;
-			if ( src != AR_SRC_ALL && Q_stricmp( e->model, model ) )
+			if ( src != AR_SRC_ALL && !AR_ModelMatch( e->model, model ) )
 				continue;
 			if ( src == AR_SRC_MODELSKIN && Q_stricmp( e->skin, skin ) )
 				continue;
