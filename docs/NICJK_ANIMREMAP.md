@@ -13,7 +13,10 @@ It is off by default. Nothing changes unless `g_animRemap 1` (server) and/or
 1. Copy `docs/animremap.cfg` to `GameData/nicjk/animremap.cfg` and remove the
    `//` in front of the lines you want (the file explains the format).
 2. Server: `g_animRemap 1`. Client: `cg_animRemap 1`. On a local game set both.
-3. After editing: `animremap_reload` (server console / rcon) and
+3. `cg_animRemap 2` = on, plus a console line every time a player's animation
+   starts, with the frames really shown and "(remapped)" when they are not the
+   stock ones - the quickest way to check what a model plays.
+4. After editing: `animremap_reload` (server console / rcon) and
    `cg_animremap_reload` (client), or change map. `animremap_list` and
    `cg_animremap_list` show what is loaded and which clients are remapped.
 

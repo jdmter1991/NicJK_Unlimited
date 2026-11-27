@@ -3583,6 +3583,15 @@ static void CG_SetLerpFrameAnimation( centity_t *cent, clientInfo_t *ci, lerpFra
 	lf->animation = anim;
 	lf->animationTime = lf->frameTime + abs(anim->frameLerp);
 
+	if ( cg_animRemap.integer > 1 && cent->currentState.number < MAX_CLIENTS && cent->localAnimIndex == 0 )
+	{ // NicJK animremap debug: which frames this player's model really shows
+		const animation_t *stock = &bgAllAnims[0].anims[newAnimation];
+		trap->Print( "AnimRemap debug: client %d (%s) %s %s: frames %d-%d%s\n", cent->currentState.number, ci->modelName,
+			lf == &cent->pe.legs ? "legs" : "torso", GetStringForID( animTable, newAnimation ),
+			anim->firstFrame, anim->firstFrame + anim->numFrames - 1,
+			( anim->firstFrame != stock->firstFrame || anim->numFrames != stock->numFrames ) ? " (remapped)" : "" );
+	}
+
 	if (cent->localAnimIndex > 1 &&
 		anim->firstFrame == 0 &&
 		anim->numFrames == 0)
