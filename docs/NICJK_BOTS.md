@@ -8,7 +8,7 @@ The bots play by the rules: they press the same keys a player has, their moves s
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `bot_features` | `4188671` | Sum of the switches below. |
+| `bot_features` | `12577279` | Sum of the switches below. |
 | `bot_fixes` | `1` | Corrections to old bot code (memory safety, Force power selection). |
 | `bot_profile <seconds>` | `0` | Prints the cost of the bot AI and the `BOTEVAL` counters every so many seconds. |
 | `bot_abTest <n>` | `0` | Testing: client slots `0..n-1` play with `bot_abBase`, slots `n..2n-1` with `bot_features`. `BOTEVAL` then reports kills and deaths per group. |
@@ -42,6 +42,30 @@ The bots play by the rules: they press the same keys a player has, their moves s
 | 524288 | yes | The world: the use key on doors and buttons that need it, touch buttons, lifts, shoot-to-open, use-triggers. |
 | 1048576 | yes | Objectives: flag jobs in Capture the Flag and Capture the Ysalamiri, objectives and classes in Siege. |
 | 2097152 | yes | No stepping or jumping off cliffs. |
+| 4194304 | no | Walking in a saber fight, running only to close in, chase or get away. Lost its test. |
+| 8388608 | yes | Duel timing, from JK2 1.02 duelling: hold at the edge of reach while a swing that will not reach passes, strike at once into a swing that ends, bounces or is parried, strike straight back after blocking, circle at the edge of reach. |
+| 16777216 | no | MB2 manual block (only with `g_mb2manualblock 1`): a swing read in time is met with a manual block on the side it comes from, aimed for the perfect block when read well. Lost its test (K/D 0.78 against 1.07 over two 7-minute matches): the direction keys walk the bot into the swing, and only about 3 in 10 matched the swing that landed. |
+
+## Saber systems
+
+### MB2-style manual block: `g_mb2manualblock`
+
+Off by default (`0`). With it off the game plays exactly as base JKA. With `1` the server uses blocking rules modelled on Movie Battles II (MB2 is closed source; the rules follow its community dueling guides), and the bots play by them.
+
+| Action | Input | Effect |
+| --- | --- | --- |
+| Guard | Hold alt attack, saber lit | Saber hits from the front are blocked, at a cost in block points. You keep your stance's normal pose (as in MB2) and can only walk. Attack while guarding is a manual block, not a swing. |
+| Manual block | While guarding, press attack with a direction key (W top, A left, D right, W+A top left, S+A bottom left, and so on) | Shows the parry pose for that side and stays open for 0.4 s, then cannot be used again for 1.5 s. If the swing that lands comes from that side, it costs half the block points. If it is also a perfect block, the attacker's saber is knocked out of his hand, unless he was guarding himself. |
+| Perfect block | Guard with your aim on the side the swing comes from (an 8° zone, `g_mb2pbZone`) | Costs nothing, gives you 2 points back, takes 5 from the attacker and bounces his swing. |
+| Saber throw | Alt attack + use | As base JKA. |
+
+Block points (0 to 100) are shown in the fuel bar on the right: gold, turning red as they run out, labelled GUARD while guarding and MANUAL while a manual block is open. The server keeps them in the cloak fuel field, so the bar also shows in clients without this build. A block costs `100 × attacker's offence ÷ defender's defence` per saber style (blue 7/55, yellow 9/50, red 12/48, purple 11/48, cyan 8/48, duals 8/50, staff 8/53), more when crouched, in the air, at low saber defence or after a manual block on the wrong side; less against a chained swing. Points come back (`g_mb2bpRegen`, every `g_mb2bpRegenTime` ms) only when not running or attacking. Guarding with no points left gets your saber knocked away and the swing lands. Hits from behind are never blocked.
+
+What the bots do with it: they guard when a saber can reach them, swing without the guard when nothing is about to land, aim for perfect blocks more often at higher skill, use manual blocks with switch 16777216 (off: it lost its test), and back off at walking pace when their points run out.
+
+### JK2 1.02 saber system: `g_jk2_102sabersystem`
+
+Planned: the Jedi Outcast 1.02 saber rules, ported exactly from jk2mv's game code. Off by default.
 
 ## How well it works
 
@@ -58,6 +82,7 @@ Measured in bot-against-bot matches on a dedicated server. One match is noisy: t
 | Siege | Bots find the objective, pick classes and use explosives on what needs them, but did not complete an objective in the test matches. Work in progress. |
 | Doors and switches that need the use key | Implemented, but not exercised by any test map so far. |
 | Lifts | Bots board and ride them on stock maps. |
+| MB2-style blocking (`g_mb2manualblock 1`) | Bots guard, perfect-block and back off at low block points. In a 24-bot, 7-minute match: about 2,000 guarded hits blocked (about 1 in 9 perfect), 140 got through, 60 disarms. |
 
 ## Reading the test output
 

@@ -3,7 +3,8 @@
 For every upward-facing triangle the cooked world draws at its nearest detail level (opaque materials, placements
 inside the collision bounds, terrain tiles left out: terrain under building floors has no collision on purpose),
 the collision triangles (<export_dir>/collision/collision_tris.npy) are asked whether there is collision within 16
-units under the triangle's centre or one of its corners pulled 20 % towards the centre. Where there is none, the drawn
+units under the triangle's centre, its corners pulled 20 % towards the centre and, for triangles over 2 m2, a lattice
+of about one point per square metre. Where there is none, the drawn
 triangle is added to the collision as it is. The reduced collision of a large mesh (quay paving, palace floors) can
 sag below or miss parts of the drawn floor; this puts the drawn floor back exactly there.
 Writes collision_tris.npy (the input is kept as collision_tris_prefill.npy) and collision/floor_fill.json."""
@@ -67,13 +68,25 @@ print("drawn walkable triangles:", len(D), " %.0fs" % (time.time() - t0))
 # ---- collision under each drawn triangle: test points (centre and corners pulled in)
 cen = D.mean(1)
 pts = np.concatenate([cen[:, None, :], D * 0.8 + cen[:, None, :] * 0.2], 1)      # (n,4,3)
+P_list = [pts.reshape(-1, 3)]; owner = [np.repeat(np.arange(len(D)), 4)]
+# large triangles: a lattice of about one point per square metre (at most 64) as well, so a hole in the middle of a
+# wide floor is found even when the corners have collision under them (a 35 m2 quay stone triangle had)
+area_m2 = np.linalg.norm(np.cross(D[:, 1] - D[:, 0], D[:, 2] - D[:, 0]), axis=1) * 0.5 / (UPM * UPM)
+for ti in np.flatnonzero(area_m2 > 2.0):
+    k = int(min(10, np.ceil(np.sqrt(2.0 * area_m2[ti]))))
+    uu, vv = np.meshgrid(np.arange(k) + 0.5, np.arange(k) + 0.5)
+    uu = uu.ravel() / k; vv = vv.ravel() / k; sel = uu + vv < 1.0
+    uu = uu[sel]; vv = vv[sel]
+    Q = D[ti, 0] + uu[:, None] * (D[ti, 1] - D[ti, 0]) + vv[:, None] * (D[ti, 2] - D[ti, 0])
+    P_list.append(Q); owner.append(np.full(len(Q), ti))
+P_all = np.concatenate(P_list); owner = np.concatenate(owner)
 CELL = 128.0
 cmin = CT.min(1); cmax = CT.max(1)
 cn = np.cross(CT[:, 1] - CT[:, 0], CT[:, 2] - CT[:, 0])
 cup = np.abs(cn[:, 2]) > 1e-6
 gx0 = np.floor(cmin[:, 0] / CELL).astype(np.int64); gx1 = np.floor(cmax[:, 0] / CELL).astype(np.int64)
 gy0 = np.floor(cmin[:, 1] / CELL).astype(np.int64); gy1 = np.floor(cmax[:, 1] / CELL).astype(np.int64)
-P = pts.reshape(-1, 3)
+P = P_all
 pk = np.floor(P[:, 0] / CELL).astype(np.int64) * 1000003 + np.floor(P[:, 1] / CELL).astype(np.int64)
 want = set(pk.tolist())
 bucket = {}
@@ -106,7 +119,7 @@ for a, b in zip(starts, np.r_[starts[1:], len(ks)]):
         z = A[None, :, 2] + u * e1[None, :, 2] + v * e2[None, :, 2]
         dz = q[:, None, 2] - z
         has[pi[s:s + 256]] = (ins & (dz > -24) & (dz < 16)).any(1)
-missing = ~has.reshape(-1, 4).all(1)
+missing = np.zeros(len(D), bool); np.logical_or.at(missing, owner, ~has)
 add = D[missing]
 # winding: collision triangles face outward (up for floors), as drawn
 out = np.concatenate([CT, add]).astype(np.float32)

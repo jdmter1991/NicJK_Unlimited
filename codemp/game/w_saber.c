@@ -9991,6 +9991,8 @@ Projectiles are blocked as in base JKA.
 ==============
 */
 int g_mb2Stats[6];	// guarded hits blocked, perfect blocks, guarded hits that got through, disarms, unguarded hits, hits from behind
+int g_mb2MbStats[4];	// manual blocks started, matched the swing, matched + perfect (attacker disarmed), attacker kept his saber (he was guarding)
+extern int BG_MB2ManualBlockQuad( int forwardmove, int rightmove );
 static const int mb2Offence[SS_NUM_SABER_STYLES] = { 9, 7, 9, 12, 11, 8, 8, 8 };	// none, blue, yellow, red, purple, cyan, duals, staff
 static const int mb2Defence[SS_NUM_SABER_STYLES] = { 50, 55, 50, 48, 48, 48, 50, 53 };
 
@@ -10072,6 +10074,45 @@ qboolean G_MB2SaberBlock( gentity_t *attacker, gentity_t *defender, vec3_t hitlo
 	vectoangles( to, ang );
 	pbZone = g_mb2pbZone.value > 1.0f ? g_mb2pbZone.value : 1.0f;
 	zone = G_MB2Zone( AngleNormalize180( dc->ps.viewangles[YAW] - ang[YAW] ), AngleNormalize180( dc->ps.viewangles[PITCH] - ang[PITCH] ), pbZone );
+	// manual block (guard + attack + direction keys, see G_MB2BlockThink): open and covering this swing's side
+	{
+		const qboolean mbOk = ( !thrown && want >= 0 && level.time < dc->mb2mbUntil && dc->mb2mbQuad == want ) ? qtrue : qfalse;
+		if ( mbOk ) {
+			dc->mb2mbUntil = 0;
+			g_mb2MbStats[1]++;
+			if ( zone == want ) {
+				// manual block on a perfect block: the attacker loses his saber, unless he was guarding himself
+				if ( attacker->client->ps.userInt3 ) {
+					g_mb2MbStats[3]++;
+				} else if ( attacker->client->ps.saberEntityNum && !attacker->client->ps.saberInFlight ) {
+					vec3_t fling;
+					VectorSubtract( attacker->client->ps.origin, dc->ps.origin, fling );
+					VectorNormalize( fling );
+					VectorScale( fling, 300, fling );
+					fling[2] = 150;
+					saberKnockOutOfHand( &g_entities[attacker->client->ps.saberEntityNum], attacker, fling );
+					g_mb2MbStats[2]++;
+					g_mb2Stats[3]++;
+				}
+			} else {
+				// matched the side but not aimed: a block at half the cost
+				aStyle = attacker->client->ps.fd.saberAnimLevel;
+				dStyle = dc->ps.fd.saberAnimLevel;
+				if ( aStyle < 0 || aStyle >= SS_NUM_SABER_STYLES ) aStyle = SS_MEDIUM;
+				if ( dStyle < 0 || dStyle >= SS_NUM_SABER_STYLES ) dStyle = SS_MEDIUM;
+				drain = 50.0f * (float)mb2Offence[aStyle] / (float)mb2Defence[dStyle];
+				if ( dc->mb2bp < drain ) {
+					dc->mb2bp = 0.0f;
+					g_mb2Stats[2]++;
+					return qfalse;
+				}
+				dc->mb2bp -= drain;
+				attacker->client->ps.saberBlocked = BLOCKED_ATK_BOUNCE;
+				g_mb2Stats[0]++;
+				return qtrue;
+			}
+		}
+	}
 	if ( want >= 0 && zone == want ) {
 		dc->mb2bp += 2.0f;
 		if ( dc->mb2bp > 100.0f ) dc->mb2bp = 100.0f;
@@ -10097,7 +10138,7 @@ qboolean G_MB2SaberBlock( gentity_t *attacker, gentity_t *defender, vec3_t hitlo
 		else if ( aSpeed > 200.0f ) drain *= 0.8f;
 		if ( PM_SaberInTransition( attacker->client->ps.saberMove ) ) drain *= 0.5f;	// a later swing of a chain
 	}
-	if ( dc->pers.cmd.buttons & BUTTON_ATTACK ) drain *= 1.2f;	// swinging while guarding
+	if ( level.time < dc->mb2mbUntil ) drain *= 1.2f;	// a manual block on the wrong side
 	if ( dc->ps.pm_flags & PMF_DUCKED ) drain *= 1.5f;
 	if ( dc->ps.groundEntityNum == ENTITYNUM_NONE ) drain *= 1.3f;
 	if ( dc->ps.fd.forcePowerLevel[FP_SABER_DEFENSE] == FORCE_LEVEL_1 ) drain *= 1.4f;
@@ -10121,9 +10162,32 @@ void G_MB2BlockThink( gentity_t *ent ) {
 	}
 	if ( !g_mb2manualblock.integer ) {
 		cl->ps.userInt3 = 0;
+		cl->ps.userInt2 = 0;
 		return;
 	}
 	if ( cl->mb2bp > 100.0f || cl->mb2bp < 0.0f ) cl->mb2bp = 100.0f;
+	{
+		// manual block: pressing attack while guarding opens it for 400 ms on the side the direction keys
+		// give; once every 1.5 s (MB2). userInt2 tells the client it is open.
+		const usercmd_t *uc = &cl->pers.cmd;
+		const qboolean guarding = ( ( uc->buttons & BUTTON_ALT_ATTACK ) && !( uc->buttons & BUTTON_USE ) && cl->ps.weapon == WP_SABER
+			&& !BG_SabersOff( &cl->ps ) && !cl->ps.saberInFlight && cl->ps.stats[STAT_HEALTH] > 0 ) ? qtrue : qfalse;
+		const qboolean attack = ( uc->buttons & BUTTON_ATTACK ) ? qtrue : qfalse;
+		if ( cl->mb2mbReady > level.time + 5000 ) cl->mb2mbReady = 0;
+		if ( cl->mb2mbUntil > level.time + 5000 ) cl->mb2mbUntil = 0;
+		if ( guarding && attack && !cl->mb2mbAttackWas && level.time >= cl->mb2mbReady ) {
+			const int q = BG_MB2ManualBlockQuad( uc->forwardmove, uc->rightmove );
+			if ( q >= 0 ) {
+				cl->mb2mbQuad = q;
+				cl->mb2mbUntil = level.time + 400;
+				cl->mb2mbReady = level.time + 1500;
+				g_mb2MbStats[0]++;
+			}
+		}
+		if ( !guarding ) cl->mb2mbUntil = 0;
+		cl->mb2mbAttackWas = attack;
+		cl->ps.userInt2 = ( level.time < cl->mb2mbUntil ) ? 1 : 0;
+	}
 	if ( cl->mb2bpNextRegen > level.time + 5000 ) cl->mb2bpNextRegen = 0;
 	speed = sqrt( cl->ps.velocity[0] * cl->ps.velocity[0] + cl->ps.velocity[1] * cl->ps.velocity[1] );
 	if ( level.time >= cl->mb2bpNextRegen ) {

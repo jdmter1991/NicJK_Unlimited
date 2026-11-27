@@ -282,3 +282,20 @@ four) and after back to back (`naboo\export\city\bench\client_lamps_*3.qconsole.
 before, 150 / 149 fps after. The first version (one texel read per value, no distance limit) cost 172 / 156 ->
 117 / 129; lamp data is now read as 2 x 2 blocks with one gather each, and lamp light is drawn up to
 `r_tworldLampDistance` (4000 units, about 100 m) from the camera, fading over its last quarter.
+
+## Wall holes from the smaller collision (2026-11-27), fixed
+
+The 4 % per-object reduction of round 4 (map file 920 -> 677 MB) opened holes in walls: window objects and facades
+lost the triangles that closed them, and a bot (Darth Malgus) jumped through a street window into a building next to
+x -2460 y 1900 (user report). `tools/wall_holes.py` fires horizontal rays on a 512-unit grid at 40 / 100 / 160 units
+over the ground against two collisions: 1,606 of 35,640 rays met a wall in the 8 % collision and none in the 4 % one.
+Back to 8 % (100 .. 2000 triangles per object) with flat areas merged at 2 degrees and identical planes stored once:
+88 holes left (0.25 %, at most 4 rays in one place), map file 902 MB, drawn floors with collision within 64 units
+94.9 %. `tools/wall_crossings.py` lists steps in the bot logs that pass through two or more surfaces (mostly corners,
+pillars and planters cut by the straight line between two 2-second samples). Rule: run wall_holes.py against the
+previous collision after every change to the collision reduction.
+Floor fill: large drawn floor triangles are also tested on a lattice (about one point per square metre, at most 64);
+a 35 m2 quay stone triangle at x 4745 y 3700 had collision under its four test points but none in its middle, and bots
+dropped into the gap under it (4 of 12 stuck bots in run 12). Run 13 (20 min, 31 bots): stuck 2, nobody under the
+ground or fallen out, water 0.5 % at two walkway spots (x 5410 y -4300, x -1900 y 9200; one drowned) - to fix next.
+Beta 6 pk3s installed in the Steam install (beta 5 kept in backups\steam_naboo_beta5).
