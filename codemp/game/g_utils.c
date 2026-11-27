@@ -1253,7 +1253,7 @@ void G_ScaleNetHealth(gentity_t *self)
 
 	maxHealth = self->maxHealth;
 	
-	if (g_tweakWeapons.integer & WT_TRIBES && maxHealth <= 1000 && self->client) {
+	if (JK2O_TWEAKWEAPONS & WT_TRIBES && maxHealth <= 1000 && self->client) {
 
 
 		if (self->client->pers.tribesClass == 3)

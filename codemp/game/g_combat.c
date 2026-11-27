@@ -528,7 +528,7 @@ void TossClientWeapon(gentity_t *self, vec3_t direction, float speed)
 	if ((g_neutralFlag.integer == 2) && (weapon == WP_DISRUPTOR))//rabbit, only cuz of snipers idk?
 		return;
 
-	if ((g_startingWeapons.integer & (1 << weapon)) && (g_forcePowerDisable.integer & (1 << FP_PULL)) && (g_tweakWeapons.integer & WT_INFINITE_AMMO))//Dont toss weapon if thers no possible use for it
+	if ((g_startingWeapons.integer & (1 << weapon)) && (g_forcePowerDisable.integer & (1 << FP_PULL)) && (JK2O_TWEAKWEAPONS & WT_INFINITE_AMMO))//Dont toss weapon if thers no possible use for it
 		return;
 
 	if (self->client && self->client->pers.tribesClass)
@@ -644,7 +644,7 @@ void TossClientItems( gentity_t *self ) {
 	if (g_gunGame.integer)
 		return;
 
-	if (g_tweakWeapons.integer & WT_TRIBES) { //Tribes tweak has ppl drop ammo on death
+	if (JK2O_TWEAKWEAPONS & WT_TRIBES) { //Tribes tweak has ppl drop ammo on death
 		ItemUse_UseDisp(self, HI_AMMODISP);
 		G_AddEvent(self, EV_USE_ITEM0 + HI_AMMODISP, 0);
 		weapon = WP_NONE;
@@ -670,7 +670,7 @@ void TossClientItems( gentity_t *self ) {
 		weapon = WP_NONE;
 	}
 
-	if ((g_startingWeapons.integer & (1 << weapon)) && (g_forcePowerDisable.integer & (1 << FP_PULL)) && (g_tweakWeapons.integer & WT_INFINITE_AMMO))//Dont toss weapon if thers no possible use for it
+	if ((g_startingWeapons.integer & (1 << weapon)) && (g_forcePowerDisable.integer & (1 << FP_PULL)) && (JK2O_TWEAKWEAPONS & WT_INFINITE_AMMO))//Dont toss weapon if thers no possible use for it
 		weapon = WP_NONE;
 
 	self->s.bolt2 = weapon;
@@ -691,7 +691,7 @@ void TossClientItems( gentity_t *self ) {
 
 		// spawn the item
 		drop = Drop_Item( self, item, 0 );
-		if ((g_tweakWeapons.integer & WT_FIX_MINEAMMO) && ((weapon == WP_TRIP_MINE) || (weapon == WP_DET_PACK)) && (self->client->ps.ammo[weaponData[weapon].ammoIndex] < bg_itemlist[BG_GetItemIndexByTag(weapon, IT_WEAPON)].quantity)) { //Quantity is always 3 for mines i guess
+		if ((JK2O_TWEAKWEAPONS & WT_FIX_MINEAMMO) && ((weapon == WP_TRIP_MINE) || (weapon == WP_DET_PACK)) && (self->client->ps.ammo[weaponData[weapon].ammoIndex] < bg_itemlist[BG_GetItemIndexByTag(weapon, IT_WEAPON)].quantity)) { //Quantity is always 3 for mines i guess
 			drop->count = self->client->ps.ammo[weaponData[weapon].ammoIndex];
 			if (drop->count < 1)
 				drop->count = 1;
@@ -2565,7 +2565,7 @@ extern void RunEmplacedWeapon( gentity_t *ent, usercmd_t **ucmd );
 	if ((self == attacker || (attacker && !attacker->client)) &&
 		(meansOfDeath == MOD_CRUSH || meansOfDeath == MOD_FALLING || meansOfDeath == MOD_TRIGGER_HURT || meansOfDeath == MOD_UNKNOWN))
 	{
-		if (g_fixKillCredit.integer) {
+		if (JK2O_FIXKILLCREDIT) {
 			if (self->client->ps.otherKillerTime > level.time)
 				attacker = &g_entities[self->client->ps.otherKiller]; //problem is here?
 		}
@@ -2576,7 +2576,7 @@ extern void RunEmplacedWeapon( gentity_t *ent, usercmd_t **ucmd );
 	}
 
 //JAPRO - Serverside - Fixkillcredit for suiciders and teamchangers - Start
-	else if ((self == attacker || !attacker->client) && g_fixKillCredit.integer &&
+	else if ((self == attacker || !attacker->client) && JK2O_FIXKILLCREDIT &&
 		(meansOfDeath == MOD_SUICIDE || meansOfDeath == MOD_TEAM_CHANGE) && 
 		self->client->ps.otherKillerTime > level.time)
 	{
@@ -2971,7 +2971,7 @@ extern void RunEmplacedWeapon( gentity_t *ent, usercmd_t **ucmd );
 	// don't allow respawn until the death anim is done
 	// g_forcerespawn may force spawning at some later time
 	self->client->respawnTime = level.time + 1700;
-	if ((g_tweakWeapons.integer & WT_TRIBES) && level.gametype >= GT_CTF && !self->client->sess.raceMode)
+	if ((JK2O_TWEAKWEAPONS & WT_TRIBES) && level.gametype >= GT_CTF && !self->client->sess.raceMode)
 		self->client->respawnTime += 2000;
 	//Com_Printf("Respawntime 1\n", self->client->respawnTime, level.time);
 
@@ -2993,7 +2993,7 @@ extern void RunEmplacedWeapon( gentity_t *ent, usercmd_t **ucmd );
 	{
 		
 		self->client->respawnTime = level.time + 1000;
-		if ((g_tweakWeapons.integer & WT_TRIBES) && level.gametype >= GT_CTF && !self->client->sess.raceMode)
+		if ((JK2O_TWEAKWEAPONS & WT_TRIBES) && level.gametype >= GT_CTF && !self->client->sess.raceMode)
 			self->client->respawnTime += 2000;
 		//Com_Printf("Respawntime 2\n", self->client->respawnTime, level.time);
 		// gib death
@@ -3031,7 +3031,7 @@ extern void RunEmplacedWeapon( gentity_t *ent, usercmd_t **ucmd );
 			}
 
 			self->client->respawnTime = level.time + 1000;//((self->client->animations[anim].numFrames*40)/(50.0f / self->client->animations[anim].frameLerp))+300;
-			if ((g_tweakWeapons.integer & WT_TRIBES) && level.gametype >= GT_CTF && !self->client->sess.raceMode)
+			if ((JK2O_TWEAKWEAPONS & WT_TRIBES) && level.gametype >= GT_CTF && !self->client->sess.raceMode)
 				self->client->respawnTime += 2000;
 			//Com_Printf("Respawntime 3\n", self->client->respawnTime, level.time);
 
@@ -3045,7 +3045,7 @@ extern void RunEmplacedWeapon( gentity_t *ent, usercmd_t **ucmd );
 
 			self->client->ps.pm_type = sPMType;
 
-			if ((meansOfDeath == MOD_SABER || (meansOfDeath == MOD_MELEE && G_HeavyMelee( attacker )) ) || (g_dismember.integer >= 101 && meansOfDeath != MOD_SUICIDE && meansOfDeath != MOD_TEAM_CHANGE))//saber or heavy melee (claws)
+			if (JK2SABER() ? (meansOfDeath == MOD_SABER) : ((meansOfDeath == MOD_SABER || (meansOfDeath == MOD_MELEE && G_HeavyMelee( attacker )) ) || (g_dismember.integer >= 101 && meansOfDeath != MOD_SUICIDE && meansOfDeath != MOD_TEAM_CHANGE)))//saber or heavy melee (claws); JK2 1.02: saber kills only
 			{ //update the anim on the actual skeleton (so bolt point will reflect the correct position) and then check for dismem
 				G_UpdateClientAnims(self, 1.0f);
 				G_CheckForDismemberment(self, attacker, self->pos1, damage, anim, qfalse);
@@ -4454,7 +4454,7 @@ void G_CheckForDismemberment(gentity_t *ent, gentity_t *enemy, vec3_t point, int
 			return;
 		}
 
-		if (damage < 5)
+		if (damage < (JK2SABER() ? 20 : 5)) // JK2 1.02: 20 (mv g_combat.c:2892)
 		{
 			return;
 		}
@@ -4550,7 +4550,7 @@ void G_LocationBasedDamageModifier(gentity_t *ent, vec3_t point, int mod, int df
 {
 	int hitLoc = -1;
 
-	if (!g_locationBasedDamage.integer)
+	if (!JK2O_LOCATIONDAMAGE)
 	{ //then leave it alone
 		return;
 	}
@@ -4579,7 +4579,7 @@ void G_LocationBasedDamageModifier(gentity_t *ent, vec3_t point, int mod, int df
 	}
 
 	if ((d_saberGhoul2Collision.integer && ent->client && ent->client->g2LastSurfaceTime == level.time && mod == MOD_SABER) || //using ghoul2 collision? Then if the mod is a saber we should have surface data from the last hit (unless thrown).
-		(d_projectileGhoul2Collision.integer && ent->client && ent->client->g2LastSurfaceTime == level.time)) //It's safe to assume we died from the projectile that just set our surface index. So, go ahead and use that as the surf I guess.
+		(JK2O_PROJG2COLLISION && ent->client && ent->client->g2LastSurfaceTime == level.time)) //It's safe to assume we died from the projectile that just set our surface index. So, go ahead and use that as the surf I guess.
 	{
 		char hitSurface[MAX_QPATH];
 
@@ -4600,14 +4600,14 @@ void G_LocationBasedDamageModifier(gentity_t *ent, vec3_t point, int mod, int df
 	{
 	case HL_FOOT_RT:
 	case HL_FOOT_LT:
-		if (g_locationBasedDamage.integer == 2)
+		if (JK2O_LOCATIONDAMAGE == 2)
 			*damage *= 0.6;
 		else
 			*damage *= 0.5;
 		break;
 	case HL_LEG_RT:
 	case HL_LEG_LT:
-		if (g_locationBasedDamage.integer == 2)
+		if (JK2O_LOCATIONDAMAGE == 2)
 			*damage *= 0.8;
 		else
 			*damage *= 0.7;
@@ -4623,14 +4623,14 @@ void G_LocationBasedDamageModifier(gentity_t *ent, vec3_t point, int mod, int df
 		break; //normal damage
 	case HL_ARM_RT:
 	case HL_ARM_LT:
-		if (g_locationBasedDamage.integer == 2)
+		if (JK2O_LOCATIONDAMAGE == 2)
 			*damage *= 0.95;
 		else
 			*damage *= 0.85;
 		break;
 	case HL_HAND_RT:
 	case HL_HAND_LT:
-		if (g_locationBasedDamage.integer == 2)//JAPRO - Serverside - Change location based damage to not give such low dmg for hand hits as it is pretty random wether you are awarded torso or hand hit.
+		if (JK2O_LOCATIONDAMAGE == 2)//JAPRO - Serverside - Change location based damage to not give such low dmg for hand hits as it is pretty random wether you are awarded torso or hand hit.
 			*damage *= 0.9;
 		else
 			*damage *= 0.6;
@@ -4730,7 +4730,7 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, vec3_
 		}
 		else if (attacker && targ->client->ps.duelInProgress && (attacker->s.number == targ->client->ps.duelIndex)) {
 		}
-		else if (g_tweakWeapons.integer & WT_TRIBES) {
+		else if (JK2O_TWEAKWEAPONS & WT_TRIBES) {
 		}
 		else {
 			if (targ->client->ps.electrifyTime < level.time)
@@ -4747,7 +4747,7 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, vec3_
 					if (targ->client->sess.movementStyle == MV_COOP_JKA) {
 						targ->client->ps.electrifyTime = level.time + 800;//Prim fire is 500ms, alt is 900ms, let them stay lowgrav forever if prim fire but not alt fire..
 					}
-					else if (g_tweakWeapons.integer & WT_DEMP2_RANDOM)
+					else if (JK2O_TWEAKWEAPONS & WT_DEMP2_RANDOM)
 						targ->client->ps.electrifyTime = level.time + 550;
 					else
 						targ->client->ps.electrifyTime = level.time + Q_irand(300, 800);
@@ -4784,7 +4784,7 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, vec3_
 	if (attacker && attacker->client && attacker->client->noclip)//Japro fix noclip abuse
 		return;
 
-	if (g_godChat.integer && level.gametype == GT_FFA && attacker && attacker->client && (attacker->client->ps.eFlags & EF_TALK))//Japro - dont allow people to chat and still do damage with godchat (should this be after the 3s period instead?)
+	if (JK2O_GODCHAT && level.gametype == GT_FFA && attacker && attacker->client && (attacker->client->ps.eFlags & EF_TALK))//Japro - dont allow people to chat and still do damage with godchat (should this be after the 3s period instead?)
 		return;
 
 	if ((level.gametype == GT_FFA) && !g_friendlyFire.value && (g_neutralFlag.integer && g_neutralFlag.integer < 4)) {
@@ -4928,7 +4928,7 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, vec3_
 		}
 	}
 
-	if ((g_tweakWeapons.integer & WT_ANTI_VEHICLE) && (targ->s.eType == ET_NPC) && (targ->s.NPC_class == CLASS_VEHICLE) && (targ->m_pVehicle) && (targ->m_pVehicle->m_pVehicleInfo->type == VH_FIGHTER)) {
+	if ((JK2O_TWEAKWEAPONS & WT_ANTI_VEHICLE) && (targ->s.eType == ET_NPC) && (targ->s.NPC_class == CLASS_VEHICLE) && (targ->m_pVehicle) && (targ->m_pVehicle->m_pVehicleInfo->type == VH_FIGHTER)) {
 		switch (mod)
 		{
 			//Bullets do ~5x dmg..
@@ -4991,14 +4991,14 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, vec3_
 				damage *= 1;
 				break;
 			case MOD_TURBLAST:
-				if (g_tweakWeapons.integer & WT_TRIBES)
+				if (JK2O_TWEAKWEAPONS & WT_TRIBES)
 				damage *= 5;
 			default:
 				break;
 		}
 	}
 
-	if ((mod == MOD_DISRUPTOR || mod == MOD_DISRUPTOR_SNIPER) && targ && targ->client && /*!(targ->client->ps.fd.forcePowersActive & (1 << FP_PROTECT)) &&*/ !(g_tweakWeapons.integer & WT_PROJ_SNIPER) && (g_tweakWeapons.integer & WT_TRIBES))
+	if ((mod == MOD_DISRUPTOR || mod == MOD_DISRUPTOR_SNIPER) && targ && targ->client && /*!(targ->client->ps.fd.forcePowersActive & (1 << FP_PROTECT)) &&*/ !(JK2O_TWEAKWEAPONS & WT_PROJ_SNIPER) && (JK2O_TWEAKWEAPONS & WT_TRIBES))
 	{
 		float cut;
 		if (g_tribesMode.integer)
@@ -5016,11 +5016,11 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, vec3_
 		VectorScale(targ->client->ps.velocity, cut, targ->client->ps.velocity);
 	}
 
-	if (targ && targ->client && targ->client->ps.electrifyTime > level.time && (g_tweakWeapons.integer & WT_TRIBES)) {
+	if (targ && targ->client && targ->client->ps.electrifyTime > level.time && (JK2O_TWEAKWEAPONS & WT_TRIBES)) {
 		damage *= 1.5f;
 	}
 
-	if ((mod == MOD_DISRUPTOR || mod == MOD_DISRUPTOR_SNIPER) && targ && targ->client && (g_tweakWeapons.integer & WT_TRIBES)) { //Zenyatta expose shit
+	if ((mod == MOD_DISRUPTOR || mod == MOD_DISRUPTOR_SNIPER) && targ && targ->client && (JK2O_TWEAKWEAPONS & WT_TRIBES)) { //Zenyatta expose shit
 		targ->client->ps.electrifyTime = level.time + 4000;
 	}
 
@@ -5147,18 +5147,18 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, vec3_
 		float	mass;
 
 		mass = 200;
-		if ((g_tweakWeapons.integer & WT_TRIBES)) {
+		if ((JK2O_TWEAKWEAPONS & WT_TRIBES)) {
 			if (targ->client->pers.tribesClass == 1)
 				mass = 175;
 			else if (targ->client->pers.tribesClass == 3)
 				mass = 240;
 			if (targ->client->ps.fd.forcePowersActive & (1 << FP_PROTECT))
 				mass *= 1.75f; //Superheavy, but also a nerf to discjumping in protect
-			else if ((g_tweakWeapons.integer & WT_TRIBES) && (targ->client->ps.fd.forcePowersActive & (1 << FP_ABSORB)))
+			else if ((JK2O_TWEAKWEAPONS & WT_TRIBES) && (targ->client->ps.fd.forcePowersActive & (1 << FP_ABSORB)))
 				mass *= 2.25f; //Superheavy, but also a nerf to discjumping in protect
 		}
 
-		if (mod == MOD_SABER)
+		if (mod == MOD_SABER && !g_jk2_102sabersystem.integer) // JK2 1.02 saber system: plain knockback for saber hits (mv g_combat.c:3132)
 		{
 			float saberKnockbackScale = g_saberDmgVelocityScale.value;
 			if ( (dflags&DAMAGE_SABER_KNOCKBACK1)
@@ -5210,7 +5210,7 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, vec3_
 			}
 		}
 //[JAPRO - Serverside - Weapons - Remove Projectile/disruptor Knockback - Start]
-		else if ((!targ->client || !targ->client->sess.raceMode) && (g_tweakWeapons.integer & WT_PROJECTILE_KNOCKBACK) && (mod == MOD_BLASTER || mod == MOD_BRYAR_PISTOL || mod == MOD_REPEATER || mod == MOD_DISRUPTOR || mod == MOD_DISRUPTOR_SNIPER || mod == MOD_STUN_BATON))
+		else if ((!targ->client || !targ->client->sess.raceMode) && (JK2O_TWEAKWEAPONS & WT_PROJECTILE_KNOCKBACK) && (mod == MOD_BLASTER || mod == MOD_BRYAR_PISTOL || mod == MOD_REPEATER || mod == MOD_DISRUPTOR || mod == MOD_DISRUPTOR_SNIPER || mod == MOD_STUN_BATON))
 		{
 			VectorScale(dir, 0.01 * g_knockback.value * (float)knockback / mass, kvel);
 		}
@@ -5229,11 +5229,11 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, vec3_
 			float dur = 5000;
 			float dur2 = 100;
 //JAPRO - Serverside - Fixkillcredit - Start
-			if (g_fixKillCredit.integer) {
+			if (JK2O_FIXKILLCREDIT) {
 				dur = 2000;
 			}
 			if (targ->client && targ->s.eType == ET_NPC && targ->s.NPC_class == CLASS_VEHICLE) {
-				if (!g_fixKillCredit.integer) {
+				if (!JK2O_FIXKILLCREDIT) {
 					dur = 25000;
 					dur2 = 25000;
 				}
@@ -5249,7 +5249,7 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, vec3_
 		}
 		// set the timer so that the other client can't cancel
 		// out the movement immediately
-		if ( !targ->client->ps.pm_time && (g_saberDmgVelocityScale.value || mod != MOD_SABER || (dflags&DAMAGE_SABER_KNOCKBACK1) || (dflags&DAMAGE_SABER_KNOCKBACK2) || (dflags&DAMAGE_SABER_KNOCKBACK1_B2) || (dflags&DAMAGE_SABER_KNOCKBACK2_B2) ) ) {
+		if ( !targ->client->ps.pm_time && (g_saberDmgVelocityScale.value || mod != MOD_SABER || g_jk2_102sabersystem.integer || (dflags&DAMAGE_SABER_KNOCKBACK1) || (dflags&DAMAGE_SABER_KNOCKBACK2) || (dflags&DAMAGE_SABER_KNOCKBACK1_B2) || (dflags&DAMAGE_SABER_KNOCKBACK2_B2) ) ) {
 			int		t;
 
 			t = knockback * 2;
@@ -5267,7 +5267,7 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, vec3_
 	{
 		targ->client->ps.otherKiller = attacker->s.number;
 //JAPRO - Serverside - Fix Kill credit - Start
-		if (g_fixKillCredit.integer) {
+		if (JK2O_FIXKILLCREDIT) {
 			targ->client->ps.otherKillerTime = level.time + 2000;
 			targ->client->ps.otherKillerDebounceTime = level.time + 100;
 		}
@@ -5308,7 +5308,7 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, vec3_
 			case MOD_TRIP_MINE_SPLASH:
 			case MOD_TIMED_MINE_SPLASH:
 			case MOD_DET_PACK_SPLASH:
-				damage *= 0.75;
+				damage *= JK2SABER() ? 0.5 : 0.75; // JK2 1.02: 1/2 (mv g_combat.c:3185)
 				break;
 			}
 		}
@@ -5492,10 +5492,10 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, vec3_
 		if ( level.gametype == GT_SIEGE )
 			damage *= 1.5;
 		else
-			damage *= g_selfDamageScale.value;
+			damage *= JK2O_SELFDAMAGESCALE;
 	}
 
-	if ((g_tweakWeapons.integer & WT_IMPACT_NITRON && (/*mod == MOD_THERMAL ||*/ mod == MOD_THERMAL_SPLASH)) || (g_tweakWeapons.integer & WT_TRIBES && (mod == MOD_THERMAL || mod == MOD_THERMAL_SPLASH))) {
+	if ((JK2O_TWEAKWEAPONS & WT_IMPACT_NITRON && (/*mod == MOD_THERMAL ||*/ mod == MOD_THERMAL_SPLASH)) || (JK2O_TWEAKWEAPONS & WT_TRIBES && (mod == MOD_THERMAL || mod == MOD_THERMAL_SPLASH))) {
 		if (targ && targ->client) {
 			if (targ->client->ps.powerups[PW_REDFLAG])
 			{
@@ -5548,7 +5548,7 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, vec3_
 		}
 	}
 
-	if (mod == MOD_STUN_BATON && g_tweakWeapons.integer & WT_STUN_HEAL && (attacker->client && !attacker->client->ps.duelInProgress)) {
+	if (mod == MOD_STUN_BATON && JK2O_TWEAKWEAPONS & WT_STUN_HEAL && (attacker->client && !attacker->client->ps.duelInProgress)) {
 		//if (damage < 1 && damage >= 0)
 		//	damage = 1;
 		if (damage > -1 && damage <= 0)
@@ -5800,7 +5800,7 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, vec3_
 					if (take > 0)
 					{
 //[JAPRO - Serverside - Weapons - Tweak weapons Buff Demp2 - Start]
-						if (g_tweakWeapons.integer & WT_DEMP2_DAM)
+						if (JK2O_TWEAKWEAPONS & WT_DEMP2_DAM)
 							take /= 2;
 						else
 							take /= 3;
@@ -5937,13 +5937,13 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, vec3_
 			{
 				int maxtake = take;
 				//G_Sound(targ, CHAN_AUTO, protectHitSound);
-				if (targ->client->forcePowerSoundDebounce < level.time)
+				if (targ->client->forcePowerSoundDebounce < level.time || JK2SABER()) // JK2 1.02: on every hit
 				{
 					G_PreDefSound(targ->client->ps.origin, PDSOUND_PROTECTHIT);
 					targ->client->forcePowerSoundDebounce = level.time + 400;
 				}
 
-				if (g_tweakWeapons.integer & WT_TRIBES) {
+				if (JK2O_TWEAKWEAPONS & WT_TRIBES) {
 					famt = 0.5f;
 					hamt = 0.90f;
 					if (g_tribesMode.integer) {
@@ -6065,7 +6065,7 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, vec3_
 		}
 	}
 
-	if (targ && targ->client && !take && asave && g_tweakWeapons.integer & WT_TRIBES) {
+	if (targ && targ->client && !take && asave && JK2O_TWEAKWEAPONS & WT_TRIBES) {
 		G_ScaleNetHealth(targ); //WT_TRIBES rework
 	}
 
@@ -6227,7 +6227,7 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, vec3_
 		}
 		else
 		{
-			if ( g_debugMelee.integer )
+			if ( JK2O_DEBUGMELEE )
 			{//getting hurt makes you let go of the wall
 				if ( targ->client && (targ->client->ps.pm_flags&PMF_STUCK_TO_WALL) )
 				{

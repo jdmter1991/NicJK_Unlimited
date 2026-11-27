@@ -826,7 +826,7 @@ qboolean BG_LegalizedForcePowers(char *powerOut, size_t powerOutSize, int maxRan
 
 //[JAPRO - Serverside - Saber - Allow server to cap block level - End]
 #ifdef _GAME
-	if (g_maxSaberDefense.integer > -1 && (final_Powers[FP_SABER_DEFENSE] > g_maxSaberDefense.integer))//my block is middle[2], forced max is 2,
+	if (g_maxSaberDefense.integer > -1 && !JK2SABER() && (final_Powers[FP_SABER_DEFENSE] > g_maxSaberDefense.integer))//my block is middle[2], forced max is 2,
 		final_Powers[FP_SABER_DEFENSE] = g_maxSaberDefense.integer;
 #endif
 //[JAPRO - Serverside - Saber - Allow server to cap block level - End]
@@ -1887,6 +1887,14 @@ extern int cg_dueltypes[MAX_CLIENTS];
 #endif
 //JAPRO - Serverside - Fullforce Dueling - End
 
+// JK2 1.02 mode allows the saber throw in a private duel (mv bg_misc.c:1335 is 1.04 only)
+#ifdef _GAME
+#define JK2_DUEL_THROW(p) ( (p) == FP_SABERTHROW && JK2SABER() )
+#elif defined(_CGAME)
+#define JK2_DUEL_THROW(p) ( (p) == FP_SABERTHROW && cgs.jk2_102sabersystem )
+#else
+#define JK2_DUEL_THROW(p) ( 0 )
+#endif
 qboolean BG_CanUseFPNow(int gametype, playerState_t *ps, int time, forcePowers_t power)
 {
 	if (BG_HasYsalamiri(gametype, ps))
@@ -1917,7 +1925,7 @@ qboolean BG_CanUseFPNow(int gametype, playerState_t *ps, int time, forcePowers_t
 			case 20:
 				if (ps->stats[STAT_RACEMODE])
 					break;
-				if (power != FP_SABER_OFFENSE && power != FP_SABER_DEFENSE && power != FP_LEVITATION)
+				if (power != FP_SABER_OFFENSE && power != FP_SABER_DEFENSE && power != FP_LEVITATION && !JK2_DUEL_THROW(power))
 				{
 					if (!ps->saberLockFrame || power != FP_PUSH)
 					{
@@ -1929,7 +1937,7 @@ qboolean BG_CanUseFPNow(int gametype, playerState_t *ps, int time, forcePowers_t
 				break;
 			case 0: //normal duel
 			default:
-				if (power != FP_SABER_OFFENSE && power != FP_SABER_DEFENSE && power != FP_LEVITATION)
+				if (power != FP_SABER_OFFENSE && power != FP_SABER_DEFENSE && power != FP_LEVITATION && !JK2_DUEL_THROW(power))
 				{
 					if (!ps->saberLockFrame || power != FP_PUSH)
 					{
@@ -1944,7 +1952,7 @@ qboolean BG_CanUseFPNow(int gametype, playerState_t *ps, int time, forcePowers_t
 	{
 		switch ( cg_dueltypes[ps->clientNum]) {
 					case 0: //normal duel
-			if (power != FP_SABER_OFFENSE && power != FP_SABER_DEFENSE && power != FP_LEVITATION)
+			if (power != FP_SABER_OFFENSE && power != FP_SABER_DEFENSE && power != FP_LEVITATION && !JK2_DUEL_THROW(power))
 			{
 				if (!ps->saberLockFrame || power != FP_PUSH)
 				{
@@ -2301,6 +2309,13 @@ Returns false if the item should not be picked up.
 This needs to be the same for client side prediction and server use.
 ================
 */
+#ifdef _GAME
+#define JK2_BGMODE() ( JK2SABER() )
+#elif defined(_CGAME)
+#define JK2_BGMODE() ( cgs.jk2_102sabersystem != 0 )
+#else
+#define JK2_BGMODE() ( 0 )
+#endif
 qboolean BG_CanItemBeGrabbed( int gametype, const entityState_t *ent, const playerState_t *ps ) {
 	gitem_t	*item;
 
@@ -2359,7 +2374,7 @@ qboolean BG_CanItemBeGrabbed( int gametype, const entityState_t *ent, const play
 		{ //weaponstay stuff.. if this isn't dropped, and you already have it, you don't get it.
 			return qfalse;
 		}
-		if (item->giTag == WP_THERMAL || item->giTag == WP_TRIP_MINE || item->giTag == WP_DET_PACK)
+		if ((item->giTag == WP_THERMAL || item->giTag == WP_TRIP_MINE || item->giTag == WP_DET_PACK) && !JK2_BGMODE()) // JK2 1.02 always picks up weapons
 		{ //check to see if full on ammo for this, if so, then..
 			int ammoIndex = weaponData[item->giTag].ammoIndex;
 			if (ps->ammo[ammoIndex] >= ammoData[ammoIndex].max)
@@ -2380,7 +2395,7 @@ qboolean BG_CanItemBeGrabbed( int gametype, const entityState_t *ent, const play
 		return qtrue;
 
 	case IT_ARMOR:
-		if ( ps->stats[STAT_ARMOR] >= ps->stats[STAT_MAX_HEALTH]/* * item->giTag*/ ) {
+		if ( ps->stats[STAT_ARMOR] >= ps->stats[STAT_MAX_HEALTH] * (JK2_BGMODE() ? item->giTag : 1) ) { // JK2 1.02: up to max * giTag (mv bg_misc.c:1698)
 			return qfalse;
 		}
 		return qtrue;

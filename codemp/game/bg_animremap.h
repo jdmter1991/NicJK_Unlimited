@@ -1,15 +1,15 @@
 /*
 ===========================================================================
-NicJK Unlimited - per-model animation remapping (animremap.cfg)
+NicJK Unlimited - per-model animation remapping (per-model-anims-config.cfg)
 
 The same move (animation number BOTH_*) can play different frames depending
-on the player model, configured by a text file. Off unless g_animRemap
-(server) / cg_animRemap (client) is set.
+on the player model, configured by a text file. Off unless g_permodelanims
+(server) / cg_permodelanims (client) is set.
 
 Animation numbers sent over the network, every check in the game code, bots
 and stock clients are unchanged. Only the frames a model shows for a given
 animation number are swapped, and gameplay timing is unchanged unless a line
-uses the "timing" mode. See GameData/nicjk/animremap.cfg for the format.
+uses the "timing" mode. See GameData/nicjk/per-model-anims-config.cfg for the format.
 ===========================================================================
 */
 

@@ -475,12 +475,12 @@ static qboolean CG_RegisterClientModelname( clientInfo_t *ci, const char *modelN
 retryModel:
 	if (badModel)
 	{
-		// NicJK: the default model itself was rejected (e.g. an animremap.cfg
+		// NicJK: the default model itself was rejected (e.g. an per-model-anims-config.cfg
 		// "skeleton" line gave it a GLA that is not humanoid): stop instead of
 		// retrying the same model forever
 		if (modelName && !Q_stricmp(modelName, DEFAULT_MODEL))
 		{
-			Com_Printf(S_COLOR_YELLOW "WARNING: default model %s could not be used (check animremap.cfg skeleton lines)\n", DEFAULT_MODEL);
+			Com_Printf(S_COLOR_YELLOW "WARNING: default model %s could not be used (check per-model-anims-config.cfg skeleton lines)\n", DEFAULT_MODEL);
 			return qfalse;
 		}
 #if 0
@@ -559,7 +559,7 @@ retryModel:
 	{
 		if (!strstr(GLAName, "players/_humanoid/") /*&&
 			(!strstr(GLAName, "players/rockettrooper/") || cgs.gametype != GT_SIEGE)*/ //only allow rockettrooper in siege
-			&& !(cg_animRemap.integer && BG_AnimRemap_OwnSkeleton(GLAName))) // NicJK: a model's own humanoid skeleton (animremap)
+			&& !(cg_permodelanims.integer && BG_AnimRemap_OwnSkeleton(GLAName))) // NicJK: a model's own humanoid skeleton (animremap)
 		{ //Bad!
 			badModel = qtrue;
 			goto retryModel;
@@ -585,7 +585,7 @@ retryModel:
 		}
 
 		// NicJK animremap: a model on its own humanoid skeleton still plays the humanoid game table
-		if (cg_animRemap.integer && BG_AnimRemap_OwnSkeleton(GLAName))
+		if (cg_permodelanims.integer && BG_AnimRemap_OwnSkeleton(GLAName))
 			Q_strncpyz( afilename, "models/players/_humanoid/animation.cfg", sizeof( afilename ) );
 
 		//rww - All player models must use humanoid, no matter what.
@@ -819,7 +819,7 @@ int CG_G2SkelForModel(void *g2)
 
 	// NicJK animremap: a model's own humanoid skeleton plays the humanoid game
 	// (table 0); its own frames are applied where it is drawn
-	if (cg_animRemap.integer && BG_AnimRemap_OwnSkeleton(GLAName))
+	if (cg_permodelanims.integer && BG_AnimRemap_OwnSkeleton(GLAName))
 		return 0;
 
 	slash = Q_strrchr( GLAName, '/' );
@@ -851,7 +851,7 @@ int CG_G2EvIndexForModel(void *g2, int animIndex)
 
 	// NicJK animremap: a model's own skeleton has its own animevents.cfg, keyed
 	// to the frames of its own animation.cfg
-	if (cg_animRemap.integer && BG_AnimRemap_OwnSkeleton(GLAName))
+	if (cg_permodelanims.integer && BG_AnimRemap_OwnSkeleton(GLAName))
 	{
 		int ownSlot = BG_AnimRemap_OwnSkeletonSlot(GLAName);
 		if (ownSlot >= 0)
@@ -3193,7 +3193,7 @@ void CG_PlayerAnimEventDo( centity_t *cent, animevent_t *animEvent )
 }
 
 /*
-NicJK animremap.cfg: frames this client's model shows for each animation number.
+NicJK per-model-anims-config.cfg: frames this client's model shows for each animation number.
 Animation numbers (what the server sends and the game code checks) never change.
 */
 // GLA of the Ghoul2 model this client is drawn with (a model's own GLA, or
@@ -3220,7 +3220,7 @@ static const char *CG_AnimRemapGLA( int entNum, clientInfo_t *ci )
 
 const animation_t *CG_AnimRemapVisual( int entNum, int animIndex, clientInfo_t *ci )
 {
-	if ( cg_animRemap.integer && animIndex == 0 && entNum >= 0 && entNum < MAX_CLIENTS )
+	if ( cg_permodelanims.integer && animIndex == 0 && entNum >= 0 && entNum < MAX_CLIENTS )
 	{
 		if ( !ci )
 			ci = &cgs.clientinfo[entNum];
@@ -3231,14 +3231,14 @@ const animation_t *CG_AnimRemapVisual( int entNum, int animIndex, clientInfo_t *
 }
 
 // Table for predicting the local player: only differs for lines in "timing" mode,
-// and only when the server uses remaps too (g_animRemap in the serverinfo).
+// and only when the server uses remaps too (g_permodelanims in the serverinfo).
 animation_t *CG_AnimRemapPmove( int entNum, int animIndex )
 {
 	clientInfo_t *ci;
 
 	if ( animIndex != 0 || entNum < 0 || entNum >= MAX_CLIENTS )
 		return NULL;
-	if ( !atoi( Info_ValueForKey( CG_ConfigString( CS_SERVERINFO ), "g_animRemap" ) ) )
+	if ( !atoi( Info_ValueForKey( CG_ConfigString( CS_SERVERINFO ), "g_permodelanims" ) ) )
 		return NULL;
 	ci = &cgs.clientinfo[entNum];
 	if ( !ci->infoValid )
@@ -3583,7 +3583,7 @@ static void CG_SetLerpFrameAnimation( centity_t *cent, clientInfo_t *ci, lerpFra
 	lf->animation = anim;
 	lf->animationTime = lf->frameTime + abs(anim->frameLerp);
 
-	if ( cg_animRemap.integer > 1 && cent->currentState.number < MAX_CLIENTS && cent->localAnimIndex == 0 )
+	if ( cg_permodelanims.integer > 1 && cent->currentState.number < MAX_CLIENTS && cent->localAnimIndex == 0 )
 	{ // NicJK animremap debug: which frames this player's model really shows
 		const animation_t *stock = &bgAllAnims[0].anims[newAnimation];
 		trap->Print( "AnimRemap debug: client %d (%s) %s %s: frames %d-%d%s\n", cent->currentState.number, ci->modelName,
@@ -11669,7 +11669,7 @@ JustDoIt:
 		saberTrail->inAction = cg.time;
 
 		// Fix black trail shader // Niksata Edit
-		if (scolor == SABER_BLACK) {
+		if (scolor == SABER_BLACK || scolor == SABER_REDBLACK) { // NicJK: color 12 uses the black trail too
 			if (cg_SFXSabers.integer == 7) {
 				fx.mShader = cgs.media.ShaderSaberTrailblackAhsoka;
 			}
@@ -17216,7 +17216,7 @@ stillDoSaber:
 	//Showing only when the power has been active (absorbed something) recently now, instead of always.
 	//AND
 	//always show if it is you with the absorb on
-	if (((cg_alwaysShowAbsorb.integer && cgs.serverMod != SVMOD_BASEENHANCED) && cent->currentState.forcePowersActive & (1<<FP_ABSORB)) ||
+	if (((cgs.jk2_102sabersystem || (cg_alwaysShowAbsorb.integer && cgs.serverMod != SVMOD_BASEENHANCED)) && cent->currentState.forcePowersActive & (1<<FP_ABSORB)) || // JK2 1.02 draws it whenever absorb is on (mv cg_players.c:7550)
 		(cent->teamPowerEffectTime > cg.time && cent->teamPowerType == 3))
 	{ //aborb is represented by blue..
 		legs.shaderRGBA[0] = 0;

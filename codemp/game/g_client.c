@@ -1784,7 +1784,7 @@ void SetupGameGhoul2Model(gentity_t *ent, char *modelname, char *skinName)
 				trap->G2API_GetGLAName( ent->ghoul2, 0, GLAName);
 
 				if (!GLAName[0] || (!strstr(GLAName, "players/_humanoid/") && ent->s.number < MAX_CLIENTS && !G_PlayerHasCustomSkeleton(ent)
-					&& !(g_animRemap.integer && BG_AnimRemap_OwnSkeleton(GLAName)))) // NicJK: a model's own humanoid skeleton (animremap)
+					&& !(g_permodelanims.integer && BG_AnimRemap_OwnSkeleton(GLAName)))) // NicJK: a model's own humanoid skeleton (animremap)
 				{ //a bad model
 					trap->G2API_CleanGhoul2Models(&(ent->ghoul2));
 					ent->ghoul2 = NULL;
@@ -2405,6 +2405,42 @@ float GetModelScale(const char* modelName) {
 	return 1.0f; // Default scale
 }
 
+// modelscale.cfg for a player: the scale the client draws (iModelScale) and the server's box. Used at spawn
+// and when the model changes in game. The config names models without a skin, so "kyle/default" looks
+// up "kyle". A live player whose bigger box would not fit where he stands gets it on a later frame.
+void G_ApplyPlayerModelScale( gentity_t *ent, const char *modelWithSkin, qboolean setBoxNow ) {
+	char model[MAX_QPATH];
+	char *slash;
+	float scale;
+	vec3_t mins, maxs;
+	if ( !ent || !ent->client ) {
+		return;
+	}
+	Q_strncpyz( model, modelWithSkin ? modelWithSkin : "", sizeof( model ) );
+	slash = strchr( model, '/' );
+	if ( slash ) {
+		*slash = 0;
+	}
+	scale = JK2SABER() ? 1.0f : GetModelScale( model ); // JK2 1.02 has no model scale (and no scaled box)
+	ent->client->ps.iModelScale = (int)( scale * 100.0f );
+	VectorScale( playerMins, scale, mins );
+	VectorScale( playerMaxs, scale, maxs );
+	if ( !setBoxNow && ent->client->sess.sessionTeam != TEAM_SPECTATOR && ent->health > 0 && !ent->client->ps.m_iVehicleNum ) {
+		trace_t tr;
+		trap->Trace( &tr, ent->client->ps.origin, mins, maxs, ent->client->ps.origin, ent->s.number, ent->clipmask ? ent->clipmask : MASK_PLAYERSOLID, qfalse, 0, 0 );
+		if ( tr.startsolid || tr.allsolid ) {
+			ent->client->modelScaleBoxPending = qtrue;
+			return;
+		}
+	}
+	VectorCopy( mins, ent->r.mins );
+	VectorCopy( maxs, ent->r.maxs );
+	ent->client->modelScaleBoxPending = qfalse;
+	if ( ent->r.linked ) {
+		trap->LinkEntity( (sharedEntity_t *)ent );
+	}
+}
+
 // REPLACE your current model scaling section with this:
 /*
 	// MODEL SCALING INTEGRATION - Config file support
@@ -2649,11 +2685,8 @@ qboolean ClientUserinfoChanged(int clientNum) { //I think anything treated as an
 	}
 
 	// MODEL SCALING INTEGRATION - Config file support // Niksata Edit
-	float scale = GetModelScale(model);
-
-	// Set the scale values
-	// client->ps.modelScale = scale; // This field doesn't exist - removed
-	client->ps.iModelScale = (int)(scale * 100.0f); // Niksata Edit
+	// (skin stripped as at spawn, and the box resized too, so a model change in game takes effect at once)
+	G_ApplyPlayerModelScale( ent, model, qfalse );
 
 	//WT_TRIBES
 	if (g_tribesMode.integer && (!client->sess.raceMode || (level.gametype >= GT_TEAM && client->sess.sessionTeam > TEAM_FREE))) {
@@ -3456,7 +3489,7 @@ void G_BreakArm(gentity_t *ent, int arm)
 //Update the ghoul2 instance anims based on the playerstate values
 qboolean BG_SaberStanceAnim( int anim );
 qboolean PM_RunningAnim( int anim );
-// NicJK animremap.cfg: each client's "model/skin" as sent to the other clients
+// NicJK per-model-anims-config.cfg: each client's "model/skin" as sent to the other clients
 static char g_animRemapModel[MAX_CLIENTS][MAX_QPATH];
 
 void G_AnimRemap_SetClientModel(int clientNum, const char *modelSkin)
@@ -3467,7 +3500,7 @@ void G_AnimRemap_SetClientModel(int clientNum, const char *modelSkin)
 
 static qboolean G_AnimRemap_ClientModel(gentity_t *ent, char *model, char *skin, char *gla, int size)
 {
-	if (!g_animRemap.integer || !ent->client || ent->s.number >= MAX_CLIENTS || ent->localAnimIndex != 0)
+	if (!g_permodelanims.integer || !ent->client || ent->s.number >= MAX_CLIENTS || ent->localAnimIndex != 0)
 		return qfalse;
 	BG_AnimRemap_SplitModel(g_animRemapModel[ent->s.number], model, size, skin, size);
 	// the GLA of the server's own Ghoul2 instance: frames from a model's own GLA
@@ -4035,7 +4068,7 @@ void GiveClientWeapons(gclient_t *client) {
 				client->ps.stats[STAT_WEAPONS] |= (1 << i);
 		}
 
-		if (g_tweakWeapons.integer & WT_TRIBES) { //oh right, startingWeapons bit 1 gives more ammo
+		if (JK2O_TWEAKWEAPONS & WT_TRIBES) { //oh right, startingWeapons bit 1 gives more ammo
 			if (g_startingWeapons.integer & (1 << WP_BLASTER) || g_startingWeapons.integer & (1 << WP_BRYAR_OLD))
 				client->ps.ammo[AMMO_BLASTER] = 600;
 			if (g_startingWeapons.integer & (1 << WP_DISRUPTOR) || g_startingWeapons.integer & (1 << WP_BOWCASTER) || g_startingWeapons.integer & (1 << WP_DEMP2))
@@ -4458,7 +4491,55 @@ void ClientSpawn(gentity_t *ent) {
 
 	client->savedJumpLevel = 0;//rabbit
 
-	if ( level.gametype != GT_HOLOCRON 
+	if ( JK2SABER() && !client->sess.raceMode && level.gametype != GT_SIEGE )
+	{ // JK2 1.02 spawn loadout (mv g_client.c:1935-1980): saber, or the stun baton without saber offence,
+	  // plus the pistol (JK2's pistol is our WP_BRYAR_OLD), and the pistol is selected; no jediVmerc rules
+		if (level.gametype == GT_HOLOCRON)
+		{
+			//always get free saber level 1 in holocron
+			client->ps.stats[STAT_WEAPONS] |= ( 1 << WP_SABER );
+		}
+		else
+		{
+			if (client->ps.fd.forcePowerLevel[FP_SABER_OFFENSE])
+			{
+				client->ps.stats[STAT_WEAPONS] |= ( 1 << WP_SABER );
+			}
+			else
+			{ //if you don't have saber attack rank then you don't get a saber
+				client->ps.stats[STAT_WEAPONS] |= (1 << WP_STUN_BATON);
+			}
+		}
+
+		if (!wDisable || !(wDisable & (1 << WP_BRYAR_OLD)))
+		{
+			client->ps.stats[STAT_WEAPONS] |= ( 1 << WP_BRYAR_OLD );
+		}
+		else if (level.gametype == GT_JEDIMASTER)
+		{
+			client->ps.stats[STAT_WEAPONS] |= ( 1 << WP_BRYAR_OLD );
+		}
+
+		if (level.gametype == GT_JEDIMASTER)
+		{
+			client->ps.stats[STAT_WEAPONS] &= ~(1 << WP_SABER);
+			client->ps.stats[STAT_WEAPONS] |= (1 << WP_STUN_BATON);
+		}
+
+		if (client->ps.stats[STAT_WEAPONS] & (1 << WP_BRYAR_OLD))
+		{
+			client->ps.weapon = WP_BRYAR_OLD;
+		}
+		else if (client->ps.stats[STAT_WEAPONS] & (1 << WP_SABER))
+		{
+			client->ps.weapon = WP_SABER;
+		}
+		else
+		{
+			client->ps.weapon = WP_STUN_BATON;
+		}
+	}
+	else if ( level.gametype != GT_HOLOCRON 
 		&& level.gametype != GT_JEDIMASTER 
 		&& !HasSetSaberOnly()
 		&& !AllForceDisabled( g_forcePowerDisable.integer )
@@ -4572,7 +4653,7 @@ void ClientSpawn(gentity_t *ent) {
 			client->ps.stats[STAT_WEAPONS] |= (1 << WP_MELEE);
 		}
 
-		if (client->ps.stats[STAT_WEAPONS] & (1 << WP_SABER) && (!(g_tweakWeapons.integer & WT_TRIBES)))
+		if (client->ps.stats[STAT_WEAPONS] & (1 << WP_SABER) && (!(JK2O_TWEAKWEAPONS & WT_TRIBES)))
 		{
 			client->ps.weapon = WP_SABER;
 		}
@@ -4683,6 +4764,11 @@ void ClientSpawn(gentity_t *ent) {
 		client->ps.stats[STAT_HOLDABLE_ITEMS] = bgSiegeClasses[client->siegeClass].invenItems;
 		client->ps.stats[STAT_HOLDABLE_ITEM] = 0;
 	}
+	else if ( JK2SABER() && !client->sess.raceMode )
+	{ // JK2 1.02: no holdables at spawn
+		client->ps.stats[STAT_HOLDABLE_ITEMS] = 0;
+		client->ps.stats[STAT_HOLDABLE_ITEM] = 0;
+	}
 	else
 	{
 		GiveClientItems(client);
@@ -4712,8 +4798,8 @@ void ClientSpawn(gentity_t *ent) {
 	}
 
 // nmckenzie: DESERT_SIEGE... or well, siege generally.  This was over-writing the max value, which was NOT good for siege.
-	if (!g_startingWeapons.integer && inSiegeWithClass == qfalse)
-	{
+	if ((!g_startingWeapons.integer || (JK2SABER() && !client->sess.raceMode)) && inSiegeWithClass == qfalse)
+	{ // (JK2 1.02 always gives 100 blaster ammo, mv g_client.c:2123)
 		client->ps.ammo[AMMO_BLASTER] = 100; //ammoData[AMMO_BLASTER].max; //100 seems fair.
 	}
 //	client->ps.ammo[AMMO_POWERCELL] = ammoData[AMMO_POWERCELL].max;
@@ -4817,7 +4903,7 @@ void ClientSpawn(gentity_t *ent) {
 	}
 	else
 	{//Clan Arena starting armor/hp here
-		if (g_tweakWeapons.integer & WT_TRIBES) {
+		if (JK2O_TWEAKWEAPONS & WT_TRIBES) {
 			ent->health = client->ps.stats[STAT_HEALTH] = client->ps.stats[STAT_MAX_HEALTH];
 			client->ps.stats[STAT_ARMOR] = 0;
 		}
@@ -4841,6 +4927,16 @@ void ClientSpawn(gentity_t *ent) {
 			client->ps.stats[STAT_ARMOR] = client->ps.stats[STAT_MAX_HEALTH] * 0.25;
 	}
 
+	if ( JK2SABER() && !client->sess.raceMode && level.gametype != GT_SIEGE && level.gametype != GT_POWERDUEL )
+	{ // JK2 1.02: 125 health and 25 armor in every gametype, duel included (mv g_client.c:2164-2167)
+		ent->health = client->ps.stats[STAT_HEALTH] = client->ps.stats[STAT_MAX_HEALTH] * 1.25;
+		client->ps.stats[STAT_ARMOR] = client->ps.stats[STAT_MAX_HEALTH] * 0.25;
+		if ( developer.integer )
+		{ // test output: the 1.02 spawn state
+			trap->Print( "JK2 spawn: client %d health %d armor %d weapons 0x%x weapon %d blaster ammo %d holdables 0x%x\n", index, ent->health, client->ps.stats[STAT_ARMOR], client->ps.stats[STAT_WEAPONS], client->ps.weapon, client->ps.ammo[AMMO_BLASTER], client->ps.stats[STAT_HOLDABLE_ITEMS] );
+		}
+	}
+
 	G_SetOrigin( ent, spawn_origin );
 	VectorCopy( spawn_origin, client->ps.origin );
 
@@ -4857,53 +4953,9 @@ void ClientSpawn(gentity_t *ent) {
 	client->inactivityTime = level.time + g_inactivity.integer * 1000;
 	client->latched_buttons = 0;
 
-	// Apply model scale to bounding boxes // Niksata Edit - FIX FOR /default
-
+	// Apply model scale (modelscale.cfg) to the drawn size and the box // Niksata Edit - FIX FOR /default
 	trap->GetUserinfo(ent - g_entities, userinfo, sizeof(userinfo));
-	char* model = Info_ValueForKey(userinfo, "model");
-
-	//Com_Printf("ClientSpawn: raw userinfo model='%s'\n", model); // debug
-
-	// Handle modelname/default format - extract just modelname
-	char cleanModel[MAX_QPATH];
-	char* slashPos = strchr(model, '/');
-	if (slashPos) {
-		// Copy everything before the slash
-		int len = slashPos - model;
-		if (len > 0 && len < MAX_QPATH) {
-			strncpy(cleanModel, model, len);
-			cleanModel[len] = '\0';
-			//Com_Printf("ClientSpawn: extracted clean model='%s' from '%s'\n", cleanModel, model); // debug
-			model = cleanModel;
-		}
-	}
-
-	//Com_Printf("ClientSpawn: final model for scaling='%s'\n", model); //debug
-
-	// Force config reload if needed
-	if (!scaleConfigLoaded) {
-		LoadModelScaleConfig();
-	}
-
-	float scale = GetModelScale(model);
-	//Com_Printf("GetModelScale('%s') returned: %.2f\n", model, scale); //debug
-
-	// Update stored value
-	client->ps.iModelScale = (int)(scale * 100.0f);
-	//Com_Printf("Set iModelScale to: %d\n", client->ps.iModelScale); //debug
-
-	if (scale != 1.0f) {
-		VectorScale(playerMins, scale, ent->r.mins);
-		VectorScale(playerMaxs, scale, ent->r.maxs);
-		/*Com_Printf("Applied scaling: mins=(%.1f,%.1f,%.1f) maxs=(%.1f,%.1f,%.1f)\n",
-			ent->r.mins[0], ent->r.mins[1], ent->r.mins[2],
-			ent->r.maxs[0], ent->r.maxs[1], ent->r.maxs[2]);*/ //debug
-	}
-	else {
-		VectorCopy(playerMins, ent->r.mins);
-		VectorCopy(playerMaxs, ent->r.maxs);
-		//Com_Printf("Used default bounding boxes\n"); //debug
-	} // Niksata Edit
+	G_ApplyPlayerModelScale(ent, Info_ValueForKey(userinfo, "model"), qtrue);
 
 	if (!level.intermissiontime) {
 		if (ent->client->sess.sessionTeam != TEAM_SPECTATOR) {
@@ -5078,7 +5130,7 @@ void ClientDisconnect( int clientNum ) {
 	}
 
 //JAPRO - Serverside - Stop those pesky reconnect whores - Start
-	if (g_fixKillCredit.integer > 1 && (ent->health > 0) && !(ent->r.svFlags & SVF_BOT) && 0 <= ent->client->ps.otherKiller && ent->client->ps.otherKiller < MAX_CLIENTS && ent->client->ps.otherKillerTime > level.time && ent->client->sess.sessionTeam != TEAM_SPECTATOR)
+	if (JK2O_FIXKILLCREDIT > 1 && (ent->health > 0) && !(ent->r.svFlags & SVF_BOT) && 0 <= ent->client->ps.otherKiller && ent->client->ps.otherKiller < MAX_CLIENTS && ent->client->ps.otherKillerTime > level.time && ent->client->sess.sessionTeam != TEAM_SPECTATOR)
 	{
 		attacker = &g_entities[ent->client->ps.otherKiller];
 		if (attacker->client) {

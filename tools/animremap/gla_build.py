@@ -10,7 +10,7 @@ valid and stock clients keep working. Writes:
 
   OUT.gla        the combined GLA
   ADDED.cfg      the added animations in animation.cfg format, with their new
-                 frame numbers (use it in animremap.cfg:
+                 frame numbers (use it in per-model-anims-config.cfg:
                  "animset NAME models/players/_humanoid/_humanoid.gla ADDED.cfg 0",
                  then per model "MODEL BOTH_x NAME:ADDED_ANIM")
   FULL.cfg       optional: the base animation.cfg with every added animation

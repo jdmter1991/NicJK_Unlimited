@@ -248,6 +248,7 @@ void G_InitGame( int levelTime, int randomSeed, int restart ) {
 	trap->SetConfigstring(CS_LEGACY_FIXES, "0");
 
 	G_RegisterCvars();
+	BG_JK2SetTables( JK2SABER() ); // JK2 1.02 force costs and weapon rows (bg_pmove_jk2.c)
 
 	G_ProcessIPBans();
 
@@ -3565,6 +3566,8 @@ void G_RunFrame( int levelTime ) {
 
 	// map testing: every g_logPlayerPos milliseconds, the position of every live player (bots too), so that places
 	// where players end up below the drawn ground (holes in a map's collision) can be found from the log
+	BG_JK2SetTables( JK2SABER() ); // JK2 1.02 force costs and weapon rows follow g_jk2_102sabersystem
+
 	if ( g_logPlayerPos.integer > 0 ) {
 		static int lastPosLog = 0;
 		if ( levelTime - lastPosLog >= g_logPlayerPos.integer || levelTime < lastPosLog ) {
@@ -3851,7 +3854,7 @@ void G_RunFrame( int levelTime ) {
 			continue;
 		}
 
-		/*if ( !(g_unlagged.integer & UNLAGGED_PROJ_REC) && (ent->s.eType == ET_MISSILE) ) {//loda fixme?
+		/*if ( !(JK2O_UNLAGGED & UNLAGGED_PROJ_REC) && (ent->s.eType == ET_MISSILE) ) {//loda fixme?
 			G_RunMissile( ent );
 			continue;
 		}*/
@@ -4052,7 +4055,7 @@ void G_RunFrame( int levelTime ) {
 			{ //recharge jetpack
 				if (ent->client->jetPackDebRecharge < level.time)
 				{
-					if (g_tweakWeapons.integer & WT_TRIBES)
+					if (JK2O_TWEAKWEAPONS & WT_TRIBES)
 						ent->client->ps.jetpackFuel += 4;
 					else
 						ent->client->ps.jetpackFuel += 3;
@@ -4195,7 +4198,7 @@ void G_RunFrame( int levelTime ) {
 				}
 			}
 			else if (ent->client->ps.cloakFuel < 100
-				&& !(g_mb2manualblock.integer && !(ent->client->ps.stats[STAT_HOLDABLE_ITEMS] & (1 << HI_CLOAK))))
+				&& !((g_mb2manualblock.integer && !g_jk2_102sabersystem.integer) && !(ent->client->ps.stats[STAT_HOLDABLE_ITEMS] & (1 << HI_CLOAK))))
 			{ //recharge cloak (with MB2 blocking on, a player without a cloak shows block points there)
 				if (ent->client->cloakDebRecharge < level.time)
 				{
@@ -4328,7 +4331,7 @@ void G_RunFrame( int levelTime ) {
 	// of the last server frame
 
 	/*
-	if (g_unlagged.integer & UNLAGGED_PROJ_REC)
+	if (JK2O_UNLAGGED & UNLAGGED_PROJ_REC)
 	{
 		G_TimeShiftAllClients( level.previousTime, NULL );
 

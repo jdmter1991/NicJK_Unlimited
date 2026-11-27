@@ -32,6 +32,8 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "ghoul2/G2.h"
 #include "ui/ui_public.h"
 
+void BG_JK2SetTables( qboolean on ); // bg_pmove_jk2.c
+
 /*
 =================
 CG_ParseScores
@@ -248,7 +250,11 @@ void CG_ParseServerinfo( void ) {
 	cgs.jpDuelAlpha = 0;
 	cgs.restricts = 0;
 	cgs.taystJKinfo =  atoi(Info_ValueForKey(info, "taystJKinfo")); // taystjk feature flags
+	cgs.jk2_102sabersystem = atoi(Info_ValueForKey(info, "g_jk2_102sabersystem"));
 	cgs.mb2manualblock = atoi(Info_ValueForKey(info, "g_mb2manualblock"));
+	if (cgs.jk2_102sabersystem)
+		cgs.mb2manualblock = 0; // the JK2 1.02 saber system overrides MB2 blocking
+	BG_JK2SetTables( cgs.jk2_102sabersystem ? qtrue : qfalse ); // JK2 1.02 force costs and weapon rows
 
 	gamename = Info_ValueForKey(info, "gamename");
 	if (gamename) {
@@ -344,6 +350,13 @@ void CG_ParseServerinfo( void ) {
 	trap->Cvar_Set ( "ui_about_hostname", Info_ValueForKey( info, "sv_hostname" ) );
 	trap->Cvar_Set ( "ui_about_needpass", Info_ValueForKey( info, "g_needpass" ) );
 	trap->Cvar_Set ( "ui_about_botminplayers", Info_ValueForKey ( info, "bot_minplayers" ) );
+
+	if (cgs.jk2_102sabersystem)
+	{ // JK2 1.02 mode: jaPRO/TaystJK gameplay options do not apply, so predict as if they were all 0
+		cgs.cinfo = 0;
+		cgs.jcinfo = 0;
+		cgs.jcinfo2 = 0;
+	}
 
 	//Set the siege teams based on what the server has for overrides.
 	trap->Cvar_Set("cg_siegeTeam1", Info_ValueForKey(info, "g_siegeTeam1"));

@@ -1180,6 +1180,17 @@ void CG_PredictPlayerState( void ) {
 	) {
 		cg.physicsTime = cg.predictedPlayerState.commandTime + 8;
 	}
+	if ( cgs.jk2_102sabersystem )
+	{ // JK2 1.02 (mv cg_predict.c): pmove_msec 8..33
+		if ( pmove_msec.integer < 8 ) {
+			trap->Cvar_Set("pmove_msec", "8");
+			trap->Cvar_Update(&pmove_msec);
+		}
+		else if (pmove_msec.integer > 33) {
+			trap->Cvar_Set("pmove_msec", "33");
+			trap->Cvar_Update(&pmove_msec);
+		}
+	}
 	//JAPRO - Clientside - Unlock Pmove bounds - Start
 	if ( pmove_msec.integer < 1 ) {
 		trap->Cvar_Set("pmove_msec", "1");
@@ -1431,7 +1442,7 @@ void CG_PredictPlayerState( void ) {
 		}
 
 		cg_pmove.animations = bgAllAnims[pEnt->localAnimIndex].anims;
-		{ // NicJK animremap.cfg: only "timing" lines change pmove, and only when the server uses them
+		{ // NicJK per-model-anims-config.cfg: only "timing" lines change pmove, and only when the server uses them
 			animation_t *remapped = CG_AnimRemapPmove( cg.predictedPlayerState.clientNum, pEnt->localAnimIndex );
 			if ( remapped )
 				cg_pmove.animations = remapped;

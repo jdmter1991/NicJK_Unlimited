@@ -39,6 +39,7 @@ set(MPCGameGameFiles
 	"${MPDir}/game/bg_panimate.c"
 	"${MPDir}/game/bg_pmove.c"
 	"${MPDir}/game/bg_saber.c"
+	"${MPDir}/game/bg_saber_jk2.c"
 	"${MPDir}/game/bg_saberLoad.c"
 	"${MPDir}/game/bg_saga.c"
 	"${MPDir}/game/bg_slidemove.c"

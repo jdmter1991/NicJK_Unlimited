@@ -64,7 +64,7 @@ XCVAR_DEF( dmflags,						"0",			NULL,				CVAR_SERVERINFO|CVAR_ARCHIVE,					qtrue
 XCVAR_DEF( duel_fraglimit,				"10",			NULL,				CVAR_SERVERINFO|CVAR_ARCHIVE|CVAR_NORESTART,	qtrue )
 XCVAR_DEF( fraglimit,					"0",			NULL,				CVAR_SERVERINFO|CVAR_ARCHIVE|CVAR_NORESTART,	qtrue )
 XCVAR_DEF( g_adaptRespawn,				"1",			NULL,				CVAR_NONE,										qtrue )
-XCVAR_DEF( g_animRemap,				"0",			NULL,				CVAR_ARCHIVE|CVAR_SERVERINFO,					qtrue )
+XCVAR_DEF( g_permodelanims,				"0",			NULL,				CVAR_ARCHIVE|CVAR_SERVERINFO,					qtrue )
 XCVAR_DEF( g_allowDuelSuicide,			"1",			NULL,				CVAR_ARCHIVE,									qtrue )
 XCVAR_DEF( g_allowHighPingDuelist,		"1",			NULL,				CVAR_NONE,										qtrue )
 XCVAR_DEF( g_allowNPC,					"1",			NULL,				CVAR_CHEAT,										qtrue )
@@ -312,6 +312,9 @@ XCVAR_DEF( g_mb2manualblock,				"0",			NULL,				CVAR_ARCHIVE|CVAR_SERVERINFO,			
 XCVAR_DEF( g_mb2bpRegen,					"4",			NULL,				CVAR_ARCHIVE,									qtrue ) // block points regained per tick when not running or attacking
 XCVAR_DEF( g_mb2bpRegenTime,				"250",			NULL,				CVAR_ARCHIVE,									qtrue ) // ms per regen tick
 XCVAR_DEF( g_mb2pbZone,						"8",			NULL,				CVAR_ARCHIVE,									qtrue ) // degrees off the attacker's body that count as aiming at a side for a perfect block
+// JK2 1.02 saber system (off = JKA saber, unchanged). Ported from mvsdk's 1.02 code paths. In the
+// server info so clients predict it. While on: single saber only, g_mb2manualblock is ignored.
+XCVAR_DEF( g_jk2_102sabersystem,			"0",			NULL,				CVAR_ARCHIVE|CVAR_SERVERINFO,					qtrue )
 XCVAR_DEF( jcinfo,						"0",			NULL,				CVAR_SERVERINFO|CVAR_ROM,						qfalse) //not a cvar, dont change it
 XCVAR_DEF( jcinfo2,						"0",			NULL,				CVAR_SERVERINFO|CVAR_ROM,						qfalse ) //not a cvar, dont change it
 XCVAR_DEF( g_emotesDisable,				"0",			CVU_Jawarun,		CVAR_ARCHIVE,									qtrue )
