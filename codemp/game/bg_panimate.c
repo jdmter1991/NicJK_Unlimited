@@ -92,6 +92,10 @@ qboolean BG_CrouchAnim( int anim )
 
 qboolean BG_InSpecialJump( int anim )
 {
+	if (JK2SABER())
+	{ // JK2 1.02: the JK2 list (bg_pmove_jk2.c)
+		return BG_InSpecialJump_JK2( anim );
+	}
 #ifdef _CGAME
 	if ( cgs.serverMod == SVMOD_JAPLUS )
 	{
@@ -3313,6 +3317,11 @@ void BG_SetAnim(playerState_t *ps, animation_t *animations, int setAnimParts,int
 
 void PM_SetAnim(int setAnimParts,int anim,int setAnimFlags)
 {
+	if (JK2SABER() && pm->ps->clientNum < MAX_CLIENTS)
+	{ // JK2 1.02: special jumps restart, a roll is never interrupted (bg_saber_jk2.c)
+		PM_SetAnim_JK2(setAnimParts, anim, setAnimFlags);
+		return;
+	}
 	BG_SetAnim(pm->ps, pm->animations, setAnimParts, anim, setAnimFlags);
 }
 

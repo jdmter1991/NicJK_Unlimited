@@ -58,6 +58,17 @@ extern void G_TestLine(vec3_t start, vec3_t end, int color, int time);
 pmove_t		*pm;
 pml_t		pml;
 
+// JK2 1.02 movement (bg_pmove_jk2.c, included at the end of this file); only used while JK2SABER() is on
+#define JK2PM() ( JK2SABER() && pm->ps->clientNum < MAX_CLIENTS )
+static void PM_Friction_JK2( void );
+static qboolean PM_CheckJump_JK2( void );
+static int PM_TryRoll_JK2( void );
+static void PM_CrashLand_JK2( void );
+static void PM_GroundTraceMissed_JK2( void );
+static void PmoveSingle_JK2( pmove_t *pmove );
+qboolean PM_AdjustAngleForWallRun_JK2( playerState_t *ps, usercmd_t *ucmd, qboolean doMove );
+void BG_AdjustClientSpeed_JK2( playerState_t *ps, usercmd_t *cmd, int svTime );
+
 bgEntity_t *pm_entSelf = NULL;
 bgEntity_t *pm_entVeh = NULL;
 
@@ -1169,7 +1180,7 @@ void PM_ClipVelocity( vec3_t in, vec3_t normal, vec3_t out, float overbounce ) {
 		change = normal[i]*backoff;
 		out[i] = in[i] - change;
 	}
-	if ( pm->stepSlideFix && pm->ps->stats[STAT_MOVEMENTSTYLE] != MV_TRIBES && pm->ps->stats[STAT_MOVEMENTSTYLE] != MV_SLICK)
+	if ( pm->stepSlideFix && !JK2PM() && pm->ps->stats[STAT_MOVEMENTSTYLE] != MV_TRIBES && pm->ps->stats[STAT_MOVEMENTSTYLE] != MV_SLICK)
 	{
 		if ( pm->ps->clientNum < MAX_CLIENTS//normal player
 			&& pm->ps->groundEntityNum != ENTITYNUM_NONE//on the ground
@@ -1189,6 +1200,7 @@ Handles both ground friction and water friction
 ==================
 */
 static void PM_Friction( void ) {
+	if ( JK2PM() ) { PM_Friction_JK2(); return; } // JK2 1.02 (bg_pmove_jk2.c)
 	vec3_t	vec;
 	float	*vel;
 	float	speed, newspeed, control, drop, realfriction = pm_friction;
@@ -1775,6 +1787,7 @@ void PM_SetPMViewAngle(playerState_t *ps, vec3_t angle, usercmd_t *ucmd)
 
 qboolean PM_AdjustAngleForWallRun( playerState_t *ps, usercmd_t *ucmd, qboolean doMove )
 {
+	if ( JK2SABER() && ps->clientNum < MAX_CLIENTS ) { return PM_AdjustAngleForWallRun_JK2( ps, ucmd, doMove ); } // JK2 1.02 (bg_pmove_jk2.c)
 	if (( (ps->legsAnim) == BOTH_WALL_RUN_RIGHT || (ps->legsAnim) == BOTH_WALL_RUN_LEFT ) && ps->legsTimer > 500 )
 	{//wall-running and not at end of anim
 		//stick to wall, if there is one
@@ -2221,7 +2234,7 @@ qboolean PM_AdjustAngleForWallJump( playerState_t *ps, usercmd_t *ucmd, qboolean
 void PM_SetForceJumpZStart(float value)
 {
 	pm->ps->fd.forceJumpZStart = value;
-	if (!pm->ps->fd.forceJumpZStart)
+	if (!pm->ps->fd.forceJumpZStart && !JK2PM()) // JK2 1.02 has no nudge (mv bg_pmove.c:722 is 1.04 only)
 	{
 		pm->ps->fd.forceJumpZStart -= 0.1f;
 	}
@@ -3355,6 +3368,7 @@ PM_CheckJump
 */
 static qboolean PM_CheckJump( void )
 {
+	if ( JK2PM() ) { return PM_CheckJump_JK2(); } // JK2 1.02 (bg_pmove_jk2.c)
 	qboolean allowFlips = qtrue;
 	bgEntity_t	*kickedEnt;//JAPRO - Serverside - Allow npcs to be flipkicked
 	int moveStyle;
@@ -4657,7 +4671,7 @@ static qboolean	PM_CheckWaterJump( void ) {
 
 	spot[2] += 16;
 	cont = pm->pointcontents (spot, pm->ps->clientNum );
-	if ( cont & (CONTENTS_SOLID|CONTENTS_PLAYERCLIP|CONTENTS_BODY) ) {
+	if ( JK2PM() ? (cont != 0) : (cont & (CONTENTS_SOLID|CONTENTS_PLAYERCLIP|CONTENTS_BODY)) ) { // JK2 1.02: any contents (mv bg_pmove.c:1411)
 		return qfalse;
 	}
 
@@ -6261,6 +6275,7 @@ static int PM_FootstepForSurface( void )
 extern qboolean PM_CanRollFromSoulCal( playerState_t *ps );
 static int PM_TryRoll( void )
 {
+	if ( JK2PM() ) { return PM_TryRoll_JK2(); } // JK2 1.02 (bg_pmove_jk2.c)
 	trace_t	trace;
 	int		anim = -1;
 	vec3_t fwd, right, traceto, mins, maxs, fwdAngles;
@@ -6441,6 +6456,7 @@ Check for hard landings that generate sound events
 =================
 */
 static void PM_CrashLand(void) {
+	if ( JK2PM() ) { PM_CrashLand_JK2(); return; } // JK2 1.02 (bg_pmove_jk2.c)
 	float		delta;
 	float		dist;
 	float		vel, acc;
@@ -6801,6 +6817,7 @@ The ground trace didn't hit a surface, so we are in freefall
 =============
 */
 static void PM_GroundTraceMissed( void ) {
+	if ( JK2PM() ) { PM_GroundTraceMissed_JK2(); return; } // JK2 1.02 (bg_pmove_jk2.c)
 	trace_t		trace;
 	vec3_t		point;
 
@@ -9419,9 +9436,9 @@ static qboolean PM_DoChargedWeapons( qboolean vehicleRocketLock, bgEntity_t *veh
 				pm->ps->zoomMode == 1 &&
 				pm->ps->zoomLocked)
 			{
-				if (!pm->cmd.forwardmove &&
+				if ((!pm->cmd.forwardmove &&
 					!pm->cmd.rightmove &&
-					pm->cmd.upmove <= 0)
+					pm->cmd.upmove <= 0) || JK2PM()) // JK2 1.02 charges while moving (mv bg_pmove.c:3065)
 				{
 					charging = qtrue;
 					altFire = qtrue;
@@ -9585,8 +9602,8 @@ int PM_ItemUsable(playerState_t *ps, int forcedUse)
 		return 0;
 	}
 
-	if (ps->duelInProgress)
-	{ //not allowed to use holdables while in a private duel.
+	if (ps->duelInProgress && !JK2SABER())
+	{ //not allowed to use holdables while in a private duel. (JK2 1.02 allows them, mv bg_pmove.c:3204 is 1.04 only)
 		return 0;
 	}
 
@@ -10314,7 +10331,7 @@ static void PM_Weapon( void )
 			pm->ps->legsTimer = pm->ps->torsoTimer = 1;
 		}
 		else if (pm->ps->forceHandExtend == HANDEXTEND_DODGE || pm->ps->forceHandExtend == HANDEXTEND_KNOCKDOWN ||
-			(pm->ps->forceHandExtend == HANDEXTEND_CHOKE && pm->ps->groundEntityNum == ENTITYNUM_NONE) )
+			(pm->ps->forceHandExtend == HANDEXTEND_CHOKE && pm->ps->groundEntityNum == ENTITYNUM_NONE && !JK2PM()) ) // no whole-body choke in the air in JK2 1.02 (mv bg_pmove.c:3487)
 		{ //special case, play dodge anim on whole body, choke anim too if off ground
 			if (seperateOnTorso)
 			{
@@ -10351,7 +10368,12 @@ static void PM_Weapon( void )
 			pm->ps->weapon = WP_SABER;
 		}
 		*/
-		if (pm->ps->weaponTime < pm->ps->legsTimer)
+		if (JK2PM())
+		{ // JK2 1.02 (mv bg_pmove.c:3507-3513): special jumps and rolls force the saber
+			pm->cmd.weapon = WP_SABER;
+			pm->ps->weapon = WP_SABER;
+		}
+		else if (pm->ps->weaponTime < pm->ps->legsTimer)
 		{
 			pm->ps->weaponTime = pm->ps->legsTimer;
 		}
@@ -10728,9 +10750,9 @@ if (pm->ps->duelInProgress)
 			return;
 		}
 
-		if (pm->cmd.forwardmove ||
+		if ((pm->cmd.forwardmove ||
 			pm->cmd.rightmove ||
-			pm->cmd.upmove > 0)
+			pm->cmd.upmove > 0) && !JK2PM()) // JK2 1.02 fires while zoomed and moving
 		{
 			return;
 		}
@@ -11336,8 +11358,15 @@ if (pm->ps->duelInProgress)
 #endif
 
 
+	if (JK2PM())
+	{ // JK2 1.02 (mv bg_pmove.c:3877-3884): rage fire rate on both sides, so the cgame predicts it
+		if (pm->ps->fd.forcePowersActive & (1 << FP_RAGE))
+			addTime *= 0.75;
+		else if (pm->ps->fd.forceRageRecoveryTime > pm->cmd.serverTime)
+			addTime *= 1.5;
+	}
 #if _GAME
-	if (!(g_tweakForce.integer & FT_NORAGEFIRERATE) || pm->ps->weapon == WP_MELEE || pm->ps->weapon == WP_SABER) {
+	else if (!(JK2O_TWEAKFORCE & FT_NORAGEFIRERATE) || pm->ps->weapon == WP_MELEE || pm->ps->weapon == WP_SABER) {
 		if (pm->ps->fd.forcePowersActive & (1 << FP_RAGE))
 			addTime *= 0.75;
 		else if (pm->ps->fd.forceRageRecoveryTime > pm->cmd.serverTime)
@@ -12077,6 +12106,7 @@ qboolean PM_SaberInTransition( int move );
 
 void BG_AdjustClientSpeed(playerState_t *ps, usercmd_t *cmd, int svTime)
 {
+	if ( JK2SABER() && ps->clientNum < MAX_CLIENTS ) { BG_AdjustClientSpeed_JK2( ps, cmd, svTime ); return; } // JK2 1.02 (bg_pmove_jk2.c)
 	saberInfo_t	*saber;
 	int fixroll = GetFixRoll(ps);
 
@@ -14172,6 +14202,7 @@ int BG_MB2ManualBlockQuad( int forwardmove, int rightmove ) {
 }
 
 void PmoveSingle (pmove_t *pmove) {
+	if ( JK2SABER() && pmove->ps->clientNum < MAX_CLIENTS ) { PmoveSingle_JK2( pmove ); return; } // JK2 1.02 (bg_pmove_jk2.c)
 	int mb2ManualQuad = -1;
 	qboolean stiffenedUp = qfalse;
 	float gDist = 0;
@@ -15990,3 +16021,5 @@ void Pmove (pmove_t *pmove) {
 	}
 }
 
+// JK2 1.02 movement (g_jk2_102sabersystem)
+#include "bg_pmove_jk2.c"

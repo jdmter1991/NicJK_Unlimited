@@ -120,6 +120,11 @@ qboolean BG_SaberInSpecialAttack_JK2( int anim );
 qboolean BG_SpinningSaberAnim_JK2( int anim );
 qboolean BG_FlippingAnim_JK2( int anim );
 qboolean PM_SaberInBrokenParry_JK2( int move );
+void PM_SetAnim_JK2( int setAnimParts, int anim, int setAnimFlags );
+
+// JK2 1.02 force, movement, weapons and match rules (bg_pmove_jk2.c, w_force_jk2.c, g_jk2.c)
+qboolean BG_InSpecialJump_JK2( int anim );
+void BG_JK2SetTables( qboolean on );
 
 void PM_SetForceJumpZStart(float value);
 
@@ -127,7 +132,9 @@ void BG_CycleInven(playerState_t *ps, int direction);
 
 // JK2 1.02 saber system (g_jk2_102sabersystem). Every 1.02 code path is gated by this.
 #ifdef _GAME
+#ifndef JK2SABER
 #define JK2SABER() ( g_jk2_102sabersystem.integer != 0 )
+#endif
 #else
 #define JK2SABER() ( cgs.jk2_102sabersystem != 0 )
 #endif

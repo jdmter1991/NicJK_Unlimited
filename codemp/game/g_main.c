@@ -248,6 +248,7 @@ void G_InitGame( int levelTime, int randomSeed, int restart ) {
 	trap->SetConfigstring(CS_LEGACY_FIXES, "0");
 
 	G_RegisterCvars();
+	BG_JK2SetTables( JK2SABER() ); // JK2 1.02 force costs and weapon rows (bg_pmove_jk2.c)
 
 	G_ProcessIPBans();
 
@@ -3565,6 +3566,8 @@ void G_RunFrame( int levelTime ) {
 
 	// map testing: every g_logPlayerPos milliseconds, the position of every live player (bots too), so that places
 	// where players end up below the drawn ground (holes in a map's collision) can be found from the log
+	BG_JK2SetTables( JK2SABER() ); // JK2 1.02 force costs and weapon rows follow g_jk2_102sabersystem
+
 	if ( g_logPlayerPos.integer > 0 ) {
 		static int lastPosLog = 0;
 		if ( levelTime - lastPosLog >= g_logPlayerPos.integer || levelTime < lastPosLog ) {
