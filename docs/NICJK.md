@@ -30,7 +30,7 @@ Measured uncapped on the earlier Korriban map: 94 to 159 frames per second at th
 
 ## Per-model animations
 
-`animremap.cfg` lets the same move play a different animation per player model (for example a Sith model's stance, taunt or kata), off unless `g_animRemap` / `cg_animRemap` is set. Gameplay timing stays the same unless a line asks for it. See [NICJK_ANIMREMAP.md](NICJK_ANIMREMAP.md).
+`per-model-anims-config.cfg` lets the same move play a different animation per player model (for example a Sith model's stance, taunt or kata), off unless `g_permodelanims` / `cg_permodelanims` is set. Gameplay timing stays the same unless a line asks for it. See [NICJK_ANIMREMAP.md](NICJK_ANIMREMAP.md).
 
 ## Bots
 

@@ -1646,10 +1646,10 @@ void Svcmd_ClanKick_f( void );
 void Svcmd_ClanCreate_f( void );
 void Svcmd_ClanDelete_f( void );
 
-// NicJK animremap.cfg (per-model animation remapping)
+// NicJK per-model-anims-config.cfg (per-model animation remapping)
 static void Svcmd_AnimRemapList_f( void ) {
-	if ( !g_animRemap.integer )
-		Com_Printf( "AnimRemap: g_animRemap is 0, remaps are not used on this server\n" );
+	if ( !g_permodelanims.integer )
+		Com_Printf( "AnimRemap: g_permodelanims is 0, remaps are not used on this server\n" );
 	BG_AnimRemap_List();
 	G_AnimRemap_ListClients();
 }

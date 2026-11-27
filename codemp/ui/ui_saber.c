@@ -68,6 +68,8 @@ static qhandle_t rgbSaberCore5Shader;
 static qhandle_t rgbSaberTrail5Shader;
 static qhandle_t blackSaberGlowShader;
 static qhandle_t blackSaberCoreShader;
+static qhandle_t redblackSaberGlowShader;	// NicJK saber color 12
+static qhandle_t redblackSaberCoreShader;
 static qhandle_t blackBlurShader;
 
 void UI_CacheSaberGlowGraphics( void )
@@ -110,6 +112,8 @@ void UI_CacheSaberGlowGraphics( void )
 	//Black
 	blackSaberGlowShader		= trap->R_RegisterShaderNoMip( "gfx/effects/sabers/blackglow" );
 	blackSaberCoreShader		= trap->R_RegisterShaderNoMip( "gfx/effects/sabers/blackcore" );
+	redblackSaberGlowShader		= trap->R_RegisterShaderNoMip( "gfx/effects/sabers/redblackglow" );
+	redblackSaberCoreShader		= trap->R_RegisterShaderNoMip( "gfx/effects/sabers/redblackcore" );
 	blackBlurShader				= trap->R_RegisterShaderNoMip( "gfx/effects/sabers/blacktrail" );
 }
 
@@ -308,6 +312,7 @@ static void UI_RGBForSaberColor( saber_colors_t color, vec3_t rgb, int bnum ) {
 		VectorSet( rgb, 0.9f, 0.2f, 1.0f );
 		break;
 	case SABER_BLACK:
+	case SABER_REDBLACK:
 		VectorSet( rgb, 1.0f, 1.0f, 1.0f );
 	default:
 	case SABER_RGB:
@@ -390,8 +395,9 @@ void UI_DoSaber( vec3_t origin, vec3_t dir, float length, float lengthMax, float
 			blade = rgbSaberCore5Shader;
 			break;
 		case SABER_BLACK:
-			glow = blackSaberGlowShader;
-			blade = blackSaberCoreShader;
+		case SABER_REDBLACK:
+			glow = (color == SABER_REDBLACK) ? redblackSaberGlowShader : blackSaberGlowShader;
+			blade = (color == SABER_REDBLACK) ? redblackSaberCoreShader : blackSaberCoreShader;
 			break;
 	}
 
@@ -466,7 +472,8 @@ void UI_DoSaber( vec3_t origin, vec3_t dir, float length, float lengthMax, float
 			sbak.customShader = rgbSaberCore5Shader;
 			break;
 		case SABER_BLACK:
-			sbak.customShader = blackSaberCoreShader;
+		case SABER_REDBLACK:
+			sbak.customShader = (color == SABER_REDBLACK) ? redblackSaberCoreShader : blackSaberCoreShader;
 			break;
 		}
 	}

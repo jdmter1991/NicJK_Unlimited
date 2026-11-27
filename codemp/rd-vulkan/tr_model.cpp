@@ -438,7 +438,7 @@ qboolean R_LoadMDXM_Server( model_t *mod, void *buffer, const char *mod_name, qb
 	}
 
 	// first up, go load in the animation file we need that has the skeletal animation info for this model
-	R_AnimRemapGLAOverride( mod_name, mdxm->animName, sizeof( mdxm->animName ) ); // NicJK animremap.cfg "skeleton" lines
+	R_AnimRemapGLAOverride( mod_name, mdxm->animName, sizeof( mdxm->animName ) ); // NicJK per-model-anims-config.cfg "skeleton" lines
 	mdxm->animIndex = RE_RegisterServerModel(va ("%s.gla",mdxm->animName));
 	if (!mdxm->animIndex)
 	{

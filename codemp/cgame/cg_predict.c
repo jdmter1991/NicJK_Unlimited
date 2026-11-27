@@ -1431,7 +1431,7 @@ void CG_PredictPlayerState( void ) {
 		}
 
 		cg_pmove.animations = bgAllAnims[pEnt->localAnimIndex].anims;
-		{ // NicJK animremap.cfg: only "timing" lines change pmove, and only when the server uses them
+		{ // NicJK per-model-anims-config.cfg: only "timing" lines change pmove, and only when the server uses them
 			animation_t *remapped = CG_AnimRemapPmove( cg.predictedPlayerState.clientNum, pEnt->localAnimIndex );
 			if ( remapped )
 				cg_pmove.animations = remapped;

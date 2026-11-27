@@ -1784,7 +1784,7 @@ void SetupGameGhoul2Model(gentity_t *ent, char *modelname, char *skinName)
 				trap->G2API_GetGLAName( ent->ghoul2, 0, GLAName);
 
 				if (!GLAName[0] || (!strstr(GLAName, "players/_humanoid/") && ent->s.number < MAX_CLIENTS && !G_PlayerHasCustomSkeleton(ent)
-					&& !(g_animRemap.integer && BG_AnimRemap_OwnSkeleton(GLAName)))) // NicJK: a model's own humanoid skeleton (animremap)
+					&& !(g_permodelanims.integer && BG_AnimRemap_OwnSkeleton(GLAName)))) // NicJK: a model's own humanoid skeleton (animremap)
 				{ //a bad model
 					trap->G2API_CleanGhoul2Models(&(ent->ghoul2));
 					ent->ghoul2 = NULL;
@@ -3489,7 +3489,7 @@ void G_BreakArm(gentity_t *ent, int arm)
 //Update the ghoul2 instance anims based on the playerstate values
 qboolean BG_SaberStanceAnim( int anim );
 qboolean PM_RunningAnim( int anim );
-// NicJK animremap.cfg: each client's "model/skin" as sent to the other clients
+// NicJK per-model-anims-config.cfg: each client's "model/skin" as sent to the other clients
 static char g_animRemapModel[MAX_CLIENTS][MAX_QPATH];
 
 void G_AnimRemap_SetClientModel(int clientNum, const char *modelSkin)
@@ -3500,7 +3500,7 @@ void G_AnimRemap_SetClientModel(int clientNum, const char *modelSkin)
 
 static qboolean G_AnimRemap_ClientModel(gentity_t *ent, char *model, char *skin, char *gla, int size)
 {
-	if (!g_animRemap.integer || !ent->client || ent->s.number >= MAX_CLIENTS || ent->localAnimIndex != 0)
+	if (!g_permodelanims.integer || !ent->client || ent->s.number >= MAX_CLIENTS || ent->localAnimIndex != 0)
 		return qfalse;
 	BG_AnimRemap_SplitModel(g_animRemapModel[ent->s.number], model, size, skin, size);
 	// the GLA of the server's own Ghoul2 instance: frames from a model's own GLA

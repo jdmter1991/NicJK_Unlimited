@@ -1851,7 +1851,7 @@ void BG_InitAnimsets(void)
 {
 	memset(&bgAllAnims, 0, sizeof(bgAllAnims));
 	BGPAFtextLoaded = qfalse;	// VVFIXME - The PC doesn't seem to need this, but why?
-	BG_AnimRemap_Reset(); // NicJK animremap.cfg is read again on next use
+	BG_AnimRemap_Reset(); // NicJK per-model-anims-config.cfg is read again on next use
 }
 
 //ALWAYS call on game/cgame shutdown

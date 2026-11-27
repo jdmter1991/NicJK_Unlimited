@@ -615,19 +615,35 @@ qboolean FS_CreatePath (char *OSPath) {
 	Q_strncpyz( path, OSPath, sizeof( path ) );
 	FS_ReplaceSeparators( path );
 
-	// Skip creation of the root directory as it will always be there
-	ofs = strchr( path, PATH_SEP );
-	if ( ofs ) {
-		ofs++;
+	// Skip the root, which is always there: a drive ("C:"), a leading
+	// separator, or a network share ("\\server\share"). A relative path
+	// (fs_homepath "folder\sub") has no root, so its first folder is created
+	// too; skipping it made every write fail and the error handler, writing
+	// the log through here, then failed again (recursive error).
+	ofs = path;
+	if ( ofs[0] == PATH_SEP && ofs[1] == PATH_SEP ) {
+		int seps = 0;
+		for ( ofs += 2; *ofs && seps < 2; ofs++ ) {
+			if ( *ofs == PATH_SEP )
+				seps++;
+		}
+		if ( seps < 2 )
+			return qfalse; // nothing below the share to create
+	} else {
+		if ( ofs[0] && ofs[1] == ':' )
+			ofs += 2;
+		while ( *ofs == PATH_SEP )
+			ofs++;
 	}
 
-	for (; ofs != NULL && *ofs ; ofs++) {
+	for (; *ofs ; ofs++) {
 		if (*ofs == PATH_SEP) {
 			// create the directory
 			*ofs = 0;
 			if (!Sys_Mkdir (path)) {
-				Com_Error( ERR_FATAL, "FS_CreatePath: failed to create path \"%s\"",
-					path );
+				// not fatal: the caller gets no file, as for a refused path
+				Com_Printf( S_COLOR_YELLOW "WARNING: FS_CreatePath: failed to create path \"%s\"\n", path );
+				return qtrue;
 			}
 			*ofs = PATH_SEP;
 		}
