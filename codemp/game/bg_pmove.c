@@ -14158,6 +14158,33 @@ void PmoveSingle (pmove_t *pmove) {
 
 	pm = pmove;
 
+	// MB2-style manual block (g_mb2manualblock): alt attack held with a lit saber is the guard.
+	// While guarding there is no saber throw, kick or kata from alt attack, and no running.
+	// Alt attack together with use is the saber throw. userInt3 carries the guard to everyone.
+	if ( MB2BLOCK() && pm->ps->weapon == WP_SABER && pm->ps->clientNum < MAX_CLIENTS )
+	{
+		const qboolean guard = ( (pm->cmd.buttons & BUTTON_ALT_ATTACK) && !(pm->cmd.buttons & BUTTON_USE)
+			&& !pm->ps->saberInFlight && !BG_SabersOff( pm->ps ) && pm->ps->stats[STAT_HEALTH] > 0 ) ? qtrue : qfalse;
+
+		pm->ps->userInt3 = guard ? 1 : 0;
+		if ( guard )
+		{
+			pm->cmd.buttons &= ~BUTTON_ALT_ATTACK;
+			if ( pm->cmd.forwardmove > 64 ) pm->cmd.forwardmove = 64;
+			if ( pm->cmd.forwardmove < -64 ) pm->cmd.forwardmove = -64;
+			if ( pm->cmd.rightmove > 64 ) pm->cmd.rightmove = 64;
+			if ( pm->cmd.rightmove < -64 ) pm->cmd.rightmove = -64;
+		}
+		else if ( (pm->cmd.buttons & BUTTON_ALT_ATTACK) && (pm->cmd.buttons & BUTTON_USE) )
+		{
+			pm->cmd.buttons &= ~BUTTON_USE;	// the throw, not a use
+		}
+	}
+	else if ( MB2BLOCK() )
+	{
+		pm->ps->userInt3 = 0;
+	}
+
 #ifdef _CGAME
 	if (cgs.serverMod != SVMOD_JAPLUS || pm->ps->weapon != WP_MELEE) {
 #endif

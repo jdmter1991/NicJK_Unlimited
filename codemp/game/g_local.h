@@ -1097,6 +1097,8 @@ struct gclient_s {
 
 	int			cloakToggleTime;
 	int			cloakDebRecharge;
+	float		mb2bp;				// MB2-style block points (g_mb2manualblock), 0..100
+	int			mb2bpNextRegen;
 	int			cloakDebReduce;
 
 	int			saberStoredIndex; //stores saberEntityNum from playerstate for when it's set to 0 (indicating saber was knocked out of the air)
