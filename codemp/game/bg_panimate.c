@@ -2870,7 +2870,7 @@ void BG_SaberStartTransAnim( int clientNum, int saberAnimLevel, int weapon, int 
 			((anim) >= BOTH_T3_BR__R && (anim) <= BOTH_T3_BL_TL))
 		{
 			if (saberAnimLevel == SS_FAST || saberAnimLevel == SS_STRONG) {
-				animSpeed = 0;
+				*animSpeed = 1.0f;	// transitions at normal speed (this used to clear the local pointer, which did the same by accident)
 				return;
 			}
 		}
