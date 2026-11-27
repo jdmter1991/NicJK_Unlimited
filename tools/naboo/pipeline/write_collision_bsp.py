@@ -670,6 +670,21 @@ if not ent_text:
     ent_text = '{\n"classname" "worldspawn"\n}\n'
 ent_lump = ent_text.encode("ascii") + b"\0"
 
+# ---- planes stored once: bit-identical planes (normal and distance as float32) share one entry; brush sides and
+# nodes are remapped. Collision is unchanged, the file and the memory for planes shrink.
+if bool(cfg.get("bsp_writer", {}).get("dedup_planes", True)):
+    _pl = np.ascontiguousarray(plane_lump.astype("<f4"))
+    _v = _pl.view(np.dtype((np.void, 16))).ravel()
+    _u, _first, _inv = np.unique(_v, return_index=True, return_inverse=True)
+    _order = np.argsort(_first)                       # keep the first-seen order
+    _rank = np.empty(len(_order), np.int64); _rank[_order] = np.arange(len(_order))
+    _remap = _rank[_inv.ravel()].astype(np.int32)
+    n_before = len(_pl)
+    plane_lump = _pl[np.sort(_first)]
+    side_lump["plane"] = _remap[side_lump["plane"]]
+    node_lump["plane"] = _remap[node_lump["plane"]]
+    print("planes stored once: %d -> %d" % (n_before, len(plane_lump)))
+
 # ---- write
 lumps = [ent_lump, shader_lump.tobytes(), plane_lump.astype("<f4").tobytes(), node_lump.tobytes(), leaf_lump.tobytes(), leafsurf_lump.tobytes(),
          leafbrush_lump.tobytes(), model_lump.tobytes(), brush_lump.tobytes(), side_lump.tobytes(), dv.tobytes(), index_lump.tobytes(),
