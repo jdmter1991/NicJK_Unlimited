@@ -1934,7 +1934,7 @@ void ClientEvents( gentity_t *ent, int oldEventSequence ) {
 					break;
 				}
 
-				if (BG_InKnockDownOnly(ent->client->ps.legsAnim))
+				if (BG_InKnockDownOnly(ent->client->ps.legsAnim) && !JK2SABER()) // JK2 1.02 has no knockdown branch (mv g_active.c:754-783)
 				{
 					if (delta <= 14)
 					{
@@ -1957,7 +1957,7 @@ void ClientEvents( gentity_t *ent, int oldEventSequence ) {
 					else damage = delta*1; 
 				}
 				else {
-					if (level.gametype == GT_SIEGE && delta > 60)
+					if (level.gametype == GT_SIEGE && delta > 60 && !JK2SABER())
 						damage = delta*1; //good enough for now, I guess
 					else {
 						if (JK2O_MAXFALLDMG && delta * 0.16 >= JK2O_MAXFALLDMG)
@@ -3791,6 +3791,14 @@ void ClientThink_real( gentity_t *ent ) {
 		msec = 200;
 	}
 
+	if ( JK2SABER() && pmove_msec.integer < 8 ) { // JK2 1.02: 8..33 (mv g_active.c:1042-1047)
+		trap->Cvar_Set("pmove_msec", "8");
+		trap->Cvar_Update(&pmove_msec);
+	}
+	else if ( JK2SABER() && pmove_msec.integer > 33 ) {
+		trap->Cvar_Set("pmove_msec", "33");
+		trap->Cvar_Update(&pmove_msec);
+	}
 	if ( pmove_msec.integer <= 1 ) {
 		trap->Cvar_Set("pmove_msec", "1");
 	}
@@ -3829,6 +3837,10 @@ void ClientThink_real( gentity_t *ent ) {
 		client->sess.movementStyle = g_movementStyle.integer;
 	}
 	client->ps.stats[STAT_MOVEMENTSTYLE] = client->sess.movementStyle;
+	if (JK2SABER() && !client->sess.raceMode)
+	{ // JK2 1.02 mode: base movement only
+		client->ps.stats[STAT_MOVEMENTSTYLE] = MV_JKA;
+	}
 
 	if ((g_neutralFlag.integer < 4) && client->ps.powerups[PW_NEUTRALFLAG]) {
 		if (client->ps.fd.forcePowerLevel[FP_LEVITATION] > 1) {
@@ -4534,8 +4546,16 @@ void ClientThink_real( gentity_t *ent ) {
 						if (!(ent->client->sess.accountFlags & JAPRO_ACCOUNTFLAG_NODUEL) && !(duelAgainst->client->sess.accountFlags & JAPRO_ACCOUNTFLAG_NODUEL))
 							G_AddDuel(ent->client->pers.lastUserName, duelAgainst->client->pers.lastUserName, ent->client->pers.duelStartTime, dueltypes[ent->client->ps.clientNum], ent->client->ps.stats[STAT_HEALTH], ent->client->ps.stats[STAT_ARMOR]);
 					}
+					if (JK2SABER())
+					{ // JK2 1.02: health raised to max only if below it, armor untouched (mv g_active.c:1183-1188)
+						if (ent->health < ent->client->ps.stats[STAT_MAX_HEALTH])
+							ent->client->ps.stats[STAT_HEALTH] = ent->health = ent->client->ps.stats[STAT_MAX_HEALTH];
+					}
+					else
+					{
 					ent->client->ps.stats[STAT_HEALTH] = ent->health = ent->client->ps.stats[STAT_MAX_HEALTH];
 					ent->client->ps.stats[STAT_ARMOR] = 25;//JAPRO
+					}
 					if (g_showHealth.integer) {
 						G_ScaleNetHealth(ent);
 					}
@@ -4567,7 +4587,7 @@ void ClientThink_real( gentity_t *ent ) {
 //[JAPRO - Serverside - Duel - Improve/fix duel end print - End]
 			G_GunDuelEndWeapon(ent);
 		}
-		else if (!ent->client->sess.raceMode && g_duelDistanceLimit.integer)
+		else if (!ent->client->sess.raceMode && (g_duelDistanceLimit.integer || JK2SABER())) // JK2 1.02 always breaks a duel at 1024
 		{
 			vec3_t vSub;
 			float subLen = 0;
@@ -5641,7 +5661,52 @@ void ClientThink_real( gentity_t *ent ) {
 //	G_VehicleAttachDroidUnit( ent );
 
 		// Did we kick someone in our pmove sequence?
-	if (client->ps.forceKickFlip && !client->sess.raceMode)//Saber)
+	if (JK2SABER() && client->ps.forceKickFlip && !client->sess.raceMode)
+	{ // JK2 1.02 kick-flip (mv g_active.c:1599-1645): damage speed*0.05, 30% knockdown for 1100 ms, push x40 and z 200
+		gentity_t *faceKicked = &g_entities[client->ps.forceKickFlip-1];
+
+		if (faceKicked && faceKicked->client && (!OnSameTeam(ent, faceKicked) || g_friendlyFire.integer) &&
+			(!faceKicked->client->ps.duelInProgress || faceKicked->client->ps.duelIndex == ent->s.number) &&
+			(!ent->client->ps.duelInProgress || ent->client->ps.duelIndex == faceKicked->s.number))
+		{
+			if ( faceKicked && faceKicked->client && faceKicked->health && faceKicked->takedamage )
+			{//push them away and do pain
+				vec3_t oppDir;
+				int strength = (int)VectorNormalize2( client->ps.velocity, oppDir );
+
+				strength *= 0.05;
+
+				VectorScale( oppDir, -1, oppDir );
+
+				G_Damage( faceKicked, ent, ent, oppDir, client->ps.origin, strength, DAMAGE_NO_ARMOR, MOD_MELEE );
+
+				if (faceKicked->health > 0 &&
+					faceKicked->client->ps.stats[STAT_HEALTH] > 0 &&
+					faceKicked->client->ps.forceHandExtend != HANDEXTEND_KNOCKDOWN)
+				{
+					if (Q_irand(1, 10) <= 3)
+					{ //only actually knock over sometimes, but always do velocity hit
+						faceKicked->client->ps.forceHandExtend = HANDEXTEND_KNOCKDOWN;
+						faceKicked->client->ps.forceHandExtendTime = level.time + 1100;
+						faceKicked->client->ps.forceDodgeAnim = 0; //this toggles between 1 and 0, when it's 1 we should play the get up anim
+					}
+
+					faceKicked->client->ps.otherKiller = ent->s.number;
+					faceKicked->client->ps.otherKillerTime = level.time + 5000;
+					faceKicked->client->ps.otherKillerDebounceTime = level.time + 100;
+
+					faceKicked->client->ps.velocity[0] = oppDir[0]*(strength*40);
+					faceKicked->client->ps.velocity[1] = oppDir[1]*(strength*40);
+					faceKicked->client->ps.velocity[2] = 200;
+				}
+
+				G_Sound( faceKicked, CHAN_AUTO, G_SoundIndex( va("sound/weapons/melee/punch%d", Q_irand(1, 4)) ) );
+			}
+		}
+
+		client->ps.forceKickFlip = 0;
+	}
+	else if (client->ps.forceKickFlip && !client->sess.raceMode)//Saber)
 	{
 		gentity_t *faceKicked = &g_entities[client->ps.forceKickFlip-1];
 

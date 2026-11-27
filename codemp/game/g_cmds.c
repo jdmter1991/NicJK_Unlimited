@@ -3820,7 +3820,7 @@ void saberKnockDown(gentity_t *saberent, gentity_t *saberOwner, gentity_t *other
 void Cmd_ToggleSaber_f(gentity_t *ent)
 {
 //[JAPRO - Serverside - Force - Fix Saber in grip - Start]
-	if (g_fixSaberInGrip.integer < 3 && ent->client->ps.fd.forceGripCripple)
+	if (g_fixSaberInGrip.integer < 3 && ent->client->ps.fd.forceGripCripple && !JK2SABER()) // JK2 1.02 has no grip rule here
 	{ //if they are being gripped, don't let them unholster their saber
 		if (ent->client->ps.saberHolstered)
 		{
@@ -4143,7 +4143,7 @@ void Cmd_SaberAttackCycle_f(gentity_t* ent) // Niksata Edit
 	}
 } // Niksata Edit
 
-#if 0
+// used by the JK2 1.02 mode (one private duel at a time on the server)
 qboolean G_OtherPlayersDueling(void)
 {
 	int i = 0;
@@ -4162,7 +4162,143 @@ qboolean G_OtherPlayersDueling(void)
 
 	return qfalse;
 }
-#endif
+
+// JK2 1.02 /engage_duel (mv g_cmds.c:Cmd_EngageDuel_f): not in duel or team gametypes, saber only,
+// one private duel at a time on the server, 10 s wait after a duel, 5 s to accept, sabers holstered
+// for the 2 s countdown. dueltypes[] is set to 0 (saber duel) for the rest of our duel code.
+static void Cmd_EngageDuel_JK2(gentity_t *ent)
+{
+	trace_t tr;
+	vec3_t forward, fwdOrg;
+
+	if (!g_privateDuel.integer)
+	{
+		return;
+	}
+
+	if (level.gametype == GT_DUEL || level.gametype == GT_POWERDUEL || level.gametype == GT_SIEGE)
+	{ //rather pointless in this mode..
+		trap->SendServerCommand( ent-g_entities, va("print \"%s\n\"", G_GetStringEdString("MP_SVGAME", "NODUEL_GAMETYPE")) );
+		return;
+	}
+
+	if (level.gametype >= GT_TEAM)
+	{ //no private dueling in team modes
+		trap->SendServerCommand( ent-g_entities, va("print \"%s\n\"", G_GetStringEdString("MP_SVGAME", "NODUEL_GAMETYPE")) );
+		return;
+	}
+
+	if (ent->client->ps.duelTime >= level.time)
+	{
+		return;
+	}
+
+	if (ent->client->ps.weapon != WP_SABER)
+	{
+		return;
+	}
+
+	if (ent->client->ps.saberInFlight)
+	{
+		return;
+	}
+
+	if (ent->client->ps.duelInProgress)
+	{
+		return;
+	}
+
+	//New: Don't let a player duel if he just did and hasn't waited 10 seconds yet (note: If someone challenges him, his duel timer will reset so he can accept)
+	if (ent->client->ps.fd.privateDuelTime > level.time)
+	{
+		trap->SendServerCommand( ent-g_entities, va("print \"%s\n\"", G_GetStringEdString("MP_SVGAME", "CANTDUEL_JUSTDID")) );
+		return;
+	}
+
+	if (G_OtherPlayersDueling())
+	{
+		trap->SendServerCommand( ent-g_entities, va("print \"%s\n\"", G_GetStringEdString("MP_SVGAME", "CANTDUEL_BUSY")) );
+		return;
+	}
+
+	AngleVectors( ent->client->ps.viewangles, forward, NULL, NULL );
+
+	fwdOrg[0] = ent->client->ps.origin[0] + forward[0]*256;
+	fwdOrg[1] = ent->client->ps.origin[1] + forward[1]*256;
+	fwdOrg[2] = (ent->client->ps.origin[2]+ent->client->ps.viewheight) + forward[2]*256;
+
+	trap->Trace(&tr, ent->client->ps.origin, NULL, NULL, fwdOrg, ent->s.number, MASK_PLAYERSOLID, qfalse, 0, 0);
+
+	if (tr.fraction != 1 && tr.entityNum < MAX_CLIENTS)
+	{
+		gentity_t *challenged = &g_entities[tr.entityNum];
+
+		if (!challenged || !challenged->client || !challenged->inuse ||
+			challenged->health < 1 || challenged->client->ps.stats[STAT_HEALTH] < 1 ||
+			challenged->client->ps.weapon != WP_SABER || challenged->client->ps.duelInProgress ||
+			challenged->client->ps.saberInFlight)
+		{
+			return;
+		}
+
+		if (level.gametype >= GT_TEAM && OnSameTeam(ent, challenged))
+		{
+			return;
+		}
+
+		if (challenged->client->ps.duelIndex == ent->s.number && challenged->client->ps.duelTime >= level.time)
+		{
+			trap->SendServerCommand( -1, va("print \"%s" S_COLOR_WHITE " %s %s" S_COLOR_WHITE "!\n\"", challenged->client->pers.netname, G_GetStringEdString("MP_SVGAME", "PLDUELACCEPT"), ent->client->pers.netname) );
+
+			ent->client->ps.duelInProgress = qtrue;
+			challenged->client->ps.duelInProgress = qtrue;
+			dueltypes[ent->client->ps.clientNum] = 0;
+			dueltypes[challenged->client->ps.clientNum] = 0;
+
+			ent->client->ps.duelTime = level.time + 2000;
+			challenged->client->ps.duelTime = level.time + 2000;
+
+			G_AddEvent(ent, EV_PRIVATE_DUEL, 1);
+			G_AddEvent(challenged, EV_PRIVATE_DUEL, 1);
+
+			//Holster their sabers now, until the duel starts (then they'll get auto-turned on to look cool)
+
+			if (!ent->client->ps.saberHolstered)
+			{
+				if (ent->client->saber[0].soundOff)
+				{
+					G_Sound(ent, CHAN_AUTO, ent->client->saber[0].soundOff);
+				}
+				ent->client->ps.weaponTime = 400;
+				ent->client->ps.saberHolstered = 2;
+			}
+			if (!challenged->client->ps.saberHolstered)
+			{
+				if (challenged->client->saber[0].soundOff)
+				{
+					G_Sound(challenged, CHAN_AUTO, challenged->client->saber[0].soundOff);
+				}
+				challenged->client->ps.weaponTime = 400;
+				challenged->client->ps.saberHolstered = 2;
+			}
+		}
+		else
+		{
+			//Print the message that a player has been challenged in private, only announce the actual duel initiation in private
+			trap->SendServerCommand( challenged-g_entities, va("cp \"%s" S_COLOR_WHITE " %s\n\"", ent->client->pers.netname, G_GetStringEdString("MP_SVGAME", "PLDUELCHALLENGE")) );
+			trap->SendServerCommand( ent-g_entities, va("cp \"%s %s\n\"", G_GetStringEdString("MP_SVGAME", "PLDUELCHALLENGED"), challenged->client->pers.netname) );
+		}
+
+		challenged->client->ps.fd.privateDuelTime = 0; //reset the timer in case this player just got out of a duel. He should still be able to accept the challenge.
+
+		ent->client->ps.forceHandExtend = HANDEXTEND_DUELCHALLENGE;
+		ent->client->ps.forceHandExtendTime = level.time + 1000;
+
+		ent->client->ps.duelIndex = challenged->s.number;
+		ent->client->ps.duelTime = level.time + 5000;
+		dueltypes[ent->client->ps.clientNum] = 0;
+	}
+}
 
 //JAPRO - Serverside - Fullforce Duels - Start
 void Cmd_ForceDuel_f(gentity_t *ent)
@@ -4252,6 +4388,15 @@ void Cmd_EngageDuel_f(gentity_t *ent, int dueltype)//JAPRO - Serverside - Fullfo
 {
 	trace_t tr;
 	vec3_t forward, fwdOrg;
+
+	if (JK2SABER())
+	{ // JK2 1.02 mode: only the plain saber duel, with the 1.02 rules
+		if (dueltype == 0)
+		{
+			Cmd_EngageDuel_JK2(ent);
+		}
+		return;
+	}
 
 	if (!g_privateDuel.integer)
 		return;
@@ -7712,7 +7857,7 @@ void Cmd_Race_f(gentity_t *ent)
 		return;
 	}
 
-	if (g_raceMode.integer < 2) {
+	if (g_raceMode.integer < 2 || JK2SABER()) { // no race mode in the JK2 1.02 mode
 		trap->SendServerCommand(ent-g_entities, "print \"^5This command is not allowed!\n\"");
 		ent->client->sess.raceMode = qfalse;
 		return;
@@ -8585,14 +8730,14 @@ void Cmd_ServerConfig_f(gentity_t *ent) //loda fixme fix indenting on this, make
 		if (JK2O_TWEAKFORCE & FT_NO_CROUCHATTACK_FP)
 			Q_strcat(buf, sizeof(buf), "   ^5Crouch special attacks do not cost forcepower\n");
 		if (level.gametype >= GT_TEAM) {
-			if (g_teamAbsorbScale.value != 1.0f)
-				Q_strcat(buf, sizeof(buf), va("   ^5Absorb team scale: ^2%.2f\n", g_teamAbsorbScale.value));
-			if (g_teamHealScale.value != 1.0f)
-				Q_strcat(buf, sizeof(buf), va("   ^5Team heal scale: ^2%.2f\n", g_teamHealScale.value));
-			if (g_teamEnergizeScale.value != 1.0f)
-				Q_strcat(buf, sizeof(buf), va("   ^5Team energize scale: ^2%.2f\n", g_teamEnergizeScale.value));
+			if (JK2O_TEAMABSORBSCALE != 1.0f)
+				Q_strcat(buf, sizeof(buf), va("   ^5Absorb team scale: ^2%.2f\n", JK2O_TEAMABSORBSCALE));
+			if (JK2O_TEAMHEALSCALE != 1.0f)
+				Q_strcat(buf, sizeof(buf), va("   ^5Team heal scale: ^2%.2f\n", JK2O_TEAMHEALSCALE));
+			if (JK2O_TEAMENERGIZESCALE != 1.0f)
+				Q_strcat(buf, sizeof(buf), va("   ^5Team energize scale: ^2%.2f\n", JK2O_TEAMENERGIZESCALE));
 		}
-		if (g_tweakForce.integer & FT_NERFED_WEAPPULL)
+		if (JK2O_TWEAKFORCE & FT_NERFED_WEAPPULL)
 			Q_strcat(buf, sizeof(buf), "   ^5Nerfed weapon pull distance\n");
 		if (JK2O_TWEAKFORCE & FT_WEAPON_PULLRESIST)
 			Q_strcat(buf, sizeof(buf), "   ^5Pull resistance when shooting/charging weapons\n");
