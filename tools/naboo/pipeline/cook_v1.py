@@ -881,6 +881,22 @@ if WATER is not None and float(cfg.get("water_gap_m", 16.0)) > 0:
                                "source_cells": int(mask0.sum())}
 
 
+_cw = os.path.join(dump, "extras", "canal_water.npz")
+if WATER is not None and cfg.get("canal_water", False) and os.path.exists(_cw):
+    # the source's dry canal stretches that join two pieces of its water, at the water's height (tools/canal_water.py):
+    # canals and river as one flowing body; the terrain is not changed
+    cw_ = np.load(_cw)
+    if cw_["add"].shape == WATER[0].shape and float(cw_["cell"]) == WATER[3]:
+        addm = cw_["add"].astype(bool); hgt = cw_["height"].astype(np.float64)
+        WATER[0][addm] = hgt[addm]
+        if WATER_FILL is None:
+            WATER_FILL = (addm.copy(), np.where(addm, hgt, 0.0))
+        else:
+            WATER_FILL = (WATER_FILL[0] | addm, np.where(addm, hgt, WATER_FILL[1]))
+        carve_stats.setdefault("gap_fill", {})["canal_cells"] = int(addm.sum())
+        carve_stats["gap_fill"]["canal_area_m2"] = float(addm.sum() * WATER[3] ** 2)
+
+
 def close_water_gaps(wr_, rcells):
     """morphological closing of the water raster, carrying the surface height: returns (new cells, heights)"""
     mask0 = ~np.isnan(wr_)
