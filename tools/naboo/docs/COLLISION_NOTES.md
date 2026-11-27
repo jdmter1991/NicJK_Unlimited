@@ -259,3 +259,26 @@ and forth with nobody near. Causes and fixes:
 | bot thinking on a route | 78 % | 84 % | 93 % | 91 % |
 
 Beta 4 pk3s (`naboo\release\beta4`) installed in the Steam install (beta 3 kept in `backups\steam_naboo_beta3`).
+
+## Lamps (2026-11-27): every glowing fixture lights its surroundings, at any distance
+
+Before: the cooked world lit itself with the four lamps nearest the camera, so lamps seemed to switch on as the player
+came near, and the palace candles glowed without lighting anything. Of 373 lights most were palace candles; glowing
+fixtures without a light of their own in the source lit nothing.
+
+Now (`tools/glow_lights.py`, `tools/bake_lamp_occlusion.py`, renderer `R_LoadTWorldLampOcclusion`):
+* 836 lights: the source's 373, plus one for every glowing fixture of the cooked world and every emissive part of the
+  source (`list_emissive_parts.py`: 198 street lamp posts and others) that has none, merged within 64 units, at 0.4 of
+  the source lights' strength. Bulb strings in trees and between poles get no light (user: "trees should not glow,
+  only the lightbulbs, candles, chandelier etc").
+* each light has a 64 x 64 octahedral occlusion map baked against the collision (rays start 24 units out), stored with
+  the light parameters in rows below the sun map in `<map>_shadow.dds`; `<map>.tlampocc` describes the layout.
+* each placement lists the (up to 8) lights that reach it; the shader adds their diffuse light with a soft occlusion test
+  and a cap for many overlapping lights. Visible geometry unchanged.
+* not yet: the lamp posts' heads do not glow (their emissive material is not a glowing material in the cook).
+
+Cost, 31 bots at 1080p, the renderer's recorder, before (renderer before the lamp work, 373 source lights, nearest
+four) and after back to back (`naboo\export\city\bench\client_lamps_*3.qconsole.log`): whole pass 157 / 155 fps
+before, 150 / 149 fps after. The first version (one texel read per value, no distance limit) cost 172 / 156 ->
+117 / 129; lamp data is now read as 2 x 2 blocks with one gather each, and lamp light is drawn up to
+`r_tworldLampDistance` (4000 units, about 100 m) from the camera, fading over its last quarter.

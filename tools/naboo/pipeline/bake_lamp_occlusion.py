@@ -5,11 +5,11 @@ Reads  <game>/maps/<mapname>.tlights            lamps: position, radius, colour 
                                                 <mapname>_shadow_sun.dds and is the input of every later run
        <export>/collision/collision_tris.npy    collision triangles (plus skirts.npy), the occluders
 Writes <game>/maps/<mapname>_shadow.dds         the sun map with rows appended below it:
-         rows S .. (S = sun map height): lamp parameters, 8 texels per lamp, row after row: x + 32768, y + 32768, z + 32768 (units),
+         rows S .. (S = sun map height): lamp parameters, two 2 x 2 blocks per lamp (W / 4 lamps per two rows): x + 32768, y + 32768, z + 32768 (units),
                                      radius (units), r, g, b times 16384, unused
          then: one tile x tile octahedral depth map per lamp, packed left to right, top to bottom:
                                      distance to the first occluder along that direction / radius (65535 = free)
-       <game>/maps/<mapname>.tlampocc           "TLOC", version 2, lamps, tile, sun height, parameter row, first tile
+       <game>/maps/<mapname>.tlampocc           "TLOC", version 3, lamps, tile, sun height, parameter row, first tile
                                                 row, tiles per row (8 x uint32)
 Rays start `near` units from the lamp so its own housing does not block it. The renderer (tr_tworld.cpp) lights every
 placement with the lamps whose radius reaches it, tested against these maps; without the file it keeps the four
@@ -56,16 +56,19 @@ DIR /= np.linalg.norm(DIR, axis=1, keepdims=True)
 
 tiles_per_row = W // TILE
 tile_rows = (n + tiles_per_row - 1) // tiles_per_row
-param_rows = (n * 8 + W - 1) // W
+LPR = W // 4                                   # lamps per pair of parameter rows (4 texels wide, 2 high each)
+param_rows = 2 * ((n + LPR - 1) // LPR)
 extra = param_rows + tile_rows * TILE
 img = np.full((extra, W), 65535, np.uint16)
 blocked_share = []
 for li in range(n):
     p = LAMPS[li, :3]; r = LAMPS[li, 3]
-    vals = [p[0] + 32768, p[1] + 32768, p[2] + 32768, r, LAMPS[li, 4] * 16384, LAMPS[li, 5] * 16384, LAMPS[li, 6] * 16384, 0]
-    for k_, v_ in enumerate(vals):
-        q_ = li * 8 + k_
-        img[q_ // W, q_ % W] = int(np.clip(round(v_), 0, 65535))
+    # two 2 x 2 blocks per lamp, so the shader reads each with one gather: [x y / z radius] and [r g / b 0]
+    pr, pc = 2 * (li // LPR), 4 * (li % LPR)
+    blk = [(0, 0, p[0] + 32768), (0, 1, p[1] + 32768), (1, 0, p[2] + 32768), (1, 1, r),
+           (0, 2, LAMPS[li, 4] * 16384), (0, 3, LAMPS[li, 5] * 16384), (1, 2, LAMPS[li, 6] * 16384), (1, 3, 0)]
+    for dr_, dc_, v_ in blk:
+        img[pr + dr_, pc + dc_] = int(np.clip(round(v_), 0, 65535))
     sel = np.flatnonzero((tmx[:, 0] >= p[0] - r) & (tmn[:, 0] <= p[0] + r) & (tmx[:, 1] >= p[1] - r) & (tmn[:, 1] <= p[1] + r)
                         & (tmx[:, 2] >= p[2] - r) & (tmn[:, 2] <= p[2] + r))
     best = np.full(len(DIR), r)
@@ -96,7 +99,7 @@ hdr += struct.pack("<IIIII", 56, 3, 0, 1, 0)
 with open(cur_p, "wb") as f:
     f.write(hdr); f.write(sunmap); f.write(img.astype("<u2").tobytes())
 with open(os.path.join(md, mapname + ".tlampocc"), "wb") as f:
-    f.write(struct.pack("<4s7I", b"TLOC", 2, n, TILE, H, H, H + param_rows, tiles_per_row))
+    f.write(struct.pack("<4s7I", b"TLOC", 3, n, TILE, H, H, H + param_rows, tiles_per_row))
 rep = {"lamps": n, "tile": TILE, "sun_height": H, "width": W, "rows_added": extra, "mean_blocked_share": round(float(np.mean(blocked_share)), 3),
        "seconds": round(time.time() - t0, 1)}
 json.dump(rep, open(os.path.join(md, mapname + "_lampocc.json"), "w"), indent=1)

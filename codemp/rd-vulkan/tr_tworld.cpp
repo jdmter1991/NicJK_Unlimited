@@ -238,6 +238,7 @@ static cvar_t	*r_tworldFoliageLight;
 static cvar_t	*r_tworldHaze;
 static cvar_t	*r_tworldLamps;
 static cvar_t	*r_tworldLampDebug;
+static cvar_t	*r_tworldLampDistance;
 static cvar_t	*r_tworldIndoor;
 static cvar_t	*r_tworldAO;
 static cvar_t	*r_tworldPortal;
@@ -472,8 +473,8 @@ static void R_LoadTWorldLampOcclusion( tworld_t *tw, const char *bspName )
 	len = ri.FS_ReadFile( name, (void **)&buf );
 	if ( !buf )
 		return;
-	if ( len != 32 || memcmp( buf, "TLOC", 4 ) || buf[1] != 2 || (int)buf[2] != tw->numLights || buf[3] != 64 || buf[2] > 4095
-		|| buf[5] != buf[4] || (int)buf[6] != (int)buf[4] + ( (int)buf[2] * 8 + tw->shadowImage->width - 1 ) / tw->shadowImage->width
+	if ( len != 32 || memcmp( buf, "TLOC", 4 ) || buf[1] != 3 || (int)buf[2] != tw->numLights || buf[3] != 64 || buf[2] > 4095
+		|| buf[5] != buf[4] || (int)buf[6] != (int)buf[4] + 2 * ( ( (int)buf[2] + tw->shadowImage->width / 4 - 1 ) / ( tw->shadowImage->width / 4 ) )
 		|| (int)buf[7] != tw->shadowImage->width / 64
 		|| tw->shadowImage->height < (int)( buf[6] + ( ( buf[2] + buf[7] - 1 ) / buf[7] ) * 64 ) ) {
 		ri.Printf( PRINT_WARNING, "R_LoadTWorldLampOcclusion: %s does not match the lamps or the shadow texture\n", name );
@@ -643,6 +644,7 @@ void R_LoadTWorld( const char *bspName )
 	r_tworldAO = ri.Cvar_Get( "r_tworldAO", "0.6", CVAR_ARCHIVE_ND, "Cooked world: strength of the baked ambient occlusion of each mesh (0 = off)" );
 	r_tworldIndoor = ri.Cvar_Get( "r_tworldIndoor", "0.55", CVAR_ARCHIVE_ND, "Cooked world: share of the ambient light inside fully enclosed spaces (1 = no darkening)" );
 	r_tworldLamps = ri.Cvar_Get( "r_tworldLamps", "1", CVAR_ARCHIVE_ND, "Cooked world: brightness of the local lights (lamps), 0 = off" );
+	r_tworldLampDistance = ri.Cvar_Get( "r_tworldLampDistance", "4000", CVAR_ARCHIVE_ND, "Cooked world: lamp light is drawn up to this distance from the camera (world units), fading over the last quarter; 0 = no limit" );
 	r_tworldLampDebug = ri.Cvar_Get( "r_tworldLampDebug", "0", CVAR_TEMP, "Cooked world: lamp debug view, 1 = no occlusion test, 2 = placements with lamps in red" );
 	r_tworldInstancing = ri.Cvar_Get( "r_tworldInstancing", "1", CVAR_ARCHIVE_ND, "Cooked world: 1 = one instanced draw per mesh level and material, 0 = one draw per placement through the model path" );
 
@@ -1403,6 +1405,7 @@ static qboolean RB_TWorldInstanced( tworld_t *tw, const int pass )
 			f[17] = 1.0f;
 			f[18] = r_tworldLampDebug->value;
 			f[20] = (float)tw->lampTileRow;		// lightPos[1].x (lightPos[1].w stays 0)
+			f[21] = r_tworldLampDistance->value > 0.0f ? r_tworldLampDistance->value : 1e9f;		// lightPos[1].y
 		} else if ( tw->numLights && r_tworldLamps->value > 0.0f ) {
 			// the four lights nearest the camera (distance beyond their radius)
 			int best[5] = { -1, -1, -1, -1, -1 };

@@ -90,15 +90,25 @@ vec3 local_lights( vec3 n ) {
 // every lamp at any distance (maps/<name>.tlampocc): the lamps that reach this placement, read from the rows below
 // the sun map in the shadow texture (texture2): parameters from row S on, one 64 x 64 octahedral occlusion tile per lamp
 // from row lightPos[1].x on. A lamp lights the fragment when nothing nearer stood between them when the map was baked.
-float lamp_param( int idx, int k, int S ) {
-	int p = idx * 8 + k, w = textureSize( texture2, 0 ).x;
-	return texelFetch( texture2, ivec2( p % w, S + p / w ), 0 ).r * 65535.0;
+// lamp parameters: two 2 x 2 blocks per lamp from row S on, W / 4 lamps per two rows: [x y / z radius] and [r g / b 0];
+// one gather reads a block (gather order: x = (c, r+1), y = (c+1, r+1), z = (c+1, r), w = (c, r))
+vec4 lamp_block( int idx, int blk, int S, vec2 size ) {
+	int per = int( size.x ) / 4;
+	vec2 corner = vec2( float( ( idx % per ) * 4 + blk * 2 + 1 ), float( S + ( idx / per ) * 2 + 1 ) );
+	return textureGather( texture2, corner / size, 0 ) * 65535.0;
 }
 vec3 baked_lamps( vec3 n ) {
 	int S = int( u_entity.modelMatrix[3].w + 0.5 );
 	if ( u_tw.lightPos[0].y < 0.5 || S <= 0 )
 		return vec3( 0.0 );
-	int tilesPerRow = textureSize( texture2, 0 ).x / 64;
+	// only within r_tworldLampDistance of the camera, fading over its last quarter: the pools of distant lamps are a
+	// few pixels, the per-pixel lamp loop is the cost
+	float camFade = 1.0 - smoothstep( 0.75, 1.0, distance( frag_world, u_tw.eye.xyz ) / u_tw.lightPos[1].y );
+	if ( camFade <= 0.0 )
+		return vec3( 0.0 );
+	vec2 size = vec2( textureSize( texture2, 0 ) );
+	int tilesPerRow = int( size.x ) / 64;
+	int tileRow = int( u_tw.lightPos[1].x + 0.5 );
 	vec3 sum = vec3( 0.0 );
 	for ( int k = 0; k < 8; k++ ) {
 		float pv = frag_lamps[k >> 1];
@@ -106,44 +116,42 @@ vec3 baked_lamps( vec3 n ) {
 		if ( idx == 0 )
 			continue;
 		idx -= 1;
-		vec3 L = vec3( lamp_param( idx, 0, S ), lamp_param( idx, 1, S ), lamp_param( idx, 2, S ) ) - 32768.0;
-		float r = lamp_param( idx, 3, S );
+		vec4 pr = lamp_block( idx, 0, S, size );
+		vec3 L = vec3( pr.w, pr.z, pr.x ) - 32768.0;
+		float r = pr.y;
 		vec3 d = L - frag_world;
 		float dd = dot( d, d );
 		float q = dd / max( r * r, 1.0 );
 		if ( q >= 1.0 )
 			continue;
 		float dist = sqrt( dd );
-		// occlusion: octahedral direction from the lamp to the fragment, nearest texel of its tile
+		// occlusion: octahedral direction from the lamp to the fragment, the 2 x 2 texels around it in one gather, each a
+		// soft pass / fail, blended bilinearly: smooth edges instead of the map's texels
 		vec3 v = -d / max( dist, 1e-3 );
 		v /= ( abs( v.x ) + abs( v.y ) + abs( v.z ) );
 		vec2 o = v.xy;
 		if ( v.z < 0.0 )
 			o = ( 1.0 - abs( v.yx ) ) * vec2( v.x >= 0.0 ? 1.0 : -1.0, v.y >= 0.0 ? 1.0 : -1.0 );
-		// four texels around the direction, each a soft pass / fail, blended: smooth edges instead of the map's texels
-		vec2 tc = ( o * 0.5 + 0.5 ) * 64.0 - 0.5;
-		ivec2 t0 = ivec2( floor( tc ) );
-		vec2 fr = tc - vec2( t0 );
-		ivec2 base = ivec2( ( idx % tilesPerRow ) * 64, int( u_tw.lightPos[1].x + 0.5 ) + ( idx / tilesPerRow ) * 64 );
+		vec2 tc = clamp( ( o * 0.5 + 0.5 ) * 64.0 - 0.5, vec2( 0.0 ), vec2( 62.999 ) );
+		vec2 t0 = floor( tc );
+		vec2 fr = tc - t0;
+		vec2 base = vec2( float( ( idx % tilesPerRow ) * 64 ), float( tileRow + ( idx / tilesPerRow ) * 64 ) );
+		vec4 occ = textureGather( texture2, ( base + t0 + 1.0 ) / size, 0 ) * r;
 		float bias = 32.0 + 0.12 * dist;
-		float vis4[4];
-		for ( int j = 0; j < 4; j++ ) {
-			ivec2 tt = clamp( t0 + ivec2( j & 1, j >> 1 ), ivec2( 0 ), ivec2( 63 ) );
-			float occ = texelFetch( texture2, base + tt, 0 ).r * r;
-			vis4[j] = clamp( ( occ + bias - dist ) / bias + 0.5, 0.0, 1.0 );
-		}
-		float lampVis = mix( mix( vis4[0], vis4[1], fr.x ), mix( vis4[2], vis4[3], fr.x ), fr.y );
+		vec4 vis4 = clamp( ( occ + bias - dist ) / bias + 0.5, 0.0, 1.0 );
+		float lampVis = mix( mix( vis4.w, vis4.z, fr.x ), mix( vis4.x, vis4.y, fr.x ), fr.y );
 		if ( u_tw.lightPos[0].z > 0.5 )
 			lampVis = 1.0;
 		if ( lampVis <= 0.0 )
 			continue;
-		vec3 col = vec3( lamp_param( idx, 4, S ), lamp_param( idx, 5, S ), lamp_param( idx, 6, S ) ) / 16384.0;
+		vec4 cb = lamp_block( idx, 1, S, size ) / 16384.0;
+		vec3 col = vec3( cb.w, cb.z, cb.x );
 		float att = ( 1.0 - q ) * ( 1.0 - q );
 		float wrap = 0.35 + 0.65 * max( dot( n, d ) / max( dist, 1e-3 ), 0.0 );
 		sum += col * ( att * wrap * lampVis );
 	}
 	// many lamps overlapping (a candle row, a chandelier) must not burn a surface white
-	sum *= u_tw.lightPos[0].x;
+	sum *= u_tw.lightPos[0].x * camFade;
 	return sum / ( 1.0 + max( max( sum.r, sum.g ), sum.b ) * 0.6 );
 }
 

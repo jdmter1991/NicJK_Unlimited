@@ -11,7 +11,7 @@ tag = sys.argv[4] if len(sys.argv) > 4 else "beta1"
 os.makedirs(out, exist_ok=True)
 LIMIT = 1900 * 1024 * 1024
 t0 = time.time()
-maps = [f for f in ("%s.bsp %s.tworld %s.tpbr %s.tuv2 %s.tao %s.tsky %s.tlights %s.tportal %s.tshadow %s_shadow.dds" % ((mapname,) * 10)).split()
+maps = [f for f in ("%s.bsp %s.tworld %s.tpbr %s.tuv2 %s.tao %s.tsky %s.tlights %s.tlampocc %s.tportal %s.tshadow %s_shadow.dds" % ((mapname,) * 11)).split()
         if os.path.exists(os.path.join(mod, "maps", f))]
 shaders = ["naboo_%s.shader" % mapname, "naboo_sys.shader", "naboo_doors.shader"]
 small = [("maps/" + f) for f in maps] + [("shaders/" + f) for f in shaders if os.path.exists(os.path.join(mod, "shaders", f))]
