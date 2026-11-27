@@ -1535,6 +1535,11 @@ qboolean WP_SabersCheckLock( gentity_t *ent1, gentity_t *ent2 )
 	qboolean	ent1BlockingPlayer = qfalse;
 	qboolean	ent2BlockingPlayer = qfalse;
 
+	if (g_jk2_102sabersystem.integer)
+	{ // JK2 1.02 saber system: JK2 lock rules and anims
+		return WP_SabersCheckLock_JK2(ent1, ent2);
+	}
+
 	if ( g_debugSaberLocks.integer )
 	{
 		WP_SabersCheckLock2( ent1, ent2, LOCK_RANDOM );
@@ -4980,7 +4985,7 @@ static QINLINE qboolean CheckSaberDamage(gentity_t *self, int rSaberNum, int rBl
 
 		didHit = qtrue;
 
-		if (g_mb2manualblock.integer
+		if ((g_mb2manualblock.integer && !g_jk2_102sabersystem.integer)
 			? (g_entities[tr.entityNum].client && !unblockable && dmg > SABER_NONATTACK_DAMAGE
 				&& G_MB2SaberBlock(self, &g_entities[tr.entityNum], tr.endpos, attackStr))	// MB2: the guard decides, whatever the damage style
 			: (!SaberSPStyle(self)//let's trying making blocks have to be blocked by a saber
@@ -5190,7 +5195,7 @@ static QINLINE qboolean CheckSaberDamage(gentity_t *self, int rSaberNum, int rBl
 		if (otherOwner->client && otherOwner->client->ps.stats[STAT_RACEMODE])
 			return qfalse;
 
-		if ( g_mb2manualblock.integer && otherOwner->client && !otherOwner->client->ps.saberInFlight
+		if ( (g_mb2manualblock.integer && !g_jk2_102sabersystem.integer) && otherOwner->client && !otherOwner->client->ps.saberInFlight
 			&& dmg > SABER_NONATTACK_DAMAGE && !unblockable
 			&& !BG_SaberInAttack( otherOwner->client->ps.saberMove ) && !BG_SaberInSpecial( otherOwner->client->ps.saberMove ) )
 		{ //MB2: the blade met a saber that is not swinging. Only a guard blocks, and it pays for it; otherwise
@@ -5953,6 +5958,11 @@ void WP_SaberStartMissileBlockCheck( gentity_t *self, usercmd_t *ucmd  )
 	int			i, e;
 	float		closestDist, radius = 256;
 	vec3_t		forward, dir, missile_dir, fwdangles = {0};
+
+	if (g_jk2_102sabersystem.integer)
+	{ // JK2 1.02 saber system: JK2 has no missile pre-block, missiles are blocked when they touch (g_missile.c)
+		return;
+	}
 	trace_t		trace;
 	vec3_t		traceTo, entDir;
 	float		dot1, dot2;
@@ -6416,7 +6426,7 @@ static QINLINE qboolean CheckThrownSaberDamaged(gentity_t *saberent, gentity_t *
 
 			if (tr.fraction == 1 || tr.entityNum == ent->s.number)
 			{ //Slice them
-				if (!saberOwner->client->ps.isJediMaster && (g_mb2manualblock.integer ? G_MB2SaberBlock(saberOwner, ent, tr.endpos, 999) : WP_SaberCanBlock(ent, tr.endpos, 0, MOD_SABER, qfalse, 999)))
+				if (!saberOwner->client->ps.isJediMaster && ((g_mb2manualblock.integer && !g_jk2_102sabersystem.integer) ? G_MB2SaberBlock(saberOwner, ent, tr.endpos, 999) : WP_SaberCanBlock(ent, tr.endpos, 0, MOD_SABER, qfalse, 999)))
 				{ //they blocked it
 					WP_SaberBlockNonRandom(ent, tr.endpos, qfalse);
 
@@ -7138,6 +7148,10 @@ void WP_SaberAddG2Model( gentity_t *saberent, const char *saberModel, qhandle_t 
 //Make the saber go flying directly out of the owner's hand in the specified direction
 qboolean saberKnockOutOfHand(gentity_t *saberent, gentity_t *saberOwner, vec3_t velocity)
 {
+	if (g_jk2_102sabersystem.integer)
+	{ // JK2 1.02 saber system: a saber is never knocked out of hand or dropped
+		return qfalse;
+	}
 	if (!saberent || !saberOwner ||
 		!saberent->inuse || !saberOwner->inuse ||
 		!saberOwner->client)
@@ -7210,6 +7224,11 @@ qboolean saberCheckKnockdown_DuelLoss(gentity_t *saberent, gentity_t *saberOwner
 	float totalDistance = 1;
 	float distScale = 6.5f;
 	qboolean validMomentum = qtrue;
+
+	if (g_jk2_102sabersystem.integer)
+	{ // JK2 1.02 saber system: a saber is never knocked out of hand or dropped
+		return qfalse;
+	}
 	int	disarmChance = 1;
 
 	if (SABERINVALID)
@@ -7294,6 +7313,11 @@ qboolean saberCheckKnockdown_BrokenParry(gentity_t *saberent, gentity_t *saberOw
 	int otherAttack;
 	qboolean doKnock = qfalse;
 	int	disarmChance = 1;
+
+	if (g_jk2_102sabersystem.integer)
+	{ // JK2 1.02 saber system: a saber is never knocked out of hand or dropped
+		return qfalse;
+	}
 
 	if (SABERINVALID)
 	{
@@ -7381,6 +7405,10 @@ qboolean BG_InExtraDefenseSaberMove( int move );
 //Called upon an enemy actually slashing into a thrown saber
 qboolean saberCheckKnockdown_Smashed(gentity_t *saberent, gentity_t *saberOwner, gentity_t *other, int damage)
 {
+	if (g_jk2_102sabersystem.integer)
+	{ // JK2 1.02 saber system: a saber is never knocked out of hand or dropped
+		return qfalse;
+	}
 	if (SABERINVALID)
 	{
 		return qfalse;
@@ -7416,6 +7444,11 @@ qboolean saberCheckKnockdown_Thrown(gentity_t *saberent, gentity_t *saberOwner, 
 	int throwLevel = 0;
 	int defenLevel = 0;
 	qboolean tossIt = qfalse;
+
+	if (g_jk2_102sabersystem.integer)
+	{ // JK2 1.02 saber system: a blocked thrown saber just returns to its owner
+		return qfalse;
+	}
 
 	if (SABERINVALID)
 	{
@@ -9116,6 +9149,12 @@ nextStep:
 		fVSpeed += self->client->ps.velocity[2];
 	}
 
+	if (g_jk2_102sabersystem.integer)
+	{ // JK2 1.02 saber system (mv w_saber.c:3441): flat factor, no cap
+		fVSpeed *= 0.08;
+	}
+	else
+	{
 	//fVSpeed *= 0.08;
 	fVSpeed *= 1.6f/sv_fps.value; //loda fixme, take into account sv_saberFPS maybe
 
@@ -9128,6 +9167,7 @@ nextStep:
 	if (fVSpeed < -70)
 	{
 		fVSpeed = -70;
+	}
 	}
 
 	properOrigin[0] += addVel[0]*fVSpeed;
@@ -9209,6 +9249,12 @@ nextStep:
 
 	VectorCopy(boltAngles, rawAngles);
 
+	if (g_jk2_102sabersystem.integer)
+	{ // JK2 1.02 saber system: one 40 unit blade, saber entity 20 units up the blade (mv w_saber.c:3488-3504)
+		WP_JK2SaberGeometry( self, self->client->ps.saberEntityNum ? mySaber : NULL, boltOrigin, boltAngles, end );
+	}
+	else
+	{
 	VectorMA( boltOrigin, self->client->saber[0].blade[0].lengthMax, boltAngles, end );
 
 	if (self->client->ps.saberEntityNum)
@@ -9218,6 +9264,7 @@ nextStep:
 		{ //place it roughly in the middle of the saber..
 			VectorMA( boltOrigin, self->client->saber[0].blade[0].lengthMax, boltAngles, mySaber->r.currentOrigin );
 		}
+	}
 	}
 
 	boltAngles[YAW] = self->client->ps.viewangles[YAW];
@@ -9356,7 +9403,10 @@ nextStep:
 		{
 			saberent->r.svFlags |= (SVF_NOCLIENT);
 			saberent->r.contents = CONTENTS_LIGHTSABER;
-			SetSaberBoxSize(saberent);
+			if (g_jk2_102sabersystem.integer)
+				WP_JK2SaberBox(saberent); // JK2 1.02 saber system: +-8 box (1.02 SABER_BOX_SIZE)
+			else
+				SetSaberBoxSize(saberent);
 			saberent->s.loopSound = 0;
 			saberent->s.loopIsSoundset = qfalse;
 		}
@@ -9416,6 +9466,26 @@ nextStep:
 
 		WP_SaberClearDamage();
 		saberDoClashEffect = qfalse;
+
+		if (g_jk2_102sabersystem.integer)
+		{ // JK2 1.02 saber system: one blade (blade 0 of saber 0, 40 units), 1.02 damage traces
+			if (!self->client->ps.saberInFlight)
+			{
+				VectorCopy(self->client->saber[0].blade[0].muzzlePoint, self->client->saber[0].blade[0].muzzlePointOld);
+				VectorCopy(self->client->saber[0].blade[0].muzzleDir, self->client->saber[0].blade[0].muzzleDirOld);
+				VectorCopy(boltOrigin, self->client->saber[0].blade[0].muzzlePoint);
+				VectorCopy(rawAngles, self->client->saber[0].blade[0].muzzleDir);
+				self->client->saber[0].blade[0].storageTime = level.time;
+
+				WP_JK2SaberDamage(self, boltOrigin, end);
+
+				VectorCopy(boltOrigin, self->client->saber[0].blade[0].trail.base);
+				VectorCopy(end, self->client->saber[0].blade[0].trail.tip);
+				self->client->saber[0].blade[0].trail.lastTime = level.time;
+				self->client->hasCurrentPosition = qtrue;
+			}
+			rSaberNum = MAX_SABERS; //skip the JKA blade loop
+		}
 
 		//Now cycle through each saber and each blade on the saber and do damage traces.
 		while (rSaberNum < MAX_SABERS)
@@ -10160,7 +10230,7 @@ void G_MB2BlockThink( gentity_t *ent ) {
 	if ( !cl ) {
 		return;
 	}
-	if ( !g_mb2manualblock.integer ) {
+	if ( !(g_mb2manualblock.integer && !g_jk2_102sabersystem.integer) ) {
 		cl->ps.userInt3 = 0;
 		cl->ps.userInt2 = 0;
 		return;
@@ -10207,6 +10277,11 @@ int WP_SaberCanBlock(gentity_t* self, vec3_t point, int dflags, int mod, qboolea
 {
 	qboolean thrownSaber = qfalse;
 	float blockFactor = 0;
+
+	if (g_jk2_102sabersystem.integer)
+	{ // JK2 1.02 saber system: the 1.02 random block table (also for projectiles and thrown sabers)
+		return WP_SaberCanBlock_JK2(self, point, dflags, mod, projectile, attackStr);
+	}
 
 	if (!self || !self->client || !point)
 		return 0;

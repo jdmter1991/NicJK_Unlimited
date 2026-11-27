@@ -5158,7 +5158,7 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, vec3_
 				mass *= 2.25f; //Superheavy, but also a nerf to discjumping in protect
 		}
 
-		if (mod == MOD_SABER)
+		if (mod == MOD_SABER && !g_jk2_102sabersystem.integer) // JK2 1.02 saber system: plain knockback for saber hits (mv g_combat.c:3132)
 		{
 			float saberKnockbackScale = g_saberDmgVelocityScale.value;
 			if ( (dflags&DAMAGE_SABER_KNOCKBACK1)
@@ -5249,7 +5249,7 @@ void G_Damage( gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, vec3_
 		}
 		// set the timer so that the other client can't cancel
 		// out the movement immediately
-		if ( !targ->client->ps.pm_time && (g_saberDmgVelocityScale.value || mod != MOD_SABER || (dflags&DAMAGE_SABER_KNOCKBACK1) || (dflags&DAMAGE_SABER_KNOCKBACK2) || (dflags&DAMAGE_SABER_KNOCKBACK1_B2) || (dflags&DAMAGE_SABER_KNOCKBACK2_B2) ) ) {
+		if ( !targ->client->ps.pm_time && (g_saberDmgVelocityScale.value || mod != MOD_SABER || g_jk2_102sabersystem.integer || (dflags&DAMAGE_SABER_KNOCKBACK1) || (dflags&DAMAGE_SABER_KNOCKBACK2) || (dflags&DAMAGE_SABER_KNOCKBACK1_B2) || (dflags&DAMAGE_SABER_KNOCKBACK2_B2) ) ) {
 			int		t;
 
 			t = knockback * 2;

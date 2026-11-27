@@ -1969,6 +1969,16 @@ qboolean HasSetSaberOnly(void);
 void WP_ForcePowerStop( gentity_t *self, forcePowers_t forcePower );
 void WP_SaberPositionUpdate( gentity_t *self, usercmd_t *ucmd );
 int WP_SaberCanBlock(gentity_t *self, vec3_t point, int dflags, int mod, qboolean projectile, int attackStr);
+
+// JK2 1.02 saber system (w_saber_jk2.c), only used while g_jk2_102sabersystem is on
+int WP_SaberCanBlock_JK2( gentity_t *self, vec3_t point, int dflags, int mod, qboolean projectile, int attackStr );
+qboolean WP_SabersCheckLock_JK2( gentity_t *ent1, gentity_t *ent2 );
+void WP_JK2SaberGeometry( gentity_t *self, gentity_t *mySaber, vec3_t boltOrigin, vec3_t boltDir, vec3_t end );
+void WP_JK2SaberBox( gentity_t *saberent );
+void WP_JK2SaberDamage( gentity_t *self, vec3_t boltOrigin, vec3_t end );
+void G_JK2SaberCheckSingle( gentity_t *ent );
+void Cmd_SaberAttackCycle_JK2( gentity_t *ent );
+void G_JK2SaberStats( char *buf, int bufSize );
 void WP_SaberInitBladeData( gentity_t *ent );
 void WP_InitForcePowers( gentity_t *ent );
 void WP_SpawnInitForcePowers( gentity_t *ent );

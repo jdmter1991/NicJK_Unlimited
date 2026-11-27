@@ -3509,6 +3509,11 @@ void ClientThink_real( gentity_t *ent ) {
 	{
 		qboolean forceSingle = qfalse;
 		qboolean changeStyle = qfalse;
+
+		if (g_jk2_102sabersystem.integer && ent->s.weapon == WP_SABER)
+		{ // JK2 1.02 saber system: one single-bladed saber, blue/yellow/red only
+			G_JK2SaberCheckSingle(ent);
+		}
 		if ((g_saberDisable.integer || (!client->sess.raceMode && g_tweakWeapons.integer & WT_TRIBES) || (client->sess.raceMode && client->sess.movementStyle == MV_COOP_JKA))
 			&& ent->s.weapon == WP_SABER && ent->s.eType == ET_PLAYER && client->sess.sessionTeam != TEAM_SPECTATOR) {
 			//trap->Print("AnimLevel: %i, DrawLevel: %i, Baselevel: %i\n", ent->client->ps.fd.saberAnimLevel, ent->client->ps.fd.saberDrawAnimLevel, ent->client->ps.fd.saberAnimLevelBase);
@@ -5010,7 +5015,22 @@ void ClientThink_real( gentity_t *ent ) {
 			SetClientViewAngle( ent, lockAng );
 		}
 
-		if ( ent->client->ps.saberLockHitCheckTime < level.time )
+		if ( g_jk2_102sabersystem.integer )
+		{ // JK2 1.02 saber system (mv g_active.c:1361-1372): 3 new attack presses = one push
+			if ( ( ent->client->buttons & BUTTON_ATTACK ) && ! ( ent->client->oldbuttons & BUTTON_ATTACK ) )
+			{
+				ent->client->ps.saberLockHits++;
+			}
+			if (ent->client->ps.saberLockHits > 2)
+			{
+				if (!ent->client->ps.saberLockAdvance)
+				{
+					ent->client->ps.saberLockHits -= 3;
+				}
+				ent->client->ps.saberLockAdvance = qtrue;
+			}
+		}
+		else if ( ent->client->ps.saberLockHitCheckTime < level.time )
 		{//have moved to next frame since last lock push
 			ent->client->ps.saberLockHitCheckTime = level.time;//so we don't push more than once per server frame
 			if ( ( ent->client->buttons & BUTTON_ATTACK ) && ! ( ent->client->oldbuttons & BUTTON_ATTACK ) )

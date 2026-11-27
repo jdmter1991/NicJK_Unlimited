@@ -3935,6 +3935,12 @@ void Cmd_SaberAttackCycle_f(gentity_t* ent) // Niksata Edit
 	}
 	*/
 
+	if (g_jk2_102sabersystem.integer)
+	{ // JK2 1.02 saber system: blue -> yellow -> red up to the saber offence level
+		Cmd_SaberAttackCycle_JK2(ent);
+		return;
+	}
+
 	if (ent->client->saber[0].model[0] && ent->client->saber[1].model[0])
 	{ //no cycling for akimbo
 		if (WP_SaberCanTurnOffSomeBlades(&ent->client->saber[1]))
