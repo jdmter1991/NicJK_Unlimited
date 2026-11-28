@@ -75,7 +75,7 @@ finally {
 Copy-Item $qlog (Join-Path $DevDir "perf_$Tag.qconsole.log") -Force
 
 # ---- parse the windows that ended inside the measured interval ----
-$sv = @(); $bp = @(); $bz = @{}; $pct = @(); $tr = @(); $ev = $null
+$sv = @(); $bp = @(); $kc = @(); $sch = @(0, 0, 0); $why = @(0, 0, 0, 0, 0, 0); $bz = @{}; $pct = @(); $tr = @(); $ev = $null
 $inWin = $false
 foreach ($line in Get-Content $qlog) {
     if ($line.Length -lt 20) { continue }
@@ -96,12 +96,20 @@ foreach ($line in Get-Content $qlog) {
         if ($sv.Count) { $sv[-1].gameTraces = [double]$Matches[1]; $sv[-1].gameTraceMs = [double]$Matches[2] }
     } elseif ($msg -match '^BOTPROF window=\S+ frames=(\d+) \(no-think frames (\d+)\) thinks=(\d+)\s+ai ms/frame avg ([\d.]+) max ([\d.]+)\s+think us avg ([\d.]+) max ([\d.]+)') {
         $bp += , [ordered]@{ frames = [int]$Matches[1]; thinks = [int]$Matches[3]; ai = [double]$Matches[4]; aiMax = [double]$Matches[5]; think = [double]$Matches[6]; thinkMax = [double]$Matches[7] }
+    } elseif ($msg -match '^BOTPROF scheduler \(bot_ai_fps \d+, combat \d+\): thinks in a fight (\d+), on schedule (\d+), frames without a think (\d+)') {
+        $sch[0] += [int]$Matches[1]; $sch[1] += [int]$Matches[2]; $sch[2] += [int]$Matches[3]
+    } elseif ($msg -match '^BOTPROF scheduler, why in a fight: hurt (\d+), in the air (\d+), move or duel (\d+), enemy near (\d+), gun fight (\d+), threat near (\d+)') {
+        for ($k = 0; $k -lt 6; $k++) { $why[$k] += [int]$Matches[$k + 1] }
+    } elseif ($msg -match '^BOTPROF frame ai kcycles ([\d.]+) \(per bot ([\d.]+)\)') {
+        $kc += , [ordered]@{ frames = 1; kc = [double]$Matches[1]; kcBot = [double]$Matches[2] }
     } elseif ($msg -match '^BOTPROF frame ai ms: p50 ([\d.]+) p95 ([\d.]+) p99 ([\d.]+) max [\d.]+; bots (\d+), thinks per frame ([\d.]+), ai us per bot per frame ([\d.]+)') {
         $pct += , [ordered]@{ p50 = [double]$Matches[1]; p95 = [double]$Matches[2]; p99 = [double]$Matches[3]; bots = [int]$Matches[4]; tpf = [double]$Matches[5]; perBot = [double]$Matches[6] }
     } elseif ($msg -match '^BOTZONE (.+?)\s+self ms/frame\s+([\d.]+)\s+[\d.]+%\s+calls/frame\s+([\d.]+)\s+self us/call\s+[\d.]+\s+incl us/call\s+[\d.]+ max\s+[\d.]+\s+traces/frame\s+([\d.]+)') {
         $n = $Matches[1].Trim()
         if (-not $bz.ContainsKey($n)) { $bz[$n] = @() }
         $bz[$n] += , @([double]$Matches[2], [double]$Matches[3], [double]$Matches[4])
+    } elseif ($msg -match '^BOTEVAL baseline: bots (\d+) kills (\d+) deaths (\d+) \| features \d+: bots (\d+) kills (\d+) deaths (\d+)') {
+        $ev = "A bots $($Matches[1]) kills $($Matches[2]) deaths $($Matches[3]) | B bots $($Matches[4]) kills $($Matches[5]) deaths $($Matches[6])"
     } elseif ($msg -match '^BOTEVAL all bots: features \d+ bots (\d+) kills (\d+) deaths (\d+)') {
         $ev = "bots $($Matches[1]) kills $($Matches[2]) deaths $($Matches[3])"
     }
@@ -128,10 +136,11 @@ $res = [ordered]@{
     botaiMs = (WAvg $sv 'botai'); botaiMaxMs = (MaxOf $sv 'botaiMax'); gameMs = (WAvg $sv 'game'); gameMaxMs = (MaxOf $sv 'gameMax'); snapMs = (WAvg $sv 'snap')
     aiTracesPerFrame = (WAvg $sv 'aiTraces'); aiTraceMs = (WAvg $sv 'aiTraceMs'); gameTracesPerFrame = (WAvg $sv 'gameTraces'); gameTraceMs = (WAvg $sv 'gameTraceMs')
     aiMs = (WAvg $bp 'ai'); aiP50 = (Avg $pct 'p50'); aiP95 = (Avg $pct 'p95'); aiP99 = (Avg $pct 'p99'); aiMaxMs = (MaxOf $bp 'aiMax')
-    thinkUs = (WAvg $bp 'think'); thinkMaxUs = (MaxOf $bp 'thinkMax'); thinksPerFrame = (Avg $pct 'tpf'); usPerBotFrame = (Avg $pct 'perBot')
+    thinkUs = (WAvg $bp 'think'); thinkMaxUs = (MaxOf $bp 'thinkMax'); thinksPerFrame = (Avg $pct 'tpf'); aiKCycles = (Avg $kc 'kc'); aiKCyclesPerBot = (Avg $kc 'kcBot'); usPerBotFrame = (Avg $pct 'perBot')
+    sched = $sch; schedWhy = $why
     eval = $ev; zones = $zones
 }
 $json = $res | ConvertTo-Json -Compress -Depth 5
 Add-Content -Path $Results -Value $json
-"{0}: bots {1} frame {2} ms (p99 {11}, max {3}) botai {4} ms game {5} ms | ai {6} ms p99 {7} | think {8} us, {9} us/bot/frame | cpu {10}%" -f `
-    $Tag, $res.bots, $res.frameMs, $res.frameMaxMs, $res.botaiMs, $res.gameMs, $res.aiMs, $res.aiP99, $res.thinkUs, $res.usPerBotFrame, $res.cpuCorePct, $res.frameP99
+"{0}: bots {1} frame {2} ms (p99 {11}, max {3}) ai kcycles {12} ({13}/bot) botai {4} ms game {5} ms | ai {6} ms p99 {7} | think {8} us, {9} us/bot/frame | cpu {10}%" -f `
+    $Tag, $res.bots, $res.frameMs, $res.frameMaxMs, $res.botaiMs, $res.gameMs, $res.aiMs, $res.aiP99, $res.thinkUs, $res.usPerBotFrame, $res.cpuCorePct, $res.frameP99, $res.aiKCycles, $res.aiKCyclesPerBot

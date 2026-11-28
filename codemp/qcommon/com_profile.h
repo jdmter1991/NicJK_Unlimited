@@ -42,6 +42,10 @@ typedef struct comProfile_s {
 	uint64_t	worstTraceNs;
 	float		worstTraceStart[3], worstTraceEnd[3], worstTraceMins[3], worstTraceMaxs[3];
 	int			worstTracePhase;
+
+	// time spent in Com_Printf (console window, log file): taken out of the SVPROF frame times,
+	// since printing the profile itself could stall a frame for a second on a busy machine
+	uint64_t	printNs;
 } comProfile_t;
 
 extern comProfile_t com_prof;
