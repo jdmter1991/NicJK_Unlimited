@@ -112,6 +112,14 @@ static double BotProf_NowUs(void) {
 typedef struct { unsigned long cb, PageFaultCount; size_t PeakWorkingSetSize, WorkingSetSize, a, b, c, d, PagefileUsage, PeakPagefileUsage; } botProfMem_t;
 __declspec(dllimport) void *__stdcall GetCurrentProcess(void);
 __declspec(dllimport) int __stdcall K32GetProcessMemoryInfo(void *process, botProfMem_t *counters, unsigned long cb);
+/* CPU cycles this thread has run: unlike the wall clock, not counting time the thread was not scheduled */
+__declspec(dllimport) int __stdcall QueryThreadCycleTime(void *thread, unsigned long long *cycles);
+__declspec(dllimport) void *__stdcall GetCurrentThread(void);
+static double BotProf_ThreadKCycles(void) {
+	unsigned long long c = 0;
+	QueryThreadCycleTime(GetCurrentThread(), &c);
+	return (double)c / 1000.0;
+}
 static unsigned long BotProf_PageFaults(void) {
 	botProfMem_t m;
 	m.cb = sizeof(m);
@@ -119,6 +127,7 @@ static unsigned long BotProf_PageFaults(void) {
 }
 #else
 static unsigned long BotProf_PageFaults(void) { return 0; }
+static double BotProf_ThreadKCycles(void) { return 0.0; }
 #include <time.h>
 static double BotProf_NowUs(void) {
 	struct timespec ts;
@@ -152,6 +161,8 @@ typedef struct botProf_s {
 	// per think
 	int				thinkTraces, maxThinkTraces;
 	double			thinkTraceUs;
+	double			frameKCycles;		// thread cycles inside BotAIStartFrame (Windows)
+	double			frameStartKCycles;
 } botProf_t;
 
 static botProf_t botProf;
@@ -182,6 +193,52 @@ vmCvar_t bot_fixes;
 // BOTEVAL lines (printed with bot_profile) give kills and deaths per group.
 vmCvar_t bot_features;
 vmCvar_t bot_abTest;
+// Bot AI performance (docs/reports/BOT_PERFORMANCE.md).
+// bot_perf: optimisations that give the same decisions as before, one bit each:
+//   1 = nearest visible waypoint: candidates are tried nearest first and the first visible one is
+//       taken (the old loop traced every waypoint that was closer than the best so far, in index order)
+//   2 = dangerous-object scan: the entities that can be dangerous at all are listed once per frame
+//       and shared by the bots, instead of every bot walking all entities on every think
+vmCvar_t bot_perf;
+#define BOTPERF_NEARWP		1
+#define BOTPERF_BADTHINGS	2
+//   4 = waypoint visibility: the second trace (does a shield stand in the way?) is left out while
+//       no shield (ET_SPECIAL entity) exists on the map, since it can only matter when one does
+#define BOTPERF_WPVIS		4
+// bot_perfBase: bot_perf of the baseline group in an A/B test (bot_abTest), -1 = as bot_perf. Only
+// the switches below that change what a bot decides are applied per bot:
+//   8 = enemy scan: a candidate the line-of-sight trace found hidden is not traced again by the same
+//       bot for bot_scanCacheMs (default 100). Someone who steps out of cover can so be noticed up
+//       to that much later than before; the threat scan (Bot_Awareness) is not affected.
+#define BOTPERF_SCANCACHE	8
+vmCvar_t bot_perfBase;
+vmCvar_t bot_scanCacheMs;
+static int BotPerfFor(int client) {
+	if (bot_abTest.integer > 0 && (client < bot_abTest.integer || client >= 2 * bot_abTest.integer) && bot_perfBase.integer >= 0) {
+		return bot_perfBase.integer;
+	}
+	return bot_perf.integer;
+}
+// bot_perfVerify 1: testing; each of the above also runs the old way and counts the times the two
+// disagreed (BOTPROF "verify" line). They should never disagree.
+vmCvar_t bot_perfVerify;
+static int botVerifyChecks[3], botVerifyMismatch[3];
+// bot_ai_fps: how often a bot that is not in a fight runs its full decision making (think).
+//   0 = every server frame (the original). Bots that are fighting, hurt, near an enemy, in the air,
+//   duelling or in the middle of a move think every server frame whatever this is (bot_ai_combatFps).
+//   Movement commands are built every server frame from the last decision.
+// bot_ai_fpsBase: the same for the baseline group of an A/B test (-1 = as bot_ai_fps)
+// bot_ai_combatFps: think rate of those bots, 0 = every server frame (the original)
+// bot_ai_combatDist / bot_ai_threatDist: an enemy this close counts as a fight (the current enemy /
+//   any enemy at all)
+vmCvar_t bot_ai_fps;
+vmCvar_t bot_ai_fpsBase;
+vmCvar_t bot_ai_combatFps;
+vmCvar_t bot_ai_combatDist;
+vmCvar_t bot_ai_threatDist;
+static qboolean botSchedSkipped[MAX_CLIENTS];	/* no think in this frame (bot_ai_fps) */
+static int botSchedUrgentThinks, botSchedPlannedThinks, botSchedSkips;	/* counted while profiling */
+static int botSchedWhy[6];	/* why a bot counted as in a fight: hurt, in the air, other move state, enemy near, gun fight, threat near */
 //   4 = the saber swing direction chosen by the combat code reaches the game: the movement keys
 //       of the chosen attack quadrant are pressed on the frames where a swing can start or chain
 //       (navigation used to overwrite them, so the direction was a by-product of movement)
@@ -1099,6 +1156,18 @@ static void BotProf_Report(double nowUs) {
 			order[z] = z;
 			sumSelf += botProfZones[z].selfUs;
 		}
+		trap->Print("BOTPROF scheduler (bot_ai_fps %d, combat %d): thinks in a fight %d, on schedule %d, frames without a think %d\n",
+			bot_ai_fps.integer, bot_ai_combatFps.integer, botSchedUrgentThinks, botSchedPlannedThinks, botSchedSkips);
+		trap->Print("BOTPROF scheduler, why in a fight: hurt %d, in the air %d, move or duel %d, enemy near %d, gun fight %d, threat near %d%c",
+			botSchedWhy[0], botSchedWhy[1], botSchedWhy[2], botSchedWhy[3], botSchedWhy[4], botSchedWhy[5], 10);
+		memset(botSchedWhy, 0, sizeof(botSchedWhy));
+		botSchedUrgentThinks = botSchedPlannedThinks = botSchedSkips = 0;
+		if (bot_perfVerify.integer) {
+			trap->Print("BOTPROF verify bot_perf %d: nearest waypoint %d checks %d different, danger list %d checks %d different, waypoint shield trace %d checks %d different\n",
+				bot_perf.integer, botVerifyChecks[0], botVerifyMismatch[0], botVerifyChecks[1], botVerifyMismatch[1], botVerifyChecks[2], botVerifyMismatch[2]);
+		}
+		trap->Print("BOTPROF map: waypoints %d, entities %d%c", gWPNum, level.num_entities, 10);
+		trap->Print("BOTPROF frame ai kcycles %.0f (per bot %.1f)\n", botProf.frameKCycles / frames, nbots ? botProf.frameKCycles / frames / nbots : 0.0);
 		trap->Print("BOTPROF frame ai ms: p50 %.2f p95 %.2f p99 %.2f max %.3f; bots %d, thinks per frame %.2f, ai us per bot per frame %.1f, zones cover %.1f%%\n",
 			BotProf_HistPct(botProf.frames, 50), BotProf_HistPct(botProf.frames, 95), BotProf_HistPct(botProf.frames, 99), botProf.maxFrameUs / 1e3,
 			nbots, botProf.thinks / frames, nbots ? botProf.frameUs / frames / nbots : 0.0, botProf.frameUs > 0 ? 100.0 * sumSelf / botProf.frameUs : 0.0);
@@ -1126,6 +1195,15 @@ static void BotProf_Report(double nowUs) {
 // called at the top of BotAIStartFrame; returns the frame start stamp (0 when off)
 static double BotProf_FrameBegin(void) {
 	trap->Cvar_Update(&bot_profile);
+	trap->Cvar_Update(&bot_perf);
+	trap->Cvar_Update(&bot_perfVerify);
+	trap->Cvar_Update(&bot_perfBase);
+	trap->Cvar_Update(&bot_scanCacheMs);
+	trap->Cvar_Update(&bot_ai_fps);
+	trap->Cvar_Update(&bot_ai_fpsBase);
+	trap->Cvar_Update(&bot_ai_combatFps);
+	trap->Cvar_Update(&bot_ai_combatDist);
+	trap->Cvar_Update(&bot_ai_threatDist);
 	trap->Cvar_Update(&bot_fixes);
 	trap->Cvar_Update(&bot_features);
 	trap->Cvar_Update(&bot_jk2Tactics);
@@ -1144,6 +1222,7 @@ static double BotProf_FrameBegin(void) {
 		botProf.enabled = 1;
 		botProf.windowStartUs = BotProf_NowUs();
 	}
+	botProf.frameStartKCycles = BotProf_ThreadKCycles();
 	return BotProf_NowUs();
 }
 
@@ -1154,6 +1233,7 @@ static void BotProf_FrameEnd(double startUs, int thinksThisFrame) {
 	}
 	nowUs = BotProf_NowUs();
 	us = nowUs - startUs;
+	botProf.frameKCycles += BotProf_ThreadKCycles() - botProf.frameStartKCycles;
 	botProf.frames++;
 	botProf.frameUs += us;
 	if (us > botProf.maxFrameUs) botProf.maxFrameUs = us;
@@ -3173,6 +3253,10 @@ void BotUpdateInput(bot_state_t* bs, int time, int elapsed_time) {
 	BotChangeViewAngles(bs, (float)elapsed_time / 1000);
 	//retrieve the bot input
 	trap->EA_GetInput(bs->client, (float)time / 1000, &bi);
+	if (botSchedSkipped[bs->client] && !(bs->jumpHoldTime > level.time) && !(bs->inputHoldUpUntil > level.time)) {
+		// no think this frame (bot_ai_fps): the last decision stands, but a jump press is let go
+		bi.actionflags &= ~(ACTION_JUMP | ACTION_DELAYEDJUMP);
+	}
 	//respawn hack
 	if (bi.actionflags & ACTION_RESPAWN) {
 		if (bs->lastucmd.buttons & BUTTON_ATTACK) bi.actionflags &= ~(ACTION_RESPAWN | ACTION_ATTACK);
@@ -4079,6 +4163,25 @@ static int OrgVisibleFrom(const char *caller, vec3_t org1, vec3_t org2, int igno
 }
 #define OrgVisible(org1, org2, ignore) OrgVisibleFrom(__FUNCTION__, org1, org2, ignore)
 
+// whether any ET_SPECIAL entity (a placed shield) exists, counted once per frame
+static qboolean BotPerf_AnySpecial(void) {
+	static int time = -1, ents = -1;
+	static qboolean any;
+	if (time != level.time || ents != level.num_entities) {
+		int i;
+		any = qfalse;
+		for (i = MAX_CLIENTS; i < level.num_entities; i++) {
+			if (g_entities[i].inuse && g_entities[i].s.eType == ET_SPECIAL) {
+				any = qtrue;
+				break;
+			}
+		}
+		time = level.time;
+		ents = level.num_entities;
+	}
+	return any;
+}
+
 //special waypoint visibility check
 int WPOrgVisible(gentity_t* bot, vec3_t org1, vec3_t org2, int ignore)
 {
@@ -4089,7 +4192,21 @@ int WPOrgVisible(gentity_t* bot, vec3_t org1, vec3_t org2, int ignore)
 
 	if (tr.fraction == 1)
 	{
+		const qboolean skip = ((bot_perf.integer & BOTPERF_WPVIS) && !BotPerf_AnySpecial()) ? qtrue : qfalse;
+		if (skip && !bot_perfVerify.integer)
+		{
+			return 1;	// the trace below can only turn up a shield, and there is none
+		}
 		JP_Trace(&tr, org1, NULL, NULL, org2, ignore, MASK_PLAYERSOLID, qfalse, 0, 0);
+		if (skip)
+		{
+			botVerifyChecks[2]++;
+			if (tr.fraction != 1 && tr.entityNum != ENTITYNUM_NONE && g_entities[tr.entityNum].s.eType == ET_SPECIAL)
+			{
+				botVerifyMismatch[2]++;
+			}
+			return 1;
+		}
 
 		if (tr.fraction != 1 && tr.entityNum != ENTITYNUM_NONE && g_entities[tr.entityNum].s.eType == ET_SPECIAL)
 		{
@@ -4195,8 +4312,60 @@ int GetNearestVisibleWP(vec3_t org, int ignore) {
 	BPZ_Pop();
 	return r;
 }
+/*
+Same answer as the loop below (the nearest waypoint within reach that is in the PVS and visible;
+on equal distance the lower index), but the candidates are sorted by distance and tried nearest
+first, so the search stops at the first visible one. The loop below traces every waypoint that is
+closer than the best one so far, in index order, which on a large route is many traces per call.
+*/
+typedef struct { float d; int i; } botWpCand_t;
+static botWpCand_t botWpCand[MAX_WPARRAY_SIZE];
+static int QDECL BotWpCand_Compare(const void *a, const void *b) {
+	const botWpCand_t *x = (const botWpCand_t *)a, *y = (const botWpCand_t *)b;
+	if (x->d < y->d) return -1;
+	if (x->d > y->d) return 1;
+	return x->i - y->i;
+}
+static int GetNearestVisibleWP_Sorted(vec3_t org, int ignore)
+{
+	int i, n = 0;
+	const float maxdist = RMG.integer ? 300.0f : 800.0f;
+	const float maxSq = maxdist * maxdist * 1.01f;	/* only a pre-filter, the exact test is on the length */
+	vec3_t a, mins, maxs;
+
+	VectorSet(mins, -15, -15, -1);
+	VectorSet(maxs, 15, 15, 1);
+	for (i = 0; i < gWPNum && i < MAX_WPARRAY_SIZE; i++) {
+		float flLen;
+		if (!gWPArray[i] || !gWPArray[i]->inuse) {
+			continue;
+		}
+		VectorSubtract(org, gWPArray[i]->origin, a);
+		if (VectorLengthSquared(a) > maxSq) {
+			continue;
+		}
+		flLen = VectorLength(a);
+		if (flLen < maxdist) {
+			botWpCand[n].d = flLen;
+			botWpCand[n].i = i;
+			n++;
+		}
+	}
+	if (n > 1) {
+		qsort(botWpCand, n, sizeof(botWpCand[0]), BotWpCand_Compare);
+	}
+	for (i = 0; i < n; i++) {
+		const int w = botWpCand[i].i;
+		if ((RMG.integer || BotPVSCheck(org, gWPArray[w]->origin)) && OrgVisibleBox(org, mins, maxs, gWPArray[w]->origin, ignore)) {
+			return w;
+		}
+	}
+	return -1;
+}
+
 static int GetNearestVisibleWP_Body(vec3_t org, int ignore)
 {
+	int verifySorted = -3;
 	int i;
 	float bestdist;
 	float flLen;
@@ -4222,6 +4391,17 @@ static int GetNearestVisibleWP_Body(vec3_t org, int ignore)
 	maxs[1] = 15;
 	maxs[2] = 1;
 
+	if (bot_perf.integer & BOTPERF_NEARWP)
+	{
+		const int sorted = GetNearestVisibleWP_Sorted(org, ignore);
+		if (!bot_perfVerify.integer)
+		{
+			return sorted;
+		}
+		botVerifyChecks[0]++;
+		verifySorted = sorted;	/* run the old loop as well and compare */
+	}
+
 	while (i < gWPNum)
 	{
 		if (gWPArray[i] && gWPArray[i]->inuse)
@@ -4239,6 +4419,10 @@ static int GetNearestVisibleWP_Body(vec3_t org, int ignore)
 		i++;
 	}
 
+	if (verifySorted != -3 && verifySorted != bestindex)
+	{
+		botVerifyMismatch[0]++;
+	}
 	return bestindex;
 }
 
@@ -5514,10 +5698,20 @@ static int ScanForEnemies_Body(bot_state_t* bs)
 
 	for (k = 0; k < numCandidates; k++)
 	{
+		static int hiddenUntil[MAX_CLIENTS][MAX_CLIENTS];	/* bot_perf 8: [bot][candidate] */
+		const qboolean cache = (BotPerfFor(bs->client) & BOTPERF_SCANCACHE) ? qtrue : qfalse;
 		i = candIndex[k];
+		if (cache && hiddenUntil[bs->client][i] > level.time && hiddenUntil[bs->client][i] <= level.time + bot_scanCacheMs.integer)
+		{
+			continue;	/* found hidden a moment ago */
+		}
 		if (BotPVSCheck(g_entities[i].client->ps.origin, bs->eye) && OrgVisible(bs->eye, g_entities[i].client->ps.origin, -1))
 		{
 			return i;
+		}
+		if (cache)
+		{
+			hiddenUntil[bs->client][i] = level.time + bot_scanCacheMs.integer;
 		}
 	}
 
@@ -6458,6 +6652,49 @@ jmPass:
 
 //look for "bad things". bad things include detpacks, thermal detonators,
 //and other dangerous explodey items.
+/*
+The entities GetNearestBadThing can care about at all: projectiles and explosives (not a client,
+in use, with damage and a weapon) and sentry guns (genericValue5 1000, alive). None of that
+depends on the bot asking, so the list is made once per frame (and again if the entity count
+changes) and every bot only looks at these, with the full test still applied to each.
+*/
+static int botBadCand[MAX_GENTITIES];
+static int botBadCandNum, botBadCandTime = -1, botBadCandEnts = -1;
+static const int *BotBadThingCandidates(int *num) {
+	if (botBadCandTime != level.time || botBadCandEnts != level.num_entities) {
+		int i;
+		botBadCandNum = 0;
+		for (i = 0; i < level.num_entities; i++) {
+			const gentity_t *e = &g_entities[i];
+			if (!e->inuse) {
+				continue;
+			}
+			if ((!e->client && e->damage && e->s.weapon) || (e->genericValue5 == 1000 && e->health > 0)) {
+				botBadCand[botBadCandNum++] = i;
+			}
+		}
+		botBadCandTime = level.time;
+		botBadCandEnts = level.num_entities;
+	}
+	if (bot_perfVerify.integer) {
+		int i, k = 0;
+		botVerifyChecks[1]++;
+		for (i = 0; i < level.num_entities; i++) {
+			const gentity_t *e = &g_entities[i];
+			const qboolean want = (e->inuse && ((!e->client && e->damage && e->s.weapon) || (e->genericValue5 == 1000 && e->health > 0))) ? qtrue : qfalse;
+			if (want) {
+				while (k < botBadCandNum && botBadCand[k] < i) k++;
+				if (k >= botBadCandNum || botBadCand[k] != i) {
+					botVerifyMismatch[1]++;
+					break;
+				}
+			}
+		}
+	}
+	*num = botBadCandNum;
+	return botBadCand;
+}
+
 gentity_t* GetNearestBadThing(bot_state_t* bs)
 {
 	int i = 0;
@@ -6469,9 +6706,15 @@ gentity_t* GetNearestBadThing(bot_state_t* bs)
 	float factor = 0;
 	gentity_t* ent;
 	trace_t tr;
+	int candNum = 0, candK = 0;
+	const int *cand = (bot_perf.integer & BOTPERF_BADTHINGS) ? BotBadThingCandidates(&candNum) : NULL;
 
-	while (i < level.num_entities)
+	while (cand ? candK < candNum : i < level.num_entities)
 	{
+		if (cand)
+		{
+			i = cand[candK++];
+		}
 		ent = &g_entities[i];
 
 		if ((ent &&
@@ -20023,6 +20266,115 @@ int gUpdateVars = 0;
 
 /*
 ==================
+Bot think scheduling (bot_ai_fps)
+
+With bot_ai_fps 0 every bot thinks every server frame, as before. Otherwise a bot that is not in
+a fight thinks bot_ai_fps times a second, the bots spread evenly over the interval by client slot
+so the work is the same in every frame. A bot thinks in every frame (or bot_ai_combatFps times a
+second) while any of these holds, checked every frame without traces:
+- its enemy is alive and within bot_ai_combatDist, or it has a gun and sees its enemy
+- any living enemy is within bot_ai_threatDist (someone running up from behind)
+- it lost health since its last think (it is being hit)
+- it is in the air, duelling, evading, or in the middle of a sequence of moves
+On a frame without a think the movement command is built from the last decision as before; a
+jump press is let go unless the bot means to hold it, as a press followed by a release is what
+the every-frame thinking produced.
+==================
+*/
+static int botSchedNext[MAX_CLIENTS], botSchedInterval[MAX_CLIENTS], botSchedLast[MAX_CLIENTS];
+static int botSchedCombatNext[MAX_CLIENTS], botSchedHealth[MAX_CLIENTS];
+
+static int BotSched_FpsFor(int client) {
+	if (bot_abTest.integer > 0 && (client < bot_abTest.integer || client >= 2 * bot_abTest.integer) && bot_ai_fpsBase.integer >= 0) {
+		return bot_ai_fpsBase.integer;	// baseline group of an A/B test
+	}
+	return bot_ai_fps.integer;
+}
+
+static qboolean BotSched_Urgent(bot_state_t* bs) {
+	const int c = bs->client;
+	gentity_t *me = &g_entities[c];
+	gclient_t *cl = me->client;
+	const float threat = bot_ai_threatDist.value;
+	int j;
+
+	if (!cl || cl->ps.stats[STAT_HEALTH] <= 0 || cl->sess.sessionTeam == TEAM_SPECTATOR) {
+		return qfalse;
+	}
+#define BOTSCHED_WHY(k) { if (botProf.enabled) botSchedWhy[k]++; return qtrue; }
+	if (cl->ps.stats[STAT_HEALTH] < botSchedHealth[c]) {
+		BOTSCHED_WHY(0)	// hit since the last think
+	}
+	if (cl->ps.groundEntityNum == ENTITYNUM_NONE) {
+		BOTSCHED_WHY(1)
+	}
+	if (cl->ps.duelInProgress || bs->seqType
+		|| bs->intentUntil > level.time || bs->defEvadeUntil > level.time || cl->ps.saberLockTime > level.time) {
+		BOTSCHED_WHY(2)
+	}
+	if (bs->currentEnemy && bs->currentEnemy->inuse && bs->currentEnemy->client && bs->currentEnemy->health > 0) {
+		if (DistanceSquared(bs->currentEnemy->client->ps.origin, cl->ps.origin) < bot_ai_combatDist.value * bot_ai_combatDist.value) {
+			BOTSCHED_WHY(3)
+		}
+		if (bs->frame_Enemy_Vis && cl->ps.weapon != WP_SABER) {
+			BOTSCHED_WHY(4)
+		}
+	}
+	for (j = 0; j < MAX_CLIENTS; j++) {
+		gentity_t *e = &g_entities[j];
+		if (j == c || !e->inuse || !e->client || e->health <= 0 || e->client->pers.connected != CON_CONNECTED
+			|| e->client->sess.sessionTeam == TEAM_SPECTATOR) {
+			continue;
+		}
+		if (DistanceSquared(e->client->ps.origin, cl->ps.origin) < threat * threat && !OnSameTeam(me, e)) {
+			BOTSCHED_WHY(5)
+		}
+	}
+#undef BOTSCHED_WHY
+	return qfalse;
+}
+
+// qtrue when the bot runs its decision making in this frame
+static qboolean BotSched_ShouldThink(bot_state_t* bs, int time) {
+	const int c = bs->client;
+	const int fps = BotSched_FpsFor(c);
+	int interval;
+
+	if (fps <= 0) {
+		return qtrue;	// the original: every server frame
+	}
+	interval = 1000 / fps;
+	if (interval < 1) interval = 1;
+	if (botSchedInterval[c] != interval || botSchedNext[c] <= 0 || botSchedNext[c] - time > 2 * interval) {
+		botSchedInterval[c] = interval;
+		botSchedNext[c] = time + (c * interval) / MAX_CLIENTS;	// spread by slot
+	}
+	if (BotSched_Urgent(bs)) {
+		const int cfps = bot_ai_combatFps.integer;
+		if (cfps > 0) {
+			const int ci = 1000 / cfps;
+			if (time < botSchedCombatNext[c] && botSchedCombatNext[c] - time <= ci) {
+				return qfalse;
+			}
+			botSchedCombatNext[c] = time + ci;
+		}
+		if (botProf.enabled) botSchedUrgentThinks++;
+		return qtrue;
+	}
+	if (time >= botSchedNext[c]) {
+		botSchedNext[c] += interval;
+		if (botSchedNext[c] <= time) {
+			botSchedNext[c] = time + interval;
+		}
+		if (botProf.enabled) botSchedPlannedThinks++;
+		return qtrue;
+	}
+	if (botProf.enabled) botSchedSkips++;
+	return qfalse;
+}
+
+/*
+==================
 BotAIStartFrame
 ==================
 */
@@ -20113,8 +20465,16 @@ int BotAIStartFrame(int time) {
 			botstates[i]->botthink_residual -= thinktime;
 
 			if (g_entities[i].client->pers.connected == CON_CONNECTED) {
-				BotProf_Think(i, (float)thinktime / 1000);
-				profThinks++;
+				if (BotSched_ShouldThink(botstates[i], time)) {
+					const int since = botSchedLast[i] > 0 && time > botSchedLast[i] ? time - botSchedLast[i] : thinktime;
+					botSchedSkipped[i] = qfalse;
+					BotProf_Think(i, (float)(BotSched_FpsFor(i) > 0 ? since : thinktime) / 1000);
+					botSchedLast[i] = time;
+					botSchedHealth[i] = g_entities[i].client->ps.stats[STAT_HEALTH];
+					profThinks++;
+				} else {
+					botSchedSkipped[i] = qtrue;
+				}
 			}
 		}
 	}
@@ -20166,6 +20526,15 @@ int BotAISetup(int restart) {
 #endif
 
 	trap->Cvar_Register(&bot_profile, "bot_profile", "0", 0);
+	trap->Cvar_Register(&bot_perf, "bot_perf", "0", CVAR_ARCHIVE);
+	trap->Cvar_Register(&bot_perfVerify, "bot_perfVerify", "0", 0);
+	trap->Cvar_Register(&bot_perfBase, "bot_perfBase", "-1", 0);
+	trap->Cvar_Register(&bot_scanCacheMs, "bot_scanCacheMs", "100", CVAR_ARCHIVE);
+	trap->Cvar_Register(&bot_ai_fps, "bot_ai_fps", "0", CVAR_ARCHIVE);
+	trap->Cvar_Register(&bot_ai_fpsBase, "bot_ai_fpsBase", "-1", 0);
+	trap->Cvar_Register(&bot_ai_combatFps, "bot_ai_combatFps", "0", CVAR_ARCHIVE);
+	trap->Cvar_Register(&bot_ai_combatDist, "bot_ai_combatDist", "1024", CVAR_ARCHIVE);
+	trap->Cvar_Register(&bot_ai_threatDist, "bot_ai_threatDist", "600", CVAR_ARCHIVE);
 	trap->Cvar_Register(&bot_profileEval, "bot_profileEval", "1", 0);
 	trap->Cvar_Register(&bot_fixes, "bot_fixes", "1", CVAR_ARCHIVE);
 	trap->Cvar_Register(&bot_abBase, "bot_abBase", "0", 0);	// features of the baseline group in an A/B test
