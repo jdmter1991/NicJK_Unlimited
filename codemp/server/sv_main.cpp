@@ -1433,6 +1433,7 @@ All times are wall-clock milliseconds of work done inside SV_Frame.
 */
 static cvar_t *sv_profile = NULL;
 
+#define SVPROF_HIST 2000
 typedef struct svProfAccum_s {
 	uint64_t	windowStartNs;
 	int			frames;			// SV_Frame calls that ran at least one game frame
@@ -1441,8 +1442,23 @@ typedef struct svProfAccum_s {
 	uint64_t	totalNs, botNs, gameNs, snapNs;
 	uint64_t	maxTotalNs, maxBotNs, maxGameNs, maxSnapNs;
 	comProfile_t base;			// counter values at window start
+	// frame-time histograms (0.1 ms steps up to 200 ms) for the percentiles: the averages and the
+	// maxima alone hide whether a slow frame is a one-off or a pattern
+	int			histTotal[SVPROF_HIST + 1], histBot[SVPROF_HIST + 1];
 } svProfAccum_t;
 static svProfAccum_t svProf;
+
+static double SV_ProfilePercentile( const int *hist, int count, double pct ) {
+	const int want = (int)( count * pct / 100.0 );
+	int acc = 0;
+	for ( int i = 0; i <= SVPROF_HIST; i++ ) {
+		acc += hist[i];
+		if ( acc > want ) {
+			return i * 0.1;
+		}
+	}
+	return SVPROF_HIST * 0.1;
+}
 
 static void SV_ProfileReport( uint64_t nowNs ) {
 	static const char *phaseNames[CPROF_NUM_PHASES] = { "other", "botai", "game", "snap" };
@@ -1455,6 +1471,7 @@ static void SV_ProfileReport( uint64_t nowNs ) {
 		}
 	}
 
+	Com_Printf( "SVPROF console output %.1f ms in the window (left out of the times below)\n", ( com_prof.printNs - svProf.base.printNs ) / 1e6 );
 	Com_Printf( "SVPROF window=%.1fs frames=%d gameframes=%d bots=%d humans=%d over_budget=%d\n",
 		(double)(nowNs - svProf.windowStartNs) / 1e9, svProf.frames, svProf.gameFrames, bots, humans, svProf.overBudget );
 	Com_Printf( "SVPROF ms/frame avg(max): total %.3f (%.3f)  botai %.3f (%.3f)  game %.3f (%.3f)  snap %.3f (%.3f)\n",
@@ -1462,6 +1479,10 @@ static void SV_ProfileReport( uint64_t nowNs ) {
 		svProf.botNs / f / 1e6, svProf.maxBotNs / 1e6,
 		svProf.gameNs / f / 1e6, svProf.maxGameNs / 1e6,
 		svProf.snapNs / f / 1e6, svProf.maxSnapNs / 1e6 );
+	Com_Printf( "SVPROF percentiles ms: total p50 %.1f p95 %.1f p99 %.1f  botai p50 %.1f p95 %.1f p99 %.1f\n",
+		SV_ProfilePercentile( svProf.histTotal, svProf.frames, 50 ), SV_ProfilePercentile( svProf.histTotal, svProf.frames, 95 ),
+		SV_ProfilePercentile( svProf.histTotal, svProf.frames, 99 ), SV_ProfilePercentile( svProf.histBot, svProf.frames, 50 ),
+		SV_ProfilePercentile( svProf.histBot, svProf.frames, 95 ), SV_ProfilePercentile( svProf.histBot, svProf.frames, 99 ) );
 	for ( int ph = 0; ph < CPROF_NUM_PHASES; ph++ ) {
 		const uint64_t tr = com_prof.svTraces[ph] - svProf.base.svTraces[ph];
 		const uint64_t trNs = com_prof.svTraceNs[ph] - svProf.base.svTraceNs[ph];
@@ -1524,6 +1545,11 @@ static void SV_ProfileFrame( uint64_t startNs, uint64_t botNs, uint64_t gameNs, 
 		if ( gameNs > svProf.maxGameNs ) svProf.maxGameNs = gameNs;
 		if ( snapNs > svProf.maxSnapNs ) svProf.maxSnapNs = snapNs;
 		if ( sv_fps->integer > 0 && totalNs > (uint64_t)( 1000000000 / sv_fps->integer ) ) svProf.overBudget++;
+		{
+			const uint64_t ht = totalNs / 100000, hb = botNs / 100000;
+			svProf.histTotal[ht > SVPROF_HIST ? SVPROF_HIST : ht]++;
+			svProf.histBot[hb > SVPROF_HIST ? SVPROF_HIST : hb]++;
+		}
 	}
 	if ( nowNs - svProf.windowStartNs >= (uint64_t)sv_profile->integer * 1000000000ull ) {
 		SV_ProfileReport( nowNs );
@@ -1665,15 +1691,20 @@ void SV_Frame( int msec ) {
 	}
 	SV_WatchdogFrameBegin( sv_hitchStacks->integer );
 	const uint64_t profFrameStart = com_prof.enabled ? Com_ProfNowNs() : 0;
+	const uint64_t profPrintStart = com_prof.printNs;
 	uint64_t profBotNs = 0, profGameNs = 0, profSnapNs = 0;
 	int profGameFrames = 0;
 
 	if (com_dedicated->integer) {
 		const uint64_t t0 = com_prof.enabled ? Com_ProfNowNs() : 0;
+		const uint64_t p0 = com_prof.printNs;
 		com_prof.phase = CPROF_BOTAI;
 		SV_BotFrame( sv.time );
 		com_prof.phase = CPROF_OTHER;
-		if ( com_prof.enabled ) profBotNs = Com_ProfNowNs() - t0;
+		if ( com_prof.enabled ) {
+			profBotNs = Com_ProfNowNs() - t0;
+			profBotNs -= ( com_prof.printNs - p0 < profBotNs ) ? com_prof.printNs - p0 : profBotNs;	// printing is not bot AI
+		}
 	}
 
 	// run the game simulation in chunks
@@ -1713,7 +1744,7 @@ void SV_Frame( int msec ) {
 
 	SV_WatchdogFrameEnd();
 	if ( com_prof.enabled ) {
-		SV_ProfileFrame( profFrameStart, profBotNs, profGameNs, profSnapNs, profGameFrames );
+		SV_ProfileFrame( profFrameStart + ( com_prof.printNs - profPrintStart ), profBotNs, profGameNs, profSnapNs, profGameFrames );
 	}
 
 	SV_CheckCvars();

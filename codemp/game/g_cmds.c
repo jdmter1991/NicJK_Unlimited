@@ -3821,7 +3821,7 @@ void saberKnockDown(gentity_t *saberent, gentity_t *saberOwner, gentity_t *other
 void Cmd_ToggleSaber_f(gentity_t *ent)
 {
 //[JAPRO - Serverside - Force - Fix Saber in grip - Start]
-	if (g_fixSaberInGrip.integer < 3 && ent->client->ps.fd.forceGripCripple)
+	if (g_fixSaberInGrip.integer < 3 && ent->client->ps.fd.forceGripCripple && !JK2SABER()) // JK2 1.02 has no grip rule here
 	{ //if they are being gripped, don't let them unholster their saber
 		if (ent->client->ps.saberHolstered)
 		{
@@ -3935,6 +3935,12 @@ void Cmd_SaberAttackCycle_f(gentity_t* ent) // Niksata Edit
 		return;
 	}
 	*/
+
+	if (g_jk2_102sabersystem.integer)
+	{ // JK2 1.02 saber system: blue -> yellow -> red up to the saber offence level
+		Cmd_SaberAttackCycle_JK2(ent);
+		return;
+	}
 
 	if (ent->client->saber[0].model[0] && ent->client->saber[1].model[0])
 	{ //no cycling for akimbo
@@ -4138,7 +4144,7 @@ void Cmd_SaberAttackCycle_f(gentity_t* ent) // Niksata Edit
 	}
 } // Niksata Edit
 
-#if 0
+// used by the JK2 1.02 mode (one private duel at a time on the server)
 qboolean G_OtherPlayersDueling(void)
 {
 	int i = 0;
@@ -4157,7 +4163,143 @@ qboolean G_OtherPlayersDueling(void)
 
 	return qfalse;
 }
-#endif
+
+// JK2 1.02 /engage_duel (mv g_cmds.c:Cmd_EngageDuel_f): not in duel or team gametypes, saber only,
+// one private duel at a time on the server, 10 s wait after a duel, 5 s to accept, sabers holstered
+// for the 2 s countdown. dueltypes[] is set to 0 (saber duel) for the rest of our duel code.
+static void Cmd_EngageDuel_JK2(gentity_t *ent)
+{
+	trace_t tr;
+	vec3_t forward, fwdOrg;
+
+	if (!g_privateDuel.integer)
+	{
+		return;
+	}
+
+	if (level.gametype == GT_DUEL || level.gametype == GT_POWERDUEL || level.gametype == GT_SIEGE)
+	{ //rather pointless in this mode..
+		trap->SendServerCommand( ent-g_entities, va("print \"%s\n\"", G_GetStringEdString("MP_SVGAME", "NODUEL_GAMETYPE")) );
+		return;
+	}
+
+	if (level.gametype >= GT_TEAM)
+	{ //no private dueling in team modes
+		trap->SendServerCommand( ent-g_entities, va("print \"%s\n\"", G_GetStringEdString("MP_SVGAME", "NODUEL_GAMETYPE")) );
+		return;
+	}
+
+	if (ent->client->ps.duelTime >= level.time)
+	{
+		return;
+	}
+
+	if (ent->client->ps.weapon != WP_SABER)
+	{
+		return;
+	}
+
+	if (ent->client->ps.saberInFlight)
+	{
+		return;
+	}
+
+	if (ent->client->ps.duelInProgress)
+	{
+		return;
+	}
+
+	//New: Don't let a player duel if he just did and hasn't waited 10 seconds yet (note: If someone challenges him, his duel timer will reset so he can accept)
+	if (ent->client->ps.fd.privateDuelTime > level.time)
+	{
+		trap->SendServerCommand( ent-g_entities, va("print \"%s\n\"", G_GetStringEdString("MP_SVGAME", "CANTDUEL_JUSTDID")) );
+		return;
+	}
+
+	if (G_OtherPlayersDueling())
+	{
+		trap->SendServerCommand( ent-g_entities, va("print \"%s\n\"", G_GetStringEdString("MP_SVGAME", "CANTDUEL_BUSY")) );
+		return;
+	}
+
+	AngleVectors( ent->client->ps.viewangles, forward, NULL, NULL );
+
+	fwdOrg[0] = ent->client->ps.origin[0] + forward[0]*256;
+	fwdOrg[1] = ent->client->ps.origin[1] + forward[1]*256;
+	fwdOrg[2] = (ent->client->ps.origin[2]+ent->client->ps.viewheight) + forward[2]*256;
+
+	trap->Trace(&tr, ent->client->ps.origin, NULL, NULL, fwdOrg, ent->s.number, MASK_PLAYERSOLID, qfalse, 0, 0);
+
+	if (tr.fraction != 1 && tr.entityNum < MAX_CLIENTS)
+	{
+		gentity_t *challenged = &g_entities[tr.entityNum];
+
+		if (!challenged || !challenged->client || !challenged->inuse ||
+			challenged->health < 1 || challenged->client->ps.stats[STAT_HEALTH] < 1 ||
+			challenged->client->ps.weapon != WP_SABER || challenged->client->ps.duelInProgress ||
+			challenged->client->ps.saberInFlight)
+		{
+			return;
+		}
+
+		if (level.gametype >= GT_TEAM && OnSameTeam(ent, challenged))
+		{
+			return;
+		}
+
+		if (challenged->client->ps.duelIndex == ent->s.number && challenged->client->ps.duelTime >= level.time)
+		{
+			trap->SendServerCommand( -1, va("print \"%s" S_COLOR_WHITE " %s %s" S_COLOR_WHITE "!\n\"", challenged->client->pers.netname, G_GetStringEdString("MP_SVGAME", "PLDUELACCEPT"), ent->client->pers.netname) );
+
+			ent->client->ps.duelInProgress = qtrue;
+			challenged->client->ps.duelInProgress = qtrue;
+			dueltypes[ent->client->ps.clientNum] = 0;
+			dueltypes[challenged->client->ps.clientNum] = 0;
+
+			ent->client->ps.duelTime = level.time + 2000;
+			challenged->client->ps.duelTime = level.time + 2000;
+
+			G_AddEvent(ent, EV_PRIVATE_DUEL, 1);
+			G_AddEvent(challenged, EV_PRIVATE_DUEL, 1);
+
+			//Holster their sabers now, until the duel starts (then they'll get auto-turned on to look cool)
+
+			if (!ent->client->ps.saberHolstered)
+			{
+				if (ent->client->saber[0].soundOff)
+				{
+					G_Sound(ent, CHAN_AUTO, ent->client->saber[0].soundOff);
+				}
+				ent->client->ps.weaponTime = 400;
+				ent->client->ps.saberHolstered = 2;
+			}
+			if (!challenged->client->ps.saberHolstered)
+			{
+				if (challenged->client->saber[0].soundOff)
+				{
+					G_Sound(challenged, CHAN_AUTO, challenged->client->saber[0].soundOff);
+				}
+				challenged->client->ps.weaponTime = 400;
+				challenged->client->ps.saberHolstered = 2;
+			}
+		}
+		else
+		{
+			//Print the message that a player has been challenged in private, only announce the actual duel initiation in private
+			trap->SendServerCommand( challenged-g_entities, va("cp \"%s" S_COLOR_WHITE " %s\n\"", ent->client->pers.netname, G_GetStringEdString("MP_SVGAME", "PLDUELCHALLENGE")) );
+			trap->SendServerCommand( ent-g_entities, va("cp \"%s %s\n\"", G_GetStringEdString("MP_SVGAME", "PLDUELCHALLENGED"), challenged->client->pers.netname) );
+		}
+
+		challenged->client->ps.fd.privateDuelTime = 0; //reset the timer in case this player just got out of a duel. He should still be able to accept the challenge.
+
+		ent->client->ps.forceHandExtend = HANDEXTEND_DUELCHALLENGE;
+		ent->client->ps.forceHandExtendTime = level.time + 1000;
+
+		ent->client->ps.duelIndex = challenged->s.number;
+		ent->client->ps.duelTime = level.time + 5000;
+		dueltypes[ent->client->ps.clientNum] = 0;
+	}
+}
 
 //JAPRO - Serverside - Fullforce Duels - Start
 void Cmd_ForceDuel_f(gentity_t *ent)
@@ -4247,6 +4389,15 @@ void Cmd_EngageDuel_f(gentity_t *ent, int dueltype)//JAPRO - Serverside - Fullfo
 {
 	trace_t tr;
 	vec3_t forward, fwdOrg;
+
+	if (JK2SABER())
+	{ // JK2 1.02 mode: only the plain saber duel, with the 1.02 rules
+		if (dueltype == 0)
+		{
+			Cmd_EngageDuel_JK2(ent);
+		}
+		return;
+	}
 
 	if (!g_privateDuel.integer)
 		return;
@@ -7707,7 +7858,7 @@ void Cmd_Race_f(gentity_t *ent)
 		return;
 	}
 
-	if (g_raceMode.integer < 2) {
+	if (g_raceMode.integer < 2 || JK2SABER()) { // no race mode in the JK2 1.02 mode
 		trap->SendServerCommand(ent-g_entities, "print \"^5This command is not allowed!\n\"");
 		ent->client->sess.raceMode = qfalse;
 		return;
@@ -8293,12 +8444,12 @@ void Cmd_ServerConfig_f(gentity_t *ent) //loda fixme fix indenting on this, make
 		Q_strcat(buf, sizeof(buf), va("   ^5Saber Duel Force regen time: ^2%i\n", g_saberDuelForceRegenTime.integer));
 	if (g_forceDuelForceRegenTime.integer != g_forceRegenTime.integer)
 		Q_strcat(buf, sizeof(buf), va("   ^5Force Duel Force regen time: ^2%i\n", g_forceDuelForceRegenTime.integer));
-	Q_strcat(buf, sizeof(buf), va("   ^5Location based damage^3: ^2%s\n", (g_locationBasedDamage.integer) ? "Yes" : "No")); //Only print if changed?
-	if (!(dmflags.integer & DF_NO_FALLING) && g_maxFallDmg.integer)
-		Q_strcat(buf, sizeof(buf), va("   ^5Fall damage capped at^3: ^2%i\n", g_maxFallDmg.integer));
-	if (g_fixKillCredit.integer == 1)
+	Q_strcat(buf, sizeof(buf), va("   ^5Location based damage^3: ^2%s\n", (JK2O_LOCATIONDAMAGE) ? "Yes" : "No")); //Only print if changed?
+	if (!(dmflags.integer & DF_NO_FALLING) && JK2O_MAXFALLDMG)
+		Q_strcat(buf, sizeof(buf), va("   ^5Fall damage capped at^3: ^2%i\n", JK2O_MAXFALLDMG));
+	if (JK2O_FIXKILLCREDIT == 1)
 		Q_strcat(buf, sizeof(buf), "   ^5Prevents suiciding/spectating to avoid a kill\n");
-	else if (g_fixKillCredit.integer > 1)
+	else if (JK2O_FIXKILLCREDIT > 1)
 		Q_strcat(buf, sizeof(buf), "   ^5Prevents suiciding/spectating/disconnecting to avoid a kill\n");
 	if (g_newBotAI.integer)
 		Q_strcat(buf, sizeof(buf), va("   ^5New bot AI for force and saber-only combat\n", g_corpseRemovalTime.integer));
@@ -8312,7 +8463,7 @@ void Cmd_ServerConfig_f(gentity_t *ent) //loda fixme fix indenting on this, make
 
 	//Saber changes
 	Q_strncpyz(buf, " ^3Saber Changes:\n", sizeof(buf));
-	if (g_tweakSaber.integer & ST_JAPLUS_DMG)
+	if (JK2O_TWEAKSABER & ST_JAPLUS_DMG)
 		Q_strcat(buf, sizeof(buf), "   ^5Saber style damage^3: ^2JA+ MP\n");
 	else {
 		Q_strcat(buf, sizeof(buf), va("   ^5Saber style damage^3: ^2%s\n", (d_saberSPStyleDamage.integer) ? "SP" : "MP"));
@@ -8358,35 +8509,35 @@ void Cmd_ServerConfig_f(gentity_t *ent) //loda fixme fix indenting on this, make
 		Q_strcat(buf, sizeof(buf), va("   ^5Backslash damage scale^3: ^2%.2f\n", g_backslashDamageScale.value));
 	if (g_redDFADamageScale.value != 1)
 		Q_strcat(buf, sizeof(buf), va("   ^5Red DFA damage scale^3: ^2%.2f\n", g_redDFADamageScale.value));
-	if (g_tweakSaber.integer & ST_FIXYELLOWDFA)
+	if (JK2O_TWEAKSABER & ST_FIXYELLOWDFA)
 		Q_strcat(buf, sizeof(buf), "   ^5JK2 Style yellow DFA\n");
-	if (g_tweakSaber.integer & ST_SPINBACKSLASH)
+	if (JK2O_TWEAKSABER & ST_SPINBACKSLASH)
 		Q_strcat(buf, sizeof(buf), "   ^5Spinable backslash\n");
-	if (g_tweakSaber.integer & ST_SPINREDDFA)
+	if (JK2O_TWEAKSABER & ST_SPINREDDFA)
 		Q_strcat(buf, sizeof(buf), "   ^5Spinable red DFA\n");
-	if (g_tweakSaber.integer & ST_JK2LUNGE)
+	if (JK2O_TWEAKSABER & ST_JK2LUNGE)
 		Q_strcat(buf, sizeof(buf), "   ^5JK2 style lunge\n");
 	if (g_maxSaberDefense.integer)
 		Q_strcat(buf, sizeof(buf), va("   ^5Saber defense level capped at^3: ^2%i\n", g_maxSaberDefense.integer));
-	if ((g_tweakSaber.integer & ST_REDUCE_SABERBLOCK) && ((g_tweakSaber.integer & ST_JAPLUS_DMG) || !d_saberSPStyleDamage.integer || !g_saberDuelSPDamage.integer))
+	if ((JK2O_TWEAKSABER & ST_REDUCE_SABERBLOCK) && ((JK2O_TWEAKSABER & ST_JAPLUS_DMG) || !d_saberSPStyleDamage.integer || !g_saberDuelSPDamage.integer))
 		Q_strcat(buf, sizeof(buf), "   ^5Reduced saber block for MP style damage\n");
-	if ((g_tweakSaber.integer & ST_REDUCE_SABERDROP) && ((g_tweakSaber.integer & ST_JAPLUS_DMG) || !d_saberSPStyleDamage.integer || !g_forceDuelSPDamage.integer))
+	if ((JK2O_TWEAKSABER & ST_REDUCE_SABERDROP) && ((JK2O_TWEAKSABER & ST_JAPLUS_DMG) || !d_saberSPStyleDamage.integer || !g_forceDuelSPDamage.integer))
 		Q_strcat(buf, sizeof(buf), "   ^5Reduced saber drop for MP style damage\n");
-	if (g_tweakSaber.integer & ST_FIXED_SABERSWITCH)
+	if (JK2O_TWEAKSABER & ST_FIXED_SABERSWITCH)
 		Q_strcat(buf, sizeof(buf), "   ^5Fixed saber switch swing\n");
-	if (g_tweakSaber.integer & ST_ALLOW_ROLLCANCEL)
+	if (JK2O_TWEAKSABER & ST_ALLOW_ROLLCANCEL)
 		Q_strcat(buf, sizeof(buf), "   ^5Roll cancel enabled\n");
-	if (g_tweakSaber.integer & ST_NO_REDCHAIN)
+	if (JK2O_TWEAKSABER & ST_NO_REDCHAIN)
 		Q_strcat(buf, sizeof(buf), "   ^5Red swings can not be chained\n");
-	if (g_tweakSaber.integer & ST_REDDFAFIX)
+	if (JK2O_TWEAKSABER & ST_REDDFAFIX)
 		Q_strcat(buf, sizeof(buf), "   ^5Red DFA boost exploit removed\n");
-	if (g_tweakSaber.integer & ST_REDDFANOFORCE)
+	if (JK2O_TWEAKSABER & ST_REDDFANOFORCE)
 		Q_strcat(buf, sizeof(buf), "   ^5Red DFA costs 0 forcepoints\n");
-	if (g_tweakSaber.integer & ST_NEWSPSABERDMG)
+	if (JK2O_TWEAKSABER & ST_NEWSPSABERDMG)
 		Q_strcat(buf, sizeof(buf), "   ^5No velocity damgage boost for SP damages\n");
-	else if (g_tweakSaber.integer & ST_DUNESABER)
+	else if (JK2O_TWEAKSABER & ST_DUNESABER)
 		Q_strcat(buf, sizeof(buf), "   ^5Negative velocity damage boost for SP damages\n");
-	else if (g_tweakSaber.integer & ST_NEWSPSABERDMGCAP)
+	else if (JK2O_TWEAKSABER & ST_NEWSPSABERDMGCAP)
 		Q_strcat(buf, sizeof(buf), "   ^5Limited velocity damage boost for SP damages\n");
 
 
@@ -8395,73 +8546,73 @@ void Cmd_ServerConfig_f(gentity_t *ent) //loda fixme fix indenting on this, make
 	//Gun changes
 	if (g_weaponDisable.integer < (1<<WP_CONCUSSION) || g_startingWeapons.integer > (1<<WP_BRYAR_PISTOL)) { // Weapons are enabled?
 		Q_strncpyz(buf, " ^3Weapon Changes:\n", sizeof(buf));
-		if (g_tweakWeapons.integer & WT_FAST_WEAPONSWITCH)
+		if (JK2O_TWEAKWEAPONS & WT_FAST_WEAPONSWITCH)
 			Q_strcat(buf, sizeof(buf), "   ^5Fast weapon switch\n");
-		if (d_projectileGhoul2Collision.integer == 0)
+		if (JK2O_PROJG2COLLISION == 0)
 			Q_strcat(buf, sizeof(buf), "   ^5Larger, square hitboxes for projectiles and hitscan\n");
-		else if (d_projectileGhoul2Collision.integer > 1)
+		else if (JK2O_PROJG2COLLISION > 1)
 			Q_strcat(buf, sizeof(buf), "   ^5Larger, square hitboxes for projectiles\n");
-		if (g_selfDamageScale.value != 0.5f)
-			Q_strcat(buf, sizeof(buf), va("   ^5Self damage scale: ^2%.2f\n", g_selfDamageScale.value));
-		if (g_fullInheritance.integer && g_projectileInheritance.value)
-			Q_strcat(buf, sizeof(buf), va("   ^5Full projectile inheritance: ^2%.2f%\n", g_projectileInheritance.value * 100.0f));
-		else if (g_projectileInheritance.value)
-			Q_strcat(buf, sizeof(buf), va("   ^5Forwards projectile inheritance: ^2%.2f%\n", g_projectileInheritance.value * 100.0f));
-		if ((g_unlagged.integer & UNLAGGED_PROJ_NUDGE) && !(g_unlagged.integer & UNLAGGED_HITSCAN)) // proj nudge only
+		if (JK2O_SELFDAMAGESCALE != 0.5f)
+			Q_strcat(buf, sizeof(buf), va("   ^5Self damage scale: ^2%.2f\n", JK2O_SELFDAMAGESCALE));
+		if (JK2O_FULLINHERITANCE && JK2O_PROJINHERITANCE)
+			Q_strcat(buf, sizeof(buf), va("   ^5Full projectile inheritance: ^2%.2f%\n", JK2O_PROJINHERITANCE * 100.0f));
+		else if (JK2O_PROJINHERITANCE)
+			Q_strcat(buf, sizeof(buf), va("   ^5Forwards projectile inheritance: ^2%.2f%\n", JK2O_PROJINHERITANCE * 100.0f));
+		if ((JK2O_UNLAGGED & UNLAGGED_PROJ_NUDGE) && !(JK2O_UNLAGGED & UNLAGGED_HITSCAN)) // proj nudge only
 			Q_strcat(buf, sizeof(buf), "   ^5Lag compensation for projectiles\n");
-		else if ((g_unlagged.integer & UNLAGGED_HITSCAN) && !(g_unlagged.integer & UNLAGGED_PROJ_NUDGE)) // hitscan only
+		else if ((JK2O_UNLAGGED & UNLAGGED_HITSCAN) && !(JK2O_UNLAGGED & UNLAGGED_PROJ_NUDGE)) // hitscan only
 			Q_strcat(buf, sizeof(buf), "   ^5Lag compensation for hitscan\n");
-		else if ((g_unlagged.integer & UNLAGGED_HITSCAN) && (g_unlagged.integer & UNLAGGED_PROJ_NUDGE)) //Proj + hitscan
+		else if ((JK2O_UNLAGGED & UNLAGGED_HITSCAN) && (JK2O_UNLAGGED & UNLAGGED_PROJ_NUDGE)) //Proj + hitscan
 			Q_strcat(buf, sizeof(buf), "   ^5Lag compensation for projectiles and hitscan\n");
-		if (g_projectileVelocityScale.value != 1.0f)
-			Q_strcat(buf, sizeof(buf), va("   ^5Projectile velocity scale: ^2%.2f\n", g_projectileVelocityScale.value));
-		if (g_weaponDamageScale.value != 1.0f)
-			Q_strcat(buf, sizeof(buf), va("   ^5Weapon damage scale: ^2%.2f\n", g_weaponDamageScale.value));
-		if (g_tweakWeapons.integer & WT_DEMP2_RANDOM)
+		if (JK2O_PROJVELOCITYSCALE != 1.0f)
+			Q_strcat(buf, sizeof(buf), va("   ^5Projectile velocity scale: ^2%.2f\n", JK2O_PROJVELOCITYSCALE));
+		if (JK2O_WEAPONDAMAGESCALE != 1.0f)
+			Q_strcat(buf, sizeof(buf), va("   ^5Weapon damage scale: ^2%.2f\n", JK2O_WEAPONDAMAGESCALE));
+		if (JK2O_TWEAKWEAPONS & WT_DEMP2_RANDOM)
 			Q_strcat(buf, sizeof(buf), "   ^5Nonrandom Demp2 alt damage\n");
-		if (g_tweakWeapons.integer & WT_DEMP2_DAM)
+		if (JK2O_TWEAKWEAPONS & WT_DEMP2_DAM)
 			Q_strcat(buf, sizeof(buf), "   ^5Increased Demp2 primary damage\n");
-		if (g_tweakWeapons.integer & WT_DISRUPTOR_DAM)
+		if (JK2O_TWEAKWEAPONS & WT_DISRUPTOR_DAM)
 			Q_strcat(buf, sizeof(buf), "   ^5Decreased sniper alt max damage\n");
-		if (g_tweakWeapons.integer & WT_BOWCASTER_SPRD)
+		if (JK2O_TWEAKWEAPONS & WT_BOWCASTER_SPRD)
 			Q_strcat(buf, sizeof(buf), "   ^5Modified bowcaster primary spread\n");
-		if (g_tweakWeapons.integer & WT_REPEATER_ALT_DAM)
+		if (JK2O_TWEAKWEAPONS & WT_REPEATER_ALT_DAM)
 			Q_strcat(buf, sizeof(buf), "   ^5Increased repeater alt damage\n");
-		if (g_tweakWeapons.integer & WT_FLECHETTE_SPRD)
+		if (JK2O_TWEAKWEAPONS & WT_FLECHETTE_SPRD)
 			Q_strcat(buf, sizeof(buf), "   ^5Nonrandom flechette primary spread\n");
-		if (g_tweakWeapons.integer & WT_FLECHETTE_ALT_DAM)
+		if (JK2O_TWEAKWEAPONS & WT_FLECHETTE_ALT_DAM)
 			Q_strcat(buf, sizeof(buf), "   ^5Decreased flechette alt damage\n");
-		if (g_tweakWeapons.integer & WT_FLECHETTE_ALT_SPRD)
+		if (JK2O_TWEAKWEAPONS & WT_FLECHETTE_ALT_SPRD)
 			Q_strcat(buf, sizeof(buf), "   ^5Nonrandom flechette alt spread/velocity\n");
-		if (g_tweakWeapons.integer & WT_CONC_ALT_DAM)
+		if (JK2O_TWEAKWEAPONS & WT_CONC_ALT_DAM)
 			Q_strcat(buf, sizeof(buf), "   ^5Increased concussion rifle alt damage\n");
-		if (g_tweakWeapons.integer & WT_PROJECTILE_KNOCKBACK)
+		if (JK2O_TWEAKWEAPONS & WT_PROJECTILE_KNOCKBACK)
 			Q_strcat(buf, sizeof(buf), "   ^5Removed knockback from most projectiles\n");
-		if (g_tweakWeapons.integer & WT_STUN_HEAL)
+		if (JK2O_TWEAKWEAPONS & WT_STUN_HEAL)
 			Q_strcat(buf, sizeof(buf), "   ^5Heal gun stun baton\n");
-		if (g_tweakWeapons.integer & WT_STUN_LG)
+		if (JK2O_TWEAKWEAPONS & WT_STUN_LG)
 			Q_strcat(buf, sizeof(buf), "   ^5Lightning gun stun baton\n");
-		if (g_tweakWeapons.integer & WT_STUN_SHOCKLANCE)
+		if (JK2O_TWEAKWEAPONS & WT_STUN_SHOCKLANCE)
 			Q_strcat(buf, sizeof(buf), "   ^5Shocklance stun baton\n");
-		if (g_tweakWeapons.integer & WT_PROJECTILE_GRAVITY)
+		if (JK2O_TWEAKWEAPONS & WT_PROJECTILE_GRAVITY)
 			Q_strcat(buf, sizeof(buf), "   ^5Gravity affected projectiles\n");
-		if (g_tweakWeapons.integer & WT_PROJ_SNIPER)
+		if (JK2O_TWEAKWEAPONS & WT_PROJ_SNIPER)
 			Q_strcat(buf, sizeof(buf), "   ^5Projectile sniper enabled\n");
-		if (g_tweakWeapons.integer & WT_SLOW_SNIPER)
+		if (JK2O_TWEAKWEAPONS & WT_SLOW_SNIPER)
 			Q_strcat(buf, sizeof(buf), "   ^5Slower snipe rifle fire rate\n");
-		if (g_tweakWeapons.integer & WT_CENTER_MUZZLEPOINT)
+		if (JK2O_TWEAKWEAPONS & WT_CENTER_MUZZLEPOINT)
 			Q_strcat(buf, sizeof(buf), "   ^5Allowed center muzzlepoint setting\n");
-		if (g_tweakWeapons.integer & WT_PSEUDORANDOM_FIRE)
+		if (JK2O_TWEAKWEAPONS & WT_PSEUDORANDOM_FIRE)
 			Q_strcat(buf, sizeof(buf), "   ^5Pseudo random weapon spread\n");
-		if (g_tweakWeapons.integer & WT_TRIBES)
+		if (JK2O_TWEAKWEAPONS & WT_TRIBES)
 			Q_strcat(buf, sizeof(buf), "   ^5Tribes inspired weapon tweaks\n");
-		else if (g_tweakWeapons.integer & WT_ROCKET_REDEEMER)
+		else if (JK2O_TWEAKWEAPONS & WT_ROCKET_REDEEMER)
 			Q_strcat(buf, sizeof(buf), "   ^5Rocket launcher alt fire is replaced with redeemer\n");
-		if (g_tweakWeapons.integer & WT_ALLOW_GUNROLL)
+		if (JK2O_TWEAKWEAPONS & WT_ALLOW_GUNROLL)
 			Q_strcat(buf, sizeof(buf), "   ^5Gunroll enabled\n");
-		if (g_tweakWeapons.integer & WT_NERFED_PISTOL)
+		if (JK2O_TWEAKWEAPONS & WT_NERFED_PISTOL)
 			Q_strcat(buf, sizeof(buf), "   ^5Lower max damage on pistol alt fire\n");
-		if (g_tweakForce.integer & FT_BUFFMELEE)
+		if (JK2O_TWEAKFORCE & FT_BUFFMELEE)
 			Q_strcat(buf, sizeof(buf), "   ^5Reworked melee combat\n");
 		trap->SendServerCommand(ent-g_entities, va("print \"%s\"", buf));
 	}
@@ -8469,8 +8620,8 @@ void Cmd_ServerConfig_f(gentity_t *ent) //loda fixme fix indenting on this, make
 	//CTF changes
 	if (level.gametype == GT_CTF || ((level.gametype == GT_FFA || level.gametype == GT_TEAM) && g_neutralFlag.integer)) {// CTF Settings
 		Q_strncpyz(buf, " ^3CTF Changes:\n", sizeof(buf));
-		if (g_flagDrag.value)
-			Q_strcat(buf, sizeof(buf), va("   ^5Flag Drag: ^2%.3f\n", g_flagDrag.value));
+		if (JK2O_FLAGDRAG)
+			Q_strcat(buf, sizeof(buf), va("   ^5Flag Drag: ^2%.3f\n", JK2O_FLAGDRAG));
 		if (g_fixFlagSuicide.integer)
 			Q_strcat(buf, sizeof(buf), "   ^5Flag suicide fix enabled\n");
 		if (g_allowFlagThrow.integer)
@@ -8508,29 +8659,29 @@ void Cmd_ServerConfig_f(gentity_t *ent) //loda fixme fix indenting on this, make
 		Q_strcat(buf, sizeof(buf), "   ^5Slick style movement\n");
 	else if (g_movementStyle.integer == MV_TRIBES)
 		Q_strcat(buf, sizeof(buf), "   ^5Tribes style movement\n");
-	if (g_fixRoll.integer == 1)
+	if (JK2O_FIXROLL == 1)
 		Q_strcat(buf, sizeof(buf), "   ^5Tweaked roll\n"); // idk what the fuck this actually does to roll
-	else if (g_fixRoll.integer == 2)
+	else if (JK2O_FIXROLL == 2)
 		Q_strcat(buf, sizeof(buf), "   ^5Chainable roll\n");
-	else if (g_fixRoll.integer > 2)
+	else if (JK2O_FIXROLL > 2)
 		Q_strcat(buf, sizeof(buf), "   ^5JK2 style roll\n");
-	if (g_flipKick.integer == 1)
+	if (JK2O_FLIPKICK == 1)
 		Q_strcat(buf, sizeof(buf), "   ^5JA+ style flipkick\n");
-	else if (g_flipKick.integer == 2)
+	else if (JK2O_FLIPKICK == 2)
 		Q_strcat(buf, sizeof(buf), "   ^5Floodprotected flipkick\n");
-	else if (g_flipKick.integer > 2)
+	else if (JK2O_FLIPKICK > 2)
 		Q_strcat(buf, sizeof(buf), "   ^5Flipkick enabled with JK2 style\n");
-	if (g_glitchKickDamage.integer >= 0)
-		Q_strcat(buf, sizeof(buf), va("   ^5Glitch kick randomness removed, now does ^3%i ^5bonus damage\n", g_glitchKickDamage.integer));
-	if (g_nonRandomKnockdown.integer == 1)
+	if (JK2O_GLITCHKICKDAMAGE >= 0)
+		Q_strcat(buf, sizeof(buf), va("   ^5Glitch kick randomness removed, now does ^3%i ^5bonus damage\n", JK2O_GLITCHKICKDAMAGE));
+	if (JK2O_NONRANDOMKNOCKDOWN == 1)
 		Q_strcat(buf, sizeof(buf), "   ^5Nonrandom flipkick knockdowns\n");
-	else if (g_nonRandomKnockdown.integer == 2)
+	else if (JK2O_NONRANDOMKNOCKDOWN == 2)
 		Q_strcat(buf, sizeof(buf), "   ^5Flipkick knockdown randomness has less variance\n");
-	else if (g_nonRandomKnockdown.integer == 3)
+	else if (JK2O_NONRANDOMKNOCKDOWN == 3)
 		Q_strcat(buf, sizeof(buf), "   ^5Flipkick knockdown based on viewangle\n");
-	else if (g_nonRandomKnockdown.integer == 4)
+	else if (JK2O_NONRANDOMKNOCKDOWN == 4)
 		Q_strcat(buf, sizeof(buf), "   ^5Flipkick knockdown based on viewangle and random chance\n");
-	else if (g_nonRandomKnockdown.integer > 4)
+	else if (JK2O_NONRANDOMKNOCKDOWN > 4)
 		Q_strcat(buf, sizeof(buf), "   ^5No flipkick knockdowns\n");
 	if (g_fixHighFPSAbuse.integer)
 		Q_strcat(buf, sizeof(buf), "   ^5Fixed physics changed due to high FPS\n");
@@ -8538,26 +8689,26 @@ void Cmd_ServerConfig_f(gentity_t *ent) //loda fixme fix indenting on this, make
 		Q_strcat(buf, sizeof(buf), "   ^5Fixed physics for NPCs on slick surfaces\n");
 	else if (g_fixSlidePhysics.integer > 1)
 		Q_strcat(buf, sizeof(buf), "   ^5Fixed physics for players on slick surfaces\n");
-	else if (g_fixPlayerCollision.integer)
+	else if (JK2O_FIXPLAYERCOLLISION)
 		Q_strcat(buf, sizeof(buf), "   ^5Fixed physics for player-player collisions\n");
 	trap->SendServerCommand(ent-g_entities, va("print \"%s\"", buf));
 
 	//Force changes
 	if (g_forcePowerDisable.integer < (1<<NUM_FORCE_POWERS)) {
 		Q_strncpyz(buf, " ^3Force Changes:\n", sizeof(buf));
-		if (g_tweakForce.integer & FT_FORCECOMBO)
+		if (JK2O_TWEAKFORCE & FT_FORCECOMBO)
 			Q_strcat(buf, sizeof(buf), "   ^5Force combo enabled\n");
-		if (g_tweakForce.integer & FT_FASTGRIP)
+		if (JK2O_TWEAKFORCE & FT_FASTGRIP)
 			Q_strcat(buf, sizeof(buf), "   ^5Increased grip runspeed\n");
-		if (g_fixGetups.integer == 1)
+		if (JK2O_FIXGETUPS == 1)
 			Q_strcat(buf, sizeof(buf), "   ^5Grip during knockdown recovery\n");
-		else if (g_fixGetups.integer > 1)
+		else if (JK2O_FIXGETUPS > 1)
 			Q_strcat(buf, sizeof(buf), "   ^5Grip/push/pull during knockdown recovery\n");
-		if (g_fixLightning.integer == 1)
+		if (JK2O_FIXLIGHTNING == 1)
 			Q_strcat(buf, sizeof(buf), "   ^5Lightning gives forcepoints to target\n");
-		else if (g_fixLightning.integer == 2)
+		else if (JK2O_FIXLIGHTNING == 2)
 			Q_strcat(buf, sizeof(buf), "   ^5Lightning gives forcepoints to target, and has reduced damage\n");
-		else if (g_fixLightning.integer > 2)
+		else if (JK2O_FIXLIGHTNING > 2)
 			Q_strcat(buf, sizeof(buf), "   ^5Lightning gives forcepoints to target, has reduced damage, and no melee bonus\n");
 		if (g_fixSaberInGrip.integer == 1)
 			Q_strcat(buf, sizeof(buf), "   ^5Grip does not turn off targets lightsaber\n");
@@ -8565,41 +8716,41 @@ void Cmd_ServerConfig_f(gentity_t *ent) //loda fixme fix indenting on this, make
 			Q_strcat(buf, sizeof(buf), "   ^5Grip does not turn off targets lightsaber, and target can turn on/off lightsaber in grip\n");
 		else if (g_fixSaberInGrip.integer > 2)
 			Q_strcat(buf, sizeof(buf), "   ^5Grip does not turn off targets lightsaber, target can turn on/off lightsaber in grip, and target can toggle saber style in grip\n");
-		if (g_tweakForce.integer & FT_FIXDRAINCOF)
+		if (JK2O_TWEAKFORCE & FT_FIXDRAINCOF)
 			Q_strcat(buf, sizeof(buf), "   ^5Force drain cone of fire is narrower, matching that of the visual effect\n");
-		if (g_tweakForce.integer & FT_PUSHPULLKD)
+		if (JK2O_TWEAKFORCE & FT_PUSHPULLKD)
 			Q_strcat(buf, sizeof(buf), "   ^5Knocked down players are affected by push/pull\n");
-		if (g_tweakForce.integer & FT_JK2KNOCKDOWN)
+		if (JK2O_TWEAKFORCE & FT_JK2KNOCKDOWN)
 			Q_strcat(buf, sizeof(buf), "   ^5Push/pull can knockdown all players like in JK2\n");
-		if ((!(g_forcePowerDisable.integer & FP_PULL) || !(g_forcePowerDisable.integer & FP_PUSH)) && g_unlagged.integer & UNLAGGED_PUSHPULL)
+		if ((!(g_forcePowerDisable.integer & FP_PULL) || !(g_forcePowerDisable.integer & FP_PUSH)) && JK2O_UNLAGGED & UNLAGGED_PUSHPULL)
 			Q_strcat(buf, sizeof(buf), "   ^5Lag compensation for force push/pull\n");
-		if (g_tweakForce.integer & FT_GRIPABSORB)
+		if (JK2O_TWEAKFORCE & FT_GRIPABSORB)
 			Q_strcat(buf, sizeof(buf), "   ^5Force absorb does not gain forcepoints from grip\n");
-		if (g_tweakForce.integer & FT_JK2GRIP)
+		if (JK2O_TWEAKFORCE & FT_JK2GRIP)
 			Q_strcat(buf, sizeof(buf), "   ^5JK2 1.02 style grip\n");
-		if (g_tweakForce.integer & FT_NO_CROUCHATTACK_FP)
+		if (JK2O_TWEAKFORCE & FT_NO_CROUCHATTACK_FP)
 			Q_strcat(buf, sizeof(buf), "   ^5Crouch special attacks do not cost forcepower\n");
 		if (level.gametype >= GT_TEAM) {
-			if (g_teamAbsorbScale.value != 1.0f)
-				Q_strcat(buf, sizeof(buf), va("   ^5Absorb team scale: ^2%.2f\n", g_teamAbsorbScale.value));
-			if (g_teamHealScale.value != 1.0f)
-				Q_strcat(buf, sizeof(buf), va("   ^5Team heal scale: ^2%.2f\n", g_teamHealScale.value));
-			if (g_teamEnergizeScale.value != 1.0f)
-				Q_strcat(buf, sizeof(buf), va("   ^5Team energize scale: ^2%.2f\n", g_teamEnergizeScale.value));
+			if (JK2O_TEAMABSORBSCALE != 1.0f)
+				Q_strcat(buf, sizeof(buf), va("   ^5Absorb team scale: ^2%.2f\n", JK2O_TEAMABSORBSCALE));
+			if (JK2O_TEAMHEALSCALE != 1.0f)
+				Q_strcat(buf, sizeof(buf), va("   ^5Team heal scale: ^2%.2f\n", JK2O_TEAMHEALSCALE));
+			if (JK2O_TEAMENERGIZESCALE != 1.0f)
+				Q_strcat(buf, sizeof(buf), va("   ^5Team energize scale: ^2%.2f\n", JK2O_TEAMENERGIZESCALE));
 		}
-		if (g_tweakForce.integer & FT_NERFED_WEAPPULL)
+		if (JK2O_TWEAKFORCE & FT_NERFED_WEAPPULL)
 			Q_strcat(buf, sizeof(buf), "   ^5Nerfed weapon pull distance\n");
-		if (g_tweakForce.integer & FT_WEAPON_PULLRESIST)
+		if (JK2O_TWEAKFORCE & FT_WEAPON_PULLRESIST)
 			Q_strcat(buf, sizeof(buf), "   ^5Pull resistance when shooting/charging weapons\n");
-		if (g_tweakForce.integer & FT_NORAGEFIRERATE)
+		if (JK2O_TWEAKFORCE & FT_NORAGEFIRERATE)
 			Q_strcat(buf, sizeof(buf), "   ^5Dark rage does not affect weapon firerate\n");
-		if (g_tweakForce.integer & FT_BUFFMINDTRICK)
+		if (JK2O_TWEAKFORCE & FT_BUFFMINDTRICK)
 			Q_strcat(buf, sizeof(buf), "   ^5Mind trick does not break when damaging target unless they are looking at you\n");
-		if (g_tweakForce.integer & FT_DRAINDMGNERF)
+		if (JK2O_TWEAKFORCE & FT_DRAINDMGNERF)
 			Q_strcat(buf, sizeof(buf), "   ^5Drain takes 25% less forcepoints from target\n");
-		if (g_tweakForce.integer & FT_FIXGRIPPEDREGEN)
+		if (JK2O_TWEAKFORCE & FT_FIXGRIPPEDREGEN)
 			Q_strcat(buf, sizeof(buf), "   ^5Jump does not pause your regen while being gripped\n");
-		if (g_tweakForce.integer & FT_FIXLINEDRAIN)
+		if (JK2O_TWEAKFORCE & FT_FIXLINEDRAIN)
 			Q_strcat(buf, sizeof(buf), "   ^5Drain level 3 is a line\n");
 
 		trap->SendServerCommand(ent-g_entities, va("print \"%s\"", buf));
@@ -8681,14 +8832,14 @@ void Cmd_Throwflag_f( gentity_t *ent ) {
 
 void WP_ThrowGrenade(gentity_t *ent);
 void Cmd_ThrowNade_f(gentity_t *ent) {
-	if (ent && ent->client && !ent->client->sess.raceMode && (g_tweakWeapons.integer & WT_TRIBES)) {
+	if (ent && ent->client && !ent->client->sess.raceMode && (JK2O_TWEAKWEAPONS & WT_TRIBES)) {
 		if (ent->client->pers.tribesClass == 3) {
 			if (ent->client->ps.ammo[AMMO_TRIPMINE] > 0) {
 				WP_ThrowGrenade(ent);
 				StandardSetBodyAnim(ent, BOTH_MELEE1, SETANIM_FLAG_OVERRIDE | SETANIM_FLAG_HOLD | SETANIM_FLAG_HOLDLESS, SETANIM_TORSO);
 				ent->client->specificWeaponTime[WP_TRIP_MINE] += 1000;
 				ent->client->ps.weaponTime += 1000;
-				if (!(g_tweakWeapons.integer & WT_INFINITE_AMMO))
+				if (!(JK2O_TWEAKWEAPONS & WT_INFINITE_AMMO))
 					ent->client->ps.ammo[AMMO_TRIPMINE] -= 1;
 			}
 		}
@@ -8701,7 +8852,7 @@ void Cmd_ThrowNade_f(gentity_t *ent) {
 					StandardSetBodyAnim(ent, BOTH_MELEE2, SETANIM_FLAG_OVERRIDE | SETANIM_FLAG_HOLD | SETANIM_FLAG_HOLDLESS, SETANIM_TORSO);
 				ent->client->specificWeaponTime[WP_DET_PACK] += 1000;
 				ent->client->ps.weaponTime += 1000;
-				if (!(g_tweakWeapons.integer & WT_INFINITE_AMMO))
+				if (!(JK2O_TWEAKWEAPONS & WT_INFINITE_AMMO))
 					ent->client->ps.ammo[AMMO_DETPACK] -= 1;
 			}
 		}
@@ -8711,7 +8862,7 @@ void Cmd_ThrowNade_f(gentity_t *ent) {
 				StandardSetBodyAnim(ent, BOTH_THERMAL_THROW, SETANIM_FLAG_OVERRIDE | SETANIM_FLAG_HOLD | SETANIM_FLAG_HOLDLESS, SETANIM_TORSO);
 				ent->client->specificWeaponTime[WP_THERMAL] += 1000;
 				ent->client->ps.weaponTime += 1000;
-				if (!(g_tweakWeapons.integer & WT_INFINITE_AMMO))
+				if (!(JK2O_TWEAKWEAPONS & WT_INFINITE_AMMO))
 					ent->client->ps.ammo[AMMO_THERMAL] -= 1;
 			}
 		}

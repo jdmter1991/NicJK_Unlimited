@@ -92,6 +92,10 @@ qboolean BG_CrouchAnim( int anim )
 
 qboolean BG_InSpecialJump( int anim )
 {
+	if (JK2SABER())
+	{ // JK2 1.02: the JK2 list (bg_pmove_jk2.c)
+		return BG_InSpecialJump_JK2( anim );
+	}
 #ifdef _CGAME
 	if ( cgs.serverMod == SVMOD_JAPLUS )
 	{
@@ -2859,8 +2863,30 @@ void PM_SetTorsoAnimTimer(int time )
 
 void BG_SaberStartTransAnim( int clientNum, int saberAnimLevel, int weapon, int anim, float *animSpeed, int broken )
 {
+	if (JK2SABER())
+	{ // JK2 1.02 saber system (mv bg_panimate.c:BG_SaberStartTransAnim): only the transition speed, and
+	  // in 1.02 it only reaches the server's ghoul2 torso (mv w_saber.c:3879). The pmove timer ignores it
+	  // (BG_SetAnimFinal_JK2) and the 1.02 cgame does not apply it (mv cg_players.c:1615).
 #ifdef _GAME
-	if ((g_tweakSaber.integer & ST_NO_REDCHAIN) && !level.clients[clientNum].sess.raceMode)
+		if ( ( anim >= BOTH_T1_BR__R && anim <= BOTH_T1_BL_TL ) ||
+			( anim >= BOTH_T2_BR__R && anim <= BOTH_T2_BL_TL ) ||
+			( anim >= BOTH_T3_BR__R && anim <= BOTH_T3_BL_TL ) )
+		{
+			if ( saberAnimLevel == FORCE_LEVEL_1 )
+			{
+				*animSpeed *= 1.5;
+			}
+			else if ( saberAnimLevel == FORCE_LEVEL_3 )
+			{
+				*animSpeed *= 0.75;
+			}
+		}
+#endif
+		return;
+	}
+
+#ifdef _GAME
+	if ((JK2O_TWEAKSABER & ST_NO_REDCHAIN) && !level.clients[clientNum].sess.raceMode)
 #elif _CGAME
 	if (pm && JK2SWINGS(pm->ps))
 #endif
@@ -2941,6 +2967,111 @@ PM_SetAnimFinal
 qboolean PM_RunningAnim( int anim );
 qboolean PM_WalkingAnim( int anim );
 
+// JK2 1.02 saber system: mv bg_panimate.c:PM_SetAnimFinal with the 1.02 timers. editAnimSpeed is 0 in
+// 1.02, so there is no speed scaling. Torso hold = (n-2)*lerp-1, legs hold = (n-3)*lerp-1 for
+// HOLD|HOLDLESS, and the rage/speed legs divisors apply to every held legs anim.
+static void BG_SetAnimFinal_JK2(playerState_t *ps, animation_t *animations,
+					 int setAnimParts,int anim,int setAnimFlags)
+{
+	// Set torso anim
+	if (setAnimParts & SETANIM_TORSO)
+	{
+		// Don't reset if it's already running the anim
+		if( !(setAnimFlags & SETANIM_FLAG_RESTART) && ps->torsoAnim == anim )
+		{
+			goto setAnimLegs;
+		}
+		// or if a more important anim is running
+		if( !(setAnimFlags & SETANIM_FLAG_OVERRIDE) && ((ps->torsoTimer > 0)||(ps->torsoTimer == -1)) )
+		{
+			goto setAnimLegs;
+		}
+
+		BG_StartTorsoAnim(ps, anim);
+
+		if (setAnimFlags & SETANIM_FLAG_HOLD)
+		{
+			if (setAnimFlags & SETANIM_FLAG_HOLDLESS)
+			{	// Make sure to only wait in full 1/20 sec server frame intervals.
+				int dur;
+
+				dur = (animations[anim].numFrames ) * abs(animations[anim].frameLerp);
+				dur -= abs(animations[anim].frameLerp)*2; //blendTime is 0
+				if (dur > 1)
+				{
+					ps->torsoTimer = dur-1;
+				}
+				else
+				{
+					ps->torsoTimer = abs(animations[anim].frameLerp);
+				}
+			}
+			else
+			{
+				ps->torsoTimer = ((animations[anim].numFrames ) * abs(animations[anim].frameLerp));
+			}
+
+			if (ps->fd.forcePowersActive & (1 << FP_RAGE))
+			{
+				ps->torsoTimer /= 1.7;
+			}
+		}
+	}
+
+setAnimLegs:
+	// Set legs anim
+	if (setAnimParts & SETANIM_LEGS)
+	{
+		// Don't reset if it's already running the anim
+		if( !(setAnimFlags & SETANIM_FLAG_RESTART) && ps->legsAnim == anim )
+		{
+			goto setAnimDone;
+		}
+		// or if a more important anim is running
+		if( !(setAnimFlags & SETANIM_FLAG_OVERRIDE) && ((ps->legsTimer > 0)||(ps->legsTimer == -1)) )
+		{
+			goto setAnimDone;
+		}
+
+		BG_StartLegsAnim(ps, anim);
+
+		if (setAnimFlags & SETANIM_FLAG_HOLD)
+		{
+			if (setAnimFlags & SETANIM_FLAG_HOLDLESS)
+			{	// Make sure to only wait in full 1/20 sec server frame intervals.
+				int dur;
+
+				dur = (animations[anim].numFrames -1) * abs(animations[anim].frameLerp);
+				dur -= abs(animations[anim].frameLerp)*2; //blendTime is 0
+				if (dur > 1)
+				{
+					ps->legsTimer = dur-1;
+				}
+				else
+				{
+					ps->legsTimer = abs(animations[anim].frameLerp);
+				}
+			}
+			else
+			{
+				ps->legsTimer = ((animations[anim].numFrames ) * abs(animations[anim].frameLerp));
+			}
+
+			if (ps->fd.forcePowersActive & (1 << FP_RAGE))
+			{
+				ps->legsTimer /= 1.3;
+			}
+			else if (ps->fd.forcePowersActive & (1 << FP_SPEED))
+			{
+				ps->legsTimer /= 1.7;
+			}
+		}
+	}
+
+setAnimDone:
+	return;
+}
+
 void BG_SetAnimFinal(playerState_t *ps, animation_t *animations,
 					 int setAnimParts,int anim,int setAnimFlags)
 {
@@ -2948,6 +3079,12 @@ void BG_SetAnimFinal(playerState_t *ps, animation_t *animations,
 
 	if (!animations)
 	{
+		return;
+	}
+
+	if (JK2SABER())
+	{ // JK2 1.02 saber system timers
+		BG_SetAnimFinal_JK2(ps, animations, setAnimParts, anim, setAnimFlags);
 		return;
 	}
 
@@ -3180,6 +3317,11 @@ void BG_SetAnim(playerState_t *ps, animation_t *animations, int setAnimParts,int
 
 void PM_SetAnim(int setAnimParts,int anim,int setAnimFlags)
 {
+	if (JK2SABER() && pm->ps->clientNum < MAX_CLIENTS)
+	{ // JK2 1.02: special jumps restart, a roll is never interrupted (bg_saber_jk2.c)
+		PM_SetAnim_JK2(setAnimParts, anim, setAnimFlags);
+		return;
+	}
 	BG_SetAnim(pm->ps, pm->animations, setAnimParts, anim, setAnimFlags);
 }
 

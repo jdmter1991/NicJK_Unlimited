@@ -1588,7 +1588,9 @@ typedef struct consoleCommand_s {
 	xcommand_t	func;
 } consoleCommand_t;
 
+void R_G2SlotList_f( void );
 static consoleCommand_t	commands[] = {
+	{ "g2slots",			R_G2SlotList_f },
 	{ "imagelist",			R_ImageList_f },
 	{ "shaderlist",			R_ShaderList_f },
 	{ "skinlist",			R_SkinList_f },

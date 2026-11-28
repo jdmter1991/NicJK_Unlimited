@@ -1,0 +1,84 @@
+== 2026-11-25 17:09 before | tffa gametype 6 map mp/ffa3 bots 16 minutes 5 features 256495
+BOTEVAL match: gametype 6, team score red 9 blue 22; flags taken 0 captured 0 returned 1; siege objectives completed 0, rounds ended 0
+BOTEVAL kills by saber 33, gun 0, explosive 0, force 3, other 0; kills of a teammate 0; deaths with no killer 5
+BOTEVAL all bots: features 256495 bots 16 kills 31 deaths 41
+BOTEVAL navigation: force jumps over high obstacles 3, jumps across gaps 1, idle bots set moving 122, stuck jump-outs 2, stuck suicides 0
+BOTEVAL force economy: went into recovery 163, powers switched off to regenerate 124; grips noticed 2, push at the gripper 11, absorb instead 0, got free 2
+== 2026-11-25 17:15 before | ctf gametype 8 map mp/ctf3 bots 16 minutes 5 features 256495
+BOTEVAL match: gametype 8, team score red 0 blue 0; flags taken 1 captured 0 returned 2; siege objectives completed 0, rounds ended 0
+BOTEVAL kills by saber 43, gun 0, explosive 0, force 10, other 8; kills of a teammate 1; deaths with no killer 20
+BOTEVAL all bots: features 256495 bots 16 kills 139 deaths 81
+BOTEVAL navigation: force jumps over high obstacles 5, jumps across gaps 8, idle bots set moving 62, stuck jump-outs 4, stuck suicides 0
+BOTEVAL force economy: went into recovery 214, powers switched off to regenerate 160; grips noticed 2, push at the gripper 2, absorb instead 1, got free 2
+== 2026-11-25 17:20 before | cty gametype 9 map mp/ctf3 bots 16 minutes 5 features 256495
+BOTEVAL match: gametype 9, team score red 0 blue 0; flags taken 0 captured 0 returned 1; siege objectives completed 0, rounds ended 0
+BOTEVAL kills by saber 39, gun 0, explosive 0, force 9, other 3; kills of a teammate 0; deaths with no killer 34
+BOTEVAL all bots: features 256495 bots 16 kills 17 deaths 85
+BOTEVAL navigation: force jumps over high obstacles 5, jumps across gaps 16, idle bots set moving 65, stuck jump-outs 3, stuck suicides 1
+BOTEVAL force economy: went into recovery 216, powers switched off to regenerate 163; grips noticed 2, push at the gripper 5, absorb instead 0, got free 2
+== 2026-11-25 17:26 before | ctf_guns gametype 8 map mp/ctf4 bots 16 minutes 5 features 256495
+BOTEVAL match: gametype 8, team score red 0 blue 0; flags taken 0 captured 0 returned 1; siege objectives completed 0, rounds ended 0
+BOTEVAL kills by saber 12, gun 0, explosive 0, force 6, other 6; kills of a teammate 0; deaths with no killer 71
+BOTEVAL all bots: features 256495 bots 16 kills -27 deaths 95
+BOTEVAL navigation: force jumps over high obstacles 6, jumps across gaps 33, idle bots set moving 191, stuck jump-outs 7, stuck suicides 0
+BOTEVAL force economy: went into recovery 69, powers switched off to regenerate 38; grips noticed 1, push at the gripper 9, absorb instead 0, got free 1
+== 2026-11-25 17:31 before | guns gametype 0 map mp/ffa3 bots 16 minutes 5 features 256495
+BOTEVAL match: gametype 0, team score red 0 blue 0; flags taken 0 captured 0 returned 1; siege objectives completed 0, rounds ended 0
+BOTEVAL kills by saber 75, gun 1, explosive 2, force 29, other 0; kills of a teammate 0; deaths with no killer 7
+BOTEVAL all bots: features 256495 bots 16 kills 106 deaths 114
+BOTEVAL navigation: force jumps over high obstacles 3, jumps across gaps 0, idle bots set moving 23, stuck jump-outs 1, stuck suicides 0
+BOTEVAL force economy: went into recovery 384, powers switched off to regenerate 307; grips noticed 16, push at the gripper 29, absorb instead 2, got free 16
+== 2026-11-25 17:37 before | siege gametype 7 map mp/siege_hoth bots 16 minutes 5 features 256495
+BOTEVAL match: gametype 7, team score red 0 blue 0; flags taken 0 captured 0 returned 1; siege objectives completed 0, rounds ended 0
+BOTEVAL kills by saber 0, gun 37, explosive 1, force 0, other 124; kills of a teammate 10; deaths with no killer 49
+BOTEVAL all bots: features 256495 bots 16 kills 97 deaths 211
+BOTEVAL navigation: force jumps over high obstacles 0, jumps across gaps 0, idle bots set moving 89, stuck jump-outs 30, stuck suicides 0
+BOTEVAL force economy: went into recovery 0, powers switched off to regenerate 0; grips noticed 0, push at the gripper 0, absorb instead 0, got free 0
+== 2026-11-25 17:43 before | siege_desert gametype 7 map mp/siege_desert bots 16 minutes 5 features 256495
+BOTEVAL match: gametype 7, team score red 0 blue 0; flags taken 0 captured 0 returned 1; siege objectives completed 0, rounds ended 0
+BOTEVAL kills by saber 0, gun 16, explosive 0, force 0, other 0; kills of a teammate 0; deaths with no killer 0
+BOTEVAL all bots: features 256495 bots 16 kills 16 deaths 16
+BOTEVAL navigation: force jumps over high obstacles 0, jumps across gaps 0, idle bots set moving 532, stuck jump-outs 71, stuck suicides 7
+BOTEVAL force economy: went into recovery 0, powers switched off to regenerate 0; grips noticed 0, push at the gripper 0, absorb instead 0, got free 0
+== 2026-11-25 17:53 after1 | ctf gametype 8 map mp/ctf3 bots 16 minutes 5 features 2091503
+BOTEVAL match: gametype 8, team score red 0 blue 0; flags taken 1 captured 0 returned 1; siege objectives completed 0, rounds ended 0
+BOTEVAL kills by saber 34, gun 0, explosive 0, force 11, other 3; kills of a teammate 0; deaths with no killer 25
+BOTEVAL all bots: features 2091503 bots 16 kills 98 deaths 61
+BOTEVAL navigation: force jumps over high obstacles 6, jumps across gaps 9, idle bots set moving 36, stuck jump-outs 0, stuck suicides 0
+BOTEVAL force economy: went into recovery 202, powers switched off to regenerate 158; grips noticed 2, push at the gripper 6, absorb instead 0, got free 2
+== 2026-11-25 17:58 after1 | cty gametype 9 map mp/ctf3 bots 16 minutes 5 features 2091503
+BOTEVAL match: gametype 9, team score red 0 blue 0; flags taken 0 captured 0 returned 1; siege objectives completed 0, rounds ended 0
+BOTEVAL kills by saber 49, gun 0, explosive 0, force 9, other 7; kills of a teammate 1; deaths with no killer 21
+BOTEVAL all bots: features 2091503 bots 16 kills 42 deaths 86
+BOTEVAL navigation: force jumps over high obstacles 0, jumps across gaps 11, idle bots set moving 47, stuck jump-outs 1, stuck suicides 0
+BOTEVAL force economy: went into recovery 258, powers switched off to regenerate 192; grips noticed 4, push at the gripper 4, absorb instead 0, got free 4
+== 2026-11-25 18:04 after1 | ctf_guns gametype 8 map mp/ctf4 bots 16 minutes 5 features 2091503
+BOTEVAL match: gametype 8, team score red 0 blue 0; flags taken 1 captured 0 returned 1; siege objectives completed 0, rounds ended 0
+BOTEVAL kills by saber 13, gun 0, explosive 0, force 5, other 5; kills of a teammate 0; deaths with no killer 66
+BOTEVAL all bots: features 2091503 bots 16 kills 7 deaths 89
+BOTEVAL navigation: force jumps over high obstacles 18, jumps across gaps 40, idle bots set moving 202, stuck jump-outs 9, stuck suicides 1
+BOTEVAL force economy: went into recovery 55, powers switched off to regenerate 38; grips noticed 1, push at the gripper 0, absorb instead 0, got free 1
+== 2026-11-25 18:09 after1 | guns gametype 0 map mp/ffa3 bots 16 minutes 5 features 2091503
+BOTEVAL match: gametype 0, team score red 0 blue 0; flags taken 0 captured 0 returned 1; siege objectives completed 0, rounds ended 0
+BOTEVAL kills by saber 87, gun 0, explosive 0, force 16, other 0; kills of a teammate 0; deaths with no killer 3
+BOTEVAL all bots: features 2091503 bots 16 kills 101 deaths 106
+BOTEVAL navigation: force jumps over high obstacles 2, jumps across gaps 0, idle bots set moving 12, stuck jump-outs 0, stuck suicides 0
+BOTEVAL force economy: went into recovery 372, powers switched off to regenerate 342; grips noticed 7, push at the gripper 17, absorb instead 2, got free 7
+== 2026-11-25 20:22 siege1 | siege gametype 7 map mp/siege_hoth bots 16 minutes 6 features 4188671
+BOTEVAL match: gametype 7, team score red 0 blue 0; flags taken 0 captured 0 returned 1; siege objectives completed 25, rounds ended 0
+BOTEVAL kills by saber 0, gun 63, explosive 0, force 0, other 166; kills of a teammate 12; deaths with no killer 44
+BOTEVAL all bots: features 4188671 bots 16 kills 671 deaths 273
+BOTEVAL navigation: force jumps over high obstacles 0, jumps across gaps 280, idle bots set moving 61, stuck jump-outs 52, stuck suicides 0
+BOTEVAL force economy: went into recovery 0, powers switched off to regenerate 0; grips noticed 0, push at the gripper 0, absorb instead 0, got free 0
+== 2026-11-25 20:29 siege1 | siege_desert gametype 7 map mp/siege_desert bots 16 minutes 6 features 4188671
+BOTEVAL match: gametype 7, team score red 0 blue 0; flags taken 0 captured 0 returned 1; siege objectives completed 0, rounds ended 0
+BOTEVAL kills by saber 0, gun 4, explosive 0, force 0, other 0; kills of a teammate 0; deaths with no killer 1
+BOTEVAL all bots: features 4188671 bots 16 kills 3 deaths 5
+BOTEVAL navigation: force jumps over high obstacles 0, jumps across gaps 56, idle bots set moving 160, stuck jump-outs 5, stuck suicides 0
+BOTEVAL force economy: went into recovery 0, powers switched off to regenerate 0; grips noticed 0, push at the gripper 0, absorb instead 0, got free 0
+== 2026-11-25 20:38 siege2 | siege gametype 7 map mp/siege_hoth bots 16 minutes 8 features 4188671
+BOTEVAL match: gametype 7, team score red 0 blue 0; flags taken 0 captured 0 returned 1; siege objectives completed 1, rounds ended 0
+BOTEVAL kills by saber 0, gun 83, explosive 1, force 0, other 221; kills of a teammate 15; deaths with no killer 59
+BOTEVAL all bots: features 4188671 bots 16 kills 5052 deaths 364
+BOTEVAL navigation: force jumps over high obstacles 0, jumps across gaps 433, idle bots set moving 73, stuck jump-outs 65, stuck suicides 0
+BOTEVAL force economy: went into recovery 0, powers switched off to regenerate 0; grips noticed 0, push at the gripper 0, absorb instead 0, got free 0

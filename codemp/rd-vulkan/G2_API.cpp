@@ -20,6 +20,9 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 ===========================================================================
 */
 
+#include <map>
+#include <string>
+#include <algorithm>
 #include "ghoul2/G2.h"
 #include "ghoul2/g2_local.h"
 #include "ghoul2/G2_gore.h"
@@ -294,8 +297,8 @@ qboolean G2API_OverrideServerWithClientData(CGhoul2Info_v& ghoul2, int modelInde
 }
 
 // must be a power of two
-#define MAX_G2_MODELS (1024)
-#define G2_MODEL_BITS (10)
+#define MAX_G2_MODELS (65536)	// was 1024: long-running servers ran out ("Out of ghoul2 info slots")
+#define G2_MODEL_BITS (16)
 
 #define G2_INDEX_MASK (MAX_G2_MODELS-1)
 
@@ -553,6 +556,25 @@ public:
 		}
 	}
 #endif
+	// g2slots / r_g2SlotWarn: how many slots are in use, grouped by the first model in each
+	void Report() const
+	{
+		std::vector<char> isFree( MAX_G2_MODELS, 0 );
+		std::map<std::string, int> byModel;
+		int used = 0;
+		for ( std::list<int>::const_iterator it = mFreeIndecies.begin(); it != mFreeIndecies.end(); ++it )
+			isFree[*it] = 1;
+		for ( int i = 0; i < MAX_G2_MODELS; i++ )
+		{
+			if ( isFree[i] )
+				continue;
+			used++;
+			byModel[ mInfos[i].size() ? std::string( mInfos[i][0].mFileName ) : std::string( "(empty)" ) ]++;
+		}
+		ri.Printf( PRINT_ALL, "G2SLOTS used %d of %d\n", used, MAX_G2_MODELS );
+		for ( std::map<std::string, int>::const_iterator it = byModel.begin(); it != byModel.end(); ++it )
+			ri.Printf( PRINT_ALL, "G2SLOTS %6d %s\n", it->second, it->first.c_str() );
+	}
 	int New()
 	{
 		if (mFreeIndecies.empty())
@@ -560,6 +582,18 @@ public:
 			assert(0);
 			Com_Error(ERR_FATAL, "Out of ghoul2 info slots");
 
+		}
+		{
+			// report when the table reaches a new high, from r_g2SlotWarn slots on, every 32 slots
+			static int reportedHigh = 0;
+			static cvar_t *warn = NULL;
+			const int usedNow = MAX_G2_MODELS - (int)mFreeIndecies.size() + 1;
+			if ( !warn ) warn = ri.Cvar_Get( "r_g2SlotWarn", "2048", CVAR_NONE, "report Ghoul2 slot use (by model) from this many slots on" );
+			if ( warn && warn->integer > 0 && usedNow >= warn->integer && usedNow >= reportedHigh + 32 )
+			{
+				reportedHigh = usedNow;
+				Report();
+			}
 		}
 		// gonna pull from the front, doing a
 		int idx=*mFreeIndecies.begin();
@@ -639,6 +673,7 @@ public:
 };
 
 static Ghoul2InfoArray *singleton = NULL;
+void R_G2SlotList_f( void ) { if ( singleton ) singleton->Report(); else ri.Printf( PRINT_ALL, "G2SLOTS used 0\n" ); }
 IGhoul2InfoArray &TheGhoul2InfoArray()
 {
 	if(!singleton) {

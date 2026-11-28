@@ -27,6 +27,7 @@ along with this program; if not, see <http://www.gnu.org/licenses/>.
 #include "stringed_ingame.h"
 #include "qcommon/cm_public.h"
 #include "qcommon/game_version.h"
+#include "qcommon/com_profile.h"
 #include "../server/NPCNav/navigator.h"
 #include "../shared/sys/sys_local.h"
 #if defined(_WIN32)
@@ -136,9 +137,16 @@ A raw string should NEVER be passed as fmt, because of "%f" type crashers.
 */
 std::recursive_mutex printfLock;
 
+struct comPrintTimer_t {
+	uint64_t t0;
+	comPrintTimer_t() : t0( com_prof.enabled ? Com_ProfNowNs() : 0 ) {}
+	~comPrintTimer_t() { if ( t0 ) com_prof.printNs += Com_ProfNowNs() - t0; }
+};
+
 void QDECL Com_Printf( const char *fmt, ... ) {
 
 	std::lock_guard<std::recursive_mutex> l( printfLock );
+	const comPrintTimer_t printTimer;
 
 	std::recursive_mutex printfLock;
 
@@ -1720,7 +1728,7 @@ milliseconds and appends the symbolized stacks to com_samples.log in the working
 Windows x64 only, debugging aid, 0 = off. Summarize with tools/hitch_stacks.py.
 =================
 */
-#if defined(_WIN32) && defined(_M_X64) && !defined(DEDICATED)
+#if defined(_WIN32) && defined(_M_X64)
 #include <dbghelp.h>
 #include <unordered_map>
 #include <string>

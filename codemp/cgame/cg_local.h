@@ -2379,6 +2379,7 @@ typedef struct cgs_s {
 	int			jcinfo2;
 	int         taystJKinfo;
 	int         mb2manualblock;	// server's g_mb2manualblock, for predicting the guard
+	int         jk2_102sabersystem;	// server's g_jk2_102sabersystem (JK2 1.02 saber system)
 	qboolean	pluginSet;
 	qboolean	legacyProtocol; //for compatibility with 1.00 servers
 	qboolean	baseGame; //runs Raven's SDK game code (retail or an SDK-built mod), not OpenJK's

@@ -681,7 +681,7 @@ static void Saber_ParseSaberLength( saberInfo_t *saber, const char **p ) {
 		return;
 
 #if _GAME
-	if (g_tweakWeapons.integer & WT_TRIBES)
+	if (JK2O_TWEAKWEAPONS & WT_TRIBES)
 		f = 56.0f;
 	else
 #endif

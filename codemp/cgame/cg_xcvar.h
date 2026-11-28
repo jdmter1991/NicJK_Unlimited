@@ -278,6 +278,7 @@ XCVAR_DEF( cg_drawCrosshairNamesOpacity,		"1",					NULL,					CVAR_ARCHIVE )
 XCVAR_DEF( cg_drawCrosshairNamesColours,		"1",					NULL,					CVAR_ARCHIVE )
 XCVAR_DEF( cg_drawEnemyInfo,					"1",					NULL,					CVAR_ARCHIVE )
 XCVAR_DEF( cg_drawFPS,							"0",					NULL,					CVAR_ARCHIVE )
+XCVAR_DEF( cg_drawFPSGraph,						"0",					NULL,					CVAR_ARCHIVE )	// frame-time graph under the FPS counter
 XCVAR_DEF( cg_drawFriend,						"1",					NULL,					CVAR_ARCHIVE )
 XCVAR_DEF( cg_drawGun,							"1",					NULL,					CVAR_ARCHIVE )
 XCVAR_DEF( cg_gunAlpha,							"1",					NULL,					CVAR_ARCHIVE )

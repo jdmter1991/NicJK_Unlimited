@@ -97,8 +97,8 @@ void G2Time_ReportTimers(void)
 #include <math.h>
 #else
 #include <float.h>
-#include "rd-common/tr_animremap_gla.h"
 #endif
+#include "rd-common/tr_animremap_gla.h"
 
 //rww - RAGDOLL_END
 

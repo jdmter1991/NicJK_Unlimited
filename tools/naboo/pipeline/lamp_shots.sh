@@ -1,6 +1,7 @@
 #!/bin/bash
 # Lamp comparison screenshots on the dev build: a local devmap without bots, sun and ambient turned down
 # (r_tworldLight 0.25, a dusk-like viewing aid, not a game setting players have), two fixed views, one screenshot each.
+# r_tworldLight is saved to the config (CVAR_ARCHIVE_ND), so the default views set it back to 1 before quitting.
 # 31 bots from the user's list are in the game (every client test runs at full load).
 #   lamp_shots.sh <tag> <renderer_dll> <shadow_dds>
 # Installs the given renderer and shadow texture for the run and restores the current ones afterwards.
@@ -18,7 +19,7 @@ if [ -n "$VIEWS" ]; then cp "$VIEWS" nicjk/lampshot.cfg; else
 cat > nicjk/lampshot.cfg <<'EOF'
 set v1 "setviewpos -672 8900 470 90; wait 600; screenshot; wait 100; vstr v2"
 set v2 "setviewpos 360 5400 160 90; wait 600; screenshot; wait 100; vstr v3"
-set v3 "setviewpos -672 8900 470 90; r_tworldLamps 0; wait 600; screenshot; wait 100; r_tworldLamps 1; quit"
+set v3 "setviewpos -672 8900 470 90; r_tworldLamps 0; wait 600; screenshot; wait 100; r_tworldLamps 1; r_tworldLight 1; quit"
 set go "wait 2500; ui_openmenu none_x; cg_draw2D 1; cg_drawFPS 1; r_tworldLight 0.25; noclip; wait 300; vstr v1"
 vstr go
 EOF
