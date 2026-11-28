@@ -157,6 +157,7 @@ typedef struct botProf_s {
 static botProf_t botProf;
 static double botProfPhase[5];		/* last think: main AI, taunts, anti-idle, learning, tuning (us) */
 vmCvar_t bot_profile;
+vmCvar_t bot_profileEval;	/* 0: bot_profile prints the timing lines only, not the BOTEVAL counters */
 
 // Behaviour-changing corrections, switchable so they can be compared in game:
 //   1 = fallback navigation probes the walls to the bot's left and right (the probes used to be
@@ -713,6 +714,163 @@ static int botEvalStyleSwitches;	// styles reached through the targeted selectio
 
 static int botEvalKataTried[2], botEvalKataStarted[2];	// [baseline group, feature group]
 
+/*
+Bot AI zones (bot_profile): every part of a bot frame is booked on one zone. Zones nest; each
+reports its self time (time not spent in a nested zone), so the self times add up to the whole
+bot AI time. Two timer reads per zone entry while profiling, one integer test otherwise.
+*/
+enum {
+	BPZ_SETUP,
+	BPZ_THINK,
+	BPZ_CORE,
+	BPZ_TEAM,
+	BPZ_SIDE,
+	BPZ_SABEREXEC,
+	BPZ_CMOVE,
+	BPZ_OBST,
+	BPZ_PATHCLR,
+	BPZ_WEAPON,
+	BPZ_NEARWP,
+	BPZ_SCAN,
+	BPZ_VIS,
+	BPZ_WPFOLLOW,
+	BPZ_WPCONST,
+	BPZ_DEST,
+	BPZ_TRAIL,
+	BPZ_FALLBACK,
+	BPZ_AIM,
+	BPZ_PREDICT,
+	BPZ_BLADE,
+	BPZ_SABERDEC,
+	BPZ_GOALS,
+	BPZ_MOVE,
+	BPZ_FIRE,
+	BPZ_TAUNT,
+	BPZ_LEARN,
+	BPZ_AWARE,
+	BPZ_WORLD,
+	BPZ_OBJ,
+	BPZ_FORCE,
+	BPZ_INPUT,
+	BPZ_UCMD,
+	BPZ_MAX
+};
+static const char *botProfZoneNames[BPZ_MAX] = {
+	"frame setup (bot spawns, event tracker)",
+	"think: state fetch and glue",
+	"core: state upkeep, enemy memory",
+	"team / squad AI",
+	"combat: tactics (NewBotAI_xSvxS)",
+	"combat: saber execution",
+	"combat: movement (GetMovement)",
+	"movement: obstacle and path checks",
+	"movement: BotNav_PathClear",
+	"weapon selection",
+	"nav: nearest visible waypoint",
+	"enemy scan (ScanForEnemies)",
+	"visibility: waypoint + enemy LOS",
+	"nav: waypoint following",
+	"nav: WPConstantRoutine",
+	"nav: destination choice",
+	"nav: trail distance queries",
+	"nav: fallback navigation",
+	"combat: aim and attack decision",
+	"prediction: enemy position",
+	"prediction: blade paths",
+	"combat: saber style and timing",
+	"goals: chat, flags, det packs",
+	"movement: walls, stuck, jump/duck traces",
+	"fire and force buttons, friend in fire",
+	"taunts and anti-idle",
+	"learning and tuning",
+	"awareness (threat scan)",
+	"world use (doors, buttons, lifts)",
+	"objectives",
+	"force tactics",
+	"usercmd building (every frame)",
+	"usercmd hand-off to the engine",
+};
+typedef struct {
+	int		calls;
+	int		traces;
+	double	selfUs, inclUs, maxInclUs;
+} botProfZone_t;
+#define BPZ_STACK 24
+static botProfZone_t botProfZones[BPZ_MAX];
+static int botProfZoneStack[BPZ_STACK];
+static double botProfZoneStart[BPZ_STACK];
+static int botProfZoneDepth;
+static double botProfZoneLast;
+static int botProfStdDepth;		/* depth at which StandardBotAI's sections sit */
+#define BOTPROF_HIST 2000		/* per-frame bot AI time in 0.05 ms steps, up to 100 ms */
+static int botProfHist[BOTPROF_HIST + 1];
+
+static int BPZ_Depth(void) { return botProfZoneDepth; }
+
+static void BPZ_Push(int z) {
+	double now;
+	if (!botProf.enabled || botProfZoneDepth >= BPZ_STACK) {
+		return;
+	}
+	now = BotProf_NowUs();
+	if (botProfZoneDepth > 0) {
+		botProfZones[botProfZoneStack[botProfZoneDepth - 1]].selfUs += now - botProfZoneLast;
+	}
+	botProfZoneStack[botProfZoneDepth] = z;
+	botProfZoneStart[botProfZoneDepth] = now;
+	botProfZoneDepth++;
+	botProfZoneLast = now;
+	botProfZones[z].calls++;
+}
+
+static void BPZ_Pop(void) {
+	double now, incl;
+	botProfZone_t *zz;
+	if (!botProf.enabled || botProfZoneDepth <= 0) {
+		return;
+	}
+	now = BotProf_NowUs();
+	botProfZoneDepth--;
+	zz = &botProfZones[botProfZoneStack[botProfZoneDepth]];
+	zz->selfUs += now - botProfZoneLast;
+	incl = now - botProfZoneStart[botProfZoneDepth];
+	zz->inclUs += incl;
+	if (incl > zz->maxInclUs) zz->maxInclUs = incl;
+	botProfZoneLast = now;
+}
+
+static void BPZ_PopTo(int depth) {
+	while (botProf.enabled && botProfZoneDepth > depth) {
+		BPZ_Pop();
+	}
+}
+
+/* the next section of StandardBotAI (sections follow each other, they do not nest) */
+static void BPZ_Section(int z) {
+	if (!botProf.enabled) {
+		return;
+	}
+	BPZ_PopTo(botProfStdDepth);
+	BPZ_Push(z);
+}
+
+static int QDECL BotProf_ZoneCompare(const void *a, const void *b) {
+	const double d = botProfZones[*(const int *)b].selfUs - botProfZones[*(const int *)a].selfUs;
+	return d > 0 ? 1 : (d < 0 ? -1 : 0);
+}
+
+static double BotProf_HistPct(int total, double pct) {
+	int i, acc = 0;
+	const int want = (int)(total * pct / 100.0);
+	for (i = 0; i <= BOTPROF_HIST; i++) {
+		acc += botProfHist[i];
+		if (acc > want) {
+			return i * 0.05;
+		}
+	}
+	return BOTPROF_HIST * 0.05;
+}
+
 static botProfSite_t *BotProf_Site(const char *fn) {
 	int i;
 	for (i = 0; i < botProf.numSites; i++) {
@@ -736,6 +894,7 @@ static void BotProf_Account(const char *fn, double us) {
 	botProf.traceUs += us;
 	botProf.thinkTraces++;
 	botProf.thinkTraceUs += us;
+	if (botProfZoneDepth > 0) botProfZones[botProfZoneStack[botProfZoneDepth - 1]].traces++;
 }
 
 static void BotProf_JPTrace(const char *fn, trace_t *results, const vec3_t start, const vec3_t mins, const vec3_t maxs, const vec3_t end, int passEntityNum, int contentmask, int capsule, int traceFlags, int useLod) {
@@ -930,7 +1089,32 @@ static void BotProf_Report(double nowUs) {
 		botProf.frameUs / frames / 1e3, botProf.maxFrameUs / 1e3, botProf.thinkUs / thinks, botProf.maxThinkUs, botProf.maxThinkClient);
 	trap->Print("BOTPROF traces from ai_main.c: %.1f per think (max %d in one think), %.1f%% of ai time\n",
 		botProf.traces / thinks, botProf.maxThinkTraces, botProf.frameUs > 0 ? 100.0 * botProf.traceUs / botProf.frameUs : 0.0);
-	BotEval_Report();
+	{
+		int order[BPZ_MAX], z, nbots = 0;
+		double sumSelf = 0.0;
+		for (z = 0; z < MAX_CLIENTS; z++) {
+			if (botstates[z] && botstates[z]->inuse) nbots++;
+		}
+		for (z = 0; z < BPZ_MAX; z++) {
+			order[z] = z;
+			sumSelf += botProfZones[z].selfUs;
+		}
+		trap->Print("BOTPROF frame ai ms: p50 %.2f p95 %.2f p99 %.2f max %.3f; bots %d, thinks per frame %.2f, ai us per bot per frame %.1f, zones cover %.1f%%\n",
+			BotProf_HistPct(botProf.frames, 50), BotProf_HistPct(botProf.frames, 95), BotProf_HistPct(botProf.frames, 99), botProf.maxFrameUs / 1e3,
+			nbots, botProf.thinks / frames, nbots ? botProf.frameUs / frames / nbots : 0.0, botProf.frameUs > 0 ? 100.0 * sumSelf / botProf.frameUs : 0.0);
+		qsort(order, BPZ_MAX, sizeof(order[0]), BotProf_ZoneCompare);
+		for (z = 0; z < BPZ_MAX; z++) {
+			const botProfZone_t *zz = &botProfZones[order[z]];
+			if (!zz->calls) continue;
+			trap->Print("BOTZONE %-42s self ms/frame %7.4f %5.1f%%  calls/frame %7.2f  self us/call %6.2f  incl us/call %7.2f max %8.1f  traces/frame %6.2f\n",
+				botProfZoneNames[order[z]], zz->selfUs / frames / 1e3, sumSelf > 0 ? 100.0 * zz->selfUs / sumSelf : 0.0,
+				zz->calls / frames, zz->selfUs / zz->calls, zz->inclUs / zz->calls, zz->maxInclUs, zz->traces / frames);
+		}
+	}
+	trap->Cvar_Update(&bot_profileEval);
+	if (bot_profileEval.integer) {
+		BotEval_Report();
+	}
 	qsort(botProf.sites, botProf.numSites, sizeof(botProf.sites[0]), BotProf_SiteCompare);
 	for (i = 0; i < botProf.numSites && i < 14; i++) {
 		const botProfSite_t *site = &botProf.sites[i];
@@ -954,6 +1138,9 @@ static double BotProf_FrameBegin(void) {
 	}
 	if (!botProf.enabled) {
 		memset(&botProf, 0, sizeof(botProf));
+		memset(botProfZones, 0, sizeof(botProfZones));
+		memset(botProfHist, 0, sizeof(botProfHist));
+		botProfZoneDepth = 0;
 		botProf.enabled = 1;
 		botProf.windowStartUs = BotProf_NowUs();
 	}
@@ -971,9 +1158,21 @@ static void BotProf_FrameEnd(double startUs, int thinksThisFrame) {
 	botProf.frameUs += us;
 	if (us > botProf.maxFrameUs) botProf.maxFrameUs = us;
 	if (!thinksThisFrame) botProf.skippedFrames++;
+	{
+		int hb = (int)(us / 50.0);
+		if (hb > BOTPROF_HIST) hb = BOTPROF_HIST;
+		if (hb < 0) hb = 0;
+		botProfHist[hb]++;
+	}
 	if (nowUs - botProf.windowStartUs >= (double)bot_profile.integer * 1e6) {
+		static double lastReportUs;
+		const double r0 = BotProf_NowUs();
+		trap->Print("BOTPROF previous report took %.1f ms\n", lastReportUs / 1e3);
 		BotProf_Report(nowUs);
+		lastReportUs = BotProf_NowUs() - r0;
 		memset(&botProf, 0, sizeof(botProf));
+		memset(botProfZones, 0, sizeof(botProfZones));
+		memset(botProfHist, 0, sizeof(botProfHist));
 		botProf.enabled = 1;
 		botProf.windowStartUs = nowUs;
 	}
@@ -990,7 +1189,12 @@ static void BotProf_Think(int client, float thinktime) {
 	botProf.thinkTraces = 0; botProf.thinkTraceUs = 0.0;
 	pf0 = BotProf_PageFaults();
 	t0 = BotProf_NowUs();
-	BotAI(client, thinktime);
+	{
+		const int bpzBase = BPZ_Depth();
+		BPZ_Push(BPZ_THINK);
+		BotAI(client, thinktime);
+		BPZ_PopTo(bpzBase);
+	}
 	pfEndUs = BotProf_NowUs();
 	t0 = pfEndUs - t0;
 	if (t0 > 40000.0) {
@@ -3501,20 +3705,30 @@ int BotAI(int client, float thinktime) {
 	{	/* phase times for the slow-think report (bot_profile) */
 		double tp = botProf.enabled ? BotProf_NowUs() : 0.0, tq;
 #define BOTPROF_PHASE(k) if (botProf.enabled) { tq = BotProf_NowUs(); botProfPhase[k] = tq - tp; tp = tq; }
+	{
+		const int bpzBase = BPZ_Depth();
+		BPZ_Push(BPZ_CORE);
+		botProfStdDepth = BPZ_Depth() - 1;
 	if (g_newBotAI.integer)
 		NewBotAI(bs, thinktime);
 	else
 		StandardBotAI(bs, thinktime);
+		BPZ_PopTo(bpzBase);
+	}
 	BOTPROF_PHASE(0)
+	BPZ_Push(BPZ_TAUNT);
 	BotContextualTaunts(bs);
 	BOTPROF_PHASE(1)
 	BotAntiIdle(bs);
+	BPZ_Pop();
 	BOTPROF_PHASE(2)
+	BPZ_Push(BPZ_LEARN);
 	if (bs->features & BOTF_LEARN) {
 		Bot_LearnResolve(bs);
 	}
 	BOTPROF_PHASE(3)
 	Bot_TuneThink(bs->client, bs->features);
+	BPZ_Pop();
 	BOTPROF_PHASE(4)
 #undef BOTPROF_PHASE
 	}
@@ -3532,10 +3746,18 @@ int BotAI(int client, float thinktime) {
 			lastD[bs->client] = dd;
 		}
 	}
+	BPZ_Push(BPZ_AWARE);
 	Bot_Awareness(bs);
+	BPZ_Pop();
+	BPZ_Push(BPZ_WORLD);
 	Bot_WorldUse(bs);
+	BPZ_Pop();
+	BPZ_Push(BPZ_OBJ);
 	Bot_ObjectiveThink(bs);
+	BPZ_Pop();
+	BPZ_Push(BPZ_FORCE);
 	Bot_ForceTactics(bs);
+	BPZ_Pop();
 #ifdef _DEBUG
 	end = trap->Milliseconds();
 
@@ -3965,7 +4187,15 @@ qboolean BotPVSCheck(const vec3_t p1, const vec3_t p2)
 }
 
 //get the index to the nearest visible waypoint in the global trail
-int GetNearestVisibleWP(vec3_t org, int ignore)
+static int GetNearestVisibleWP_Body(vec3_t org, int ignore);
+int GetNearestVisibleWP(vec3_t org, int ignore) {
+	int r;
+	BPZ_Push(BPZ_NEARWP);
+	r = GetNearestVisibleWP_Body(org, ignore);
+	BPZ_Pop();
+	return r;
+}
+static int GetNearestVisibleWP_Body(vec3_t org, int ignore)
 {
 	int i;
 	float bestdist;
@@ -4054,7 +4284,15 @@ int PassWayCheck(bot_state_t* bs, int windex)
 }
 
 //tally up the distance between two waypoints
-float TotalTrailDistance(int start, int end, bot_state_t* bs)
+static float TotalTrailDistance_Body(int start, int end, bot_state_t* bs);
+float TotalTrailDistance(int start, int end, bot_state_t* bs) {
+	float r;
+	BPZ_Push(BPZ_TRAIL);
+	r = TotalTrailDistance_Body(start, end, bs);
+	BPZ_Pop();
+	return r;
+}
+static float TotalTrailDistance_Body(int start, int end, bot_state_t* bs)
 {
 	int beginat;
 	int endat;
@@ -4214,7 +4452,13 @@ void CheckForShorterRoutes(bot_state_t* bs, int newwpindex)
 
 //check for flags on the waypoint we're currently travelling to
 //and perform the desired behavior based on the flag
-void WPConstantRoutine(bot_state_t* bs)
+static void WPConstantRoutine_Body(bot_state_t* bs);
+void WPConstantRoutine(bot_state_t* bs) {
+	BPZ_Push(BPZ_WPCONST);
+	WPConstantRoutine_Body(bs);
+	BPZ_Pop();
+}
+static void WPConstantRoutine_Body(bot_state_t* bs)
 {
 	if (!bs->wpCurrent)
 	{
@@ -5199,7 +5443,15 @@ qboolean G_ThereIsAMaster(void);
 // by applying every cheap rule first, sorting what is left by distance and tracing nearest
 // first: the first visible one is the result. A bot that already has an enemy only has to
 // consider clients more than 128 units nearer than that enemy, which is usually nobody.
-int ScanForEnemies(bot_state_t* bs)
+static int ScanForEnemies_Body(bot_state_t* bs);
+int ScanForEnemies(bot_state_t* bs) {
+	int r;
+	BPZ_Push(BPZ_SCAN);
+	r = ScanForEnemies_Body(bs);
+	BPZ_Pop();
+	return r;
+}
+static int ScanForEnemies_Body(bot_state_t* bs)
 {
 	vec3_t a;
 	float distcheck;
@@ -7460,7 +7712,13 @@ int GetBestIdleGoal(bot_state_t* bs)
 
 //go through the list of possible priorities for navigating
 //and work out the best destination point.
-void GetIdealDestination(bot_state_t* bs)
+static void GetIdealDestination_Body(bot_state_t* bs);
+void GetIdealDestination(bot_state_t* bs) {
+	BPZ_Push(BPZ_DEST);
+	GetIdealDestination_Body(bs);
+	BPZ_Pop();
+}
+static void GetIdealDestination_Body(bot_state_t* bs)
 {
 	int tempInt, cWPIndex, bChicken, idleWP;
 	float distChange, plusLen, minusLen;
@@ -8937,7 +9195,15 @@ Fallback navigation helpers (bot_features 128)
 */
 // can the bot walk "dist" units along the flat direction "dir": nothing solid in the way of the
 // player box and ground under the far end
+static qboolean BotNav_PathClear_Body(bot_state_t* bs, vec3_t dir, float dist, float raise);
 static qboolean BotNav_PathClear(bot_state_t* bs, vec3_t dir, float dist, float raise) {
+	qboolean r;
+	BPZ_Push(BPZ_PATHCLR);
+	r = BotNav_PathClear_Body(bs, dir, dist, raise);
+	BPZ_Pop();
+	return r;
+}
+static qboolean BotNav_PathClear_Body(bot_state_t* bs, vec3_t dir, float dist, float raise) {
 	vec3_t mins, maxs, start, end, down;
 	trace_t tr;
 
@@ -9385,7 +9651,15 @@ static qboolean BotNav_PickOpenTarget(bot_state_t* bs, float goalYaw, vec3_t out
 	return qfalse;
 }
 
+static int BotFallbackNavigation_Body(bot_state_t* bs);
 int BotFallbackNavigation(bot_state_t* bs) {
+	int r;
+	BPZ_Push(BPZ_FALLBACK);
+	r = BotFallbackNavigation_Body(bs);
+	BPZ_Pop();
+	return r;
+}
+static int BotFallbackNavigation_Body(bot_state_t* bs) {
 	vec3_t mins, maxs, forward, right, up, end;
 	trace_t tr;
 	float wallDistance;
@@ -12261,7 +12535,13 @@ qboolean BotShouldAttack(bot_state_t* bs)
 }
 
 // Predict enemy position based on current velocity and patterns
-void BotPredictEnemyPosition(bot_state_t* bs, vec3_t predictedPos)
+static void BotPredictEnemyPosition_Body(bot_state_t* bs, vec3_t predictedPos);
+void BotPredictEnemyPosition(bot_state_t* bs, vec3_t predictedPos) {
+	BPZ_Push(BPZ_PREDICT);
+	BotPredictEnemyPosition_Body(bs, predictedPos);
+	BPZ_Pop();
+}
+static void BotPredictEnemyPosition_Body(bot_state_t* bs, vec3_t predictedPos)
 {
 	vec3_t enemyVel;
 	float predictionTime;
@@ -14018,7 +14298,15 @@ void Bot_ExecuteKataAttack(bot_state_t* bs) {
 // Niksata Edit - ENHANCED WITH CALCULATEJUMP LOGIC
 // SMART OBSTACLE INTERACTION (ENHANCED)
 // ================================
-qboolean Bot_CheckAndInteractWithObstacle(bot_state_t* bs) { // Niksata Edit - FIXED VERSION
+static qboolean Bot_CheckAndInteractWithObstacle_Body(bot_state_t* bs);
+qboolean Bot_CheckAndInteractWithObstacle(bot_state_t* bs) {
+	qboolean r;
+	BPZ_Push(BPZ_OBST);
+	r = Bot_CheckAndInteractWithObstacle_Body(bs);
+	BPZ_Pop();
+	return r;
+}
+static qboolean Bot_CheckAndInteractWithObstacle_Body(bot_state_t* bs) { // Niksata Edit - FIXED VERSION
 	if (!bs) return qfalse;
 
 	vec3_t forward, traceStart, traceEnd;
@@ -14313,7 +14601,15 @@ static int BotPred_BladeThreat(bot_state_t* bs, gentity_t* enemy, int horizonMs)
 }
 
 // time in ms until one of "attacker"'s blades reaches "target"'s body, or -1
+static int BotPred_BladeHits_Body(gentity_t* attacker, gentity_t* target, int horizonMs);
 static int BotPred_BladeHits(gentity_t* attacker, gentity_t* target, int horizonMs) {
+	int r;
+	BPZ_Push(BPZ_BLADE);
+	r = BotPred_BladeHits_Body(attacker, target, horizonMs);
+	BPZ_Pop();
+	return r;
+}
+static int BotPred_BladeHits_Body(gentity_t* attacker, gentity_t* target, int horizonMs) {
 	gclient_t *en = attacker->client;
 	gclient_t *cl = target->client;
 	int dt = level.time - level.previousTime;
@@ -14511,7 +14807,13 @@ static qboolean Bot_DefensiveReaction(bot_state_t* bs) {
 	return qfalse;
 }
 
+static void Bot_ExecuteSaberCombat_Body(bot_state_t* bs);
 void Bot_ExecuteSaberCombat(bot_state_t* bs) {
+	BPZ_Push(BPZ_SABEREXEC);
+	Bot_ExecuteSaberCombat_Body(bs);
+	BPZ_Pop();
+}
+static void Bot_ExecuteSaberCombat_Body(bot_state_t* bs) {
 	int dist = bs->frame_Enemy_Len;
 	vec3_t dir, moveDir;
 	vec3_t mins, maxs, forward, right, up, end;
@@ -15543,7 +15845,15 @@ void Bot_CheckRearThreat(bot_state_t* bs, float frontDot) // Niksata Edit
 // ================================
 // ENHANCED OBSTACLE-AWARE MOVEMENT
 // ================================
+static qboolean Bot_CheckMovementPaths_Body(bot_state_t* bs);
 qboolean Bot_CheckMovementPaths(bot_state_t* bs) {
+	qboolean r;
+	BPZ_Push(BPZ_OBST);
+	r = Bot_CheckMovementPaths_Body(bs);
+	BPZ_Pop();
+	return r;
+}
+static qboolean Bot_CheckMovementPaths_Body(bot_state_t* bs) {
 	if (!bs) return qfalse;
 
 	vec3_t forward, left, right;
@@ -15628,7 +15938,13 @@ qboolean Bot_CheckMovementPaths(bot_state_t* bs) {
 // ================================
 // ENHANCED MOVEMENT WITH COMBAT INTEGRATION
 // ================================
+static void NewBotAI_GetMovement_Body(bot_state_t* bs);
 void NewBotAI_GetMovement(bot_state_t* bs) {
+	BPZ_Push(BPZ_CMOVE);
+	NewBotAI_GetMovement_Body(bs);
+	BPZ_Pop();
+}
+static void NewBotAI_GetMovement_Body(bot_state_t* bs) {
 	if (!bs || !bs->currentEnemy || !bs->currentEnemy->client) return;
 
 	int dist = bs->frame_Enemy_Len;
@@ -18334,6 +18650,7 @@ void StandardBotAI(bot_state_t* bs, float thinktime)
 		return;
 	}
 
+	BPZ_Section(BPZ_TEAM);
 	VectorCopy(bs->goalAngles, preFrameGAngles);
 
 	bs->doAttack = 0;
@@ -18367,6 +18684,7 @@ void StandardBotAI(bot_state_t* bs, float thinktime)
 		bs->currentEnemy = NULL;
 	}
 
+	BPZ_Section(BPZ_SIDE);
 	fjHalt = 0;
 
 #ifndef FORCEJUMP_INSTANTMETHOD
@@ -18396,6 +18714,7 @@ void StandardBotAI(bot_state_t* bs, float thinktime)
 			}
 		} // Niksata Edit
 
+	BPZ_Section(BPZ_WEAPON);
 	doingFallback = 0;
 
 	bs->deathActivitiesDone = 0;
@@ -18456,6 +18775,7 @@ void StandardBotAI(bot_state_t* bs, float thinktime)
 		return;
 	}*/
 
+	BPZ_Section(BPZ_CORE);
 	reaction = bs->skills.reflex / bs->settings.skill;
 
 	if (reaction < 0)
@@ -18628,6 +18948,7 @@ void StandardBotAI(bot_state_t* bs, float thinktime)
 		bs->squadLeader = NULL;
 	}
 
+	BPZ_Section(BPZ_VIS);
 	//ESTABLISH VISIBILITIES AND DISTANCES FOR THE WHOLE FRAME HERE
 	if (bs->wpCurrent)
 	{
@@ -18720,6 +19041,7 @@ void StandardBotAI(bot_state_t* bs, float thinktime)
 		bs->enemySeenTime = level.time + ENEMY_FORGET_MS;
 	}
 
+	BPZ_Section(BPZ_WPFOLLOW);
 	if (bs->wpCurrent)
 	{
 		int wpTouchDist = BOT_WPTOUCH_DISTANCE;
@@ -18964,6 +19286,7 @@ void StandardBotAI(bot_state_t* bs, float thinktime)
 		bs->doingFallback = qfalse;
 	}
 
+	BPZ_Section(BPZ_AIM);
 	if (bs->timeToReact < level.time && bs->currentEnemy && bs->enemySeenTime > level.time + (ENEMY_FORGET_MS - (ENEMY_FORGET_MS * 0.2)))
 	{
 		if (bs->frame_Enemy_Vis)
@@ -19042,6 +19365,7 @@ void StandardBotAI(bot_state_t* bs, float thinktime)
 		}
 	}
 
+	BPZ_Section(BPZ_SABERDEC);
 	if (bs->cur_ps.saberInFlight)
 	{
 		bs->saberThrowTime = level.time + Q_irand(4000, 10000);
@@ -19116,6 +19440,7 @@ void StandardBotAI(bot_state_t* bs, float thinktime)
 		}
 	} // Niksata Edit
 
+	BPZ_Section(BPZ_GOALS);
 	if (bs->doChat && bs->chatTime > level.time && (!bs->currentEnemy || !bs->frame_Enemy_Vis))
 	{
 		return;
@@ -19247,6 +19572,7 @@ void StandardBotAI(bot_state_t* bs, float thinktime)
 		}
 	}
 
+	BPZ_Section(BPZ_MOVE);
 	if (bs->beStill < level.time && !WaitingForNow(bs, bs->goalPosition) && !fjHalt)
 	{
 		// CHECK FOR WALLS BEFORE MOVEMENT
@@ -19517,6 +19843,7 @@ skip_movement: // Niksata Edit
 		trap->EA_Crouch(bs->client);
 	}
 
+	BPZ_Section(BPZ_FIRE);
 	if (bs->dangerousObject && bs->dangerousObject->inuse && bs->dangerousObject->health > 0 &&
 		bs->dangerousObject->takedamage && (!bs->frame_Enemy_Vis || !bs->currentEnemy) &&
 		(BotGetWeaponRange(bs) == BWEAPONRANGE_MID || BotGetWeaponRange(bs) == BWEAPONRANGE_LONG) &&
@@ -19704,6 +20031,8 @@ int BotAIStartFrame(int time) {
 	int profThinks = 0;
 	const double profStart = BotProf_FrameBegin();
 
+	BPZ_Push(BPZ_SETUP);
+
 	// (A "timeout protection" block used to live here. It compared the clock against a stamp that
 	// was only refreshed when the check fired, so it fired about every 100 ms and dropped that whole
 	// bot frame: no thinking and no usercmd for any bot, roughly one server frame in five at sv_fps 40.)
@@ -19771,6 +20100,7 @@ int BotAIStartFrame(int time) {
 	if (elapsed_time > BOT_THINK_TIME) thinktime = elapsed_time;
 	else thinktime = BOT_THINK_TIME;
 
+	BPZ_Pop();
 	// execute scheduled bot AI
 	for (i = 0; i < MAX_CLIENTS; i++) {
 		if (!botstates[i] || !botstates[i]->inuse) {
@@ -19798,8 +20128,12 @@ int BotAIStartFrame(int time) {
 			continue;
 		}
 
+		BPZ_Push(BPZ_INPUT);
 		BotUpdateInput(botstates[i], time, elapsed_time);
+		BPZ_Pop();
+		BPZ_Push(BPZ_UCMD);
 		trap->BotUserCommand(botstates[i]->client, &botstates[i]->lastucmd);
+		BPZ_Pop();
 	}
 
 	BotProf_FrameEnd(profStart, profThinks);
@@ -19832,6 +20166,7 @@ int BotAISetup(int restart) {
 #endif
 
 	trap->Cvar_Register(&bot_profile, "bot_profile", "0", 0);
+	trap->Cvar_Register(&bot_profileEval, "bot_profileEval", "1", 0);
 	trap->Cvar_Register(&bot_fixes, "bot_fixes", "1", CVAR_ARCHIVE);
 	trap->Cvar_Register(&bot_abBase, "bot_abBase", "0", 0);	// features of the baseline group in an A/B test
 	trap->Cvar_Register(&bot_features, "bot_features", "46131711", CVAR_ARCHIVE);	// everything measured to help or do no harm (33554432 acts only in JK2 1.02 mode); off: 512 (guide tactics), 1024 (counters), 4096 (swing table), 4194304 (combat walking), which lost or showed no gain

@@ -1433,6 +1433,7 @@ All times are wall-clock milliseconds of work done inside SV_Frame.
 */
 static cvar_t *sv_profile = NULL;
 
+#define SVPROF_HIST 2000
 typedef struct svProfAccum_s {
 	uint64_t	windowStartNs;
 	int			frames;			// SV_Frame calls that ran at least one game frame
@@ -1441,8 +1442,23 @@ typedef struct svProfAccum_s {
 	uint64_t	totalNs, botNs, gameNs, snapNs;
 	uint64_t	maxTotalNs, maxBotNs, maxGameNs, maxSnapNs;
 	comProfile_t base;			// counter values at window start
+	// frame-time histograms (0.1 ms steps up to 200 ms) for the percentiles: the averages and the
+	// maxima alone hide whether a slow frame is a one-off or a pattern
+	int			histTotal[SVPROF_HIST + 1], histBot[SVPROF_HIST + 1];
 } svProfAccum_t;
 static svProfAccum_t svProf;
+
+static double SV_ProfilePercentile( const int *hist, int count, double pct ) {
+	const int want = (int)( count * pct / 100.0 );
+	int acc = 0;
+	for ( int i = 0; i <= SVPROF_HIST; i++ ) {
+		acc += hist[i];
+		if ( acc > want ) {
+			return i * 0.1;
+		}
+	}
+	return SVPROF_HIST * 0.1;
+}
 
 static void SV_ProfileReport( uint64_t nowNs ) {
 	static const char *phaseNames[CPROF_NUM_PHASES] = { "other", "botai", "game", "snap" };
@@ -1462,6 +1478,10 @@ static void SV_ProfileReport( uint64_t nowNs ) {
 		svProf.botNs / f / 1e6, svProf.maxBotNs / 1e6,
 		svProf.gameNs / f / 1e6, svProf.maxGameNs / 1e6,
 		svProf.snapNs / f / 1e6, svProf.maxSnapNs / 1e6 );
+	Com_Printf( "SVPROF percentiles ms: total p50 %.1f p95 %.1f p99 %.1f  botai p50 %.1f p95 %.1f p99 %.1f\n",
+		SV_ProfilePercentile( svProf.histTotal, svProf.frames, 50 ), SV_ProfilePercentile( svProf.histTotal, svProf.frames, 95 ),
+		SV_ProfilePercentile( svProf.histTotal, svProf.frames, 99 ), SV_ProfilePercentile( svProf.histBot, svProf.frames, 50 ),
+		SV_ProfilePercentile( svProf.histBot, svProf.frames, 95 ), SV_ProfilePercentile( svProf.histBot, svProf.frames, 99 ) );
 	for ( int ph = 0; ph < CPROF_NUM_PHASES; ph++ ) {
 		const uint64_t tr = com_prof.svTraces[ph] - svProf.base.svTraces[ph];
 		const uint64_t trNs = com_prof.svTraceNs[ph] - svProf.base.svTraceNs[ph];
@@ -1524,6 +1544,11 @@ static void SV_ProfileFrame( uint64_t startNs, uint64_t botNs, uint64_t gameNs, 
 		if ( gameNs > svProf.maxGameNs ) svProf.maxGameNs = gameNs;
 		if ( snapNs > svProf.maxSnapNs ) svProf.maxSnapNs = snapNs;
 		if ( sv_fps->integer > 0 && totalNs > (uint64_t)( 1000000000 / sv_fps->integer ) ) svProf.overBudget++;
+		{
+			const uint64_t ht = totalNs / 100000, hb = botNs / 100000;
+			svProf.histTotal[ht > SVPROF_HIST ? SVPROF_HIST : ht]++;
+			svProf.histBot[hb > SVPROF_HIST ? SVPROF_HIST : hb]++;
+		}
 	}
 	if ( nowNs - svProf.windowStartNs >= (uint64_t)sv_profile->integer * 1000000000ull ) {
 		SV_ProfileReport( nowNs );

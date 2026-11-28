@@ -1720,7 +1720,7 @@ milliseconds and appends the symbolized stacks to com_samples.log in the working
 Windows x64 only, debugging aid, 0 = off. Summarize with tools/hitch_stacks.py.
 =================
 */
-#if defined(_WIN32) && defined(_M_X64) && !defined(DEDICATED)
+#if defined(_WIN32) && defined(_M_X64)
 #include <dbghelp.h>
 #include <unordered_map>
 #include <string>
