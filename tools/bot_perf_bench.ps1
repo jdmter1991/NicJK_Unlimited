@@ -29,6 +29,8 @@ $cycle = if ($Extra -match 'bot_abTest\s+(\d+)') { [int]$Matches[1] } else { 0 }
 $lines = Get-BotLines -Bots $Bots -Cycle $cycle
 ($lines -join "`r`n") + "`r`n" | Out-File -Encoding ascii (Join-Path $modDir "perf_bots.cfg")
 if ($Seed) { Copy-Item (Join-Path $Seed "*.dat") $modDir -Force }
+# archived cvars from an earlier run (nicjk_server.cfg is written by the server) must not carry over
+Remove-Item (Join-Path $modDir "nicjk_server.cfg") -Force -ErrorAction SilentlyContinue
 if (-not $Tag) { $Tag = "{0}_b{1}_fps{2}" -f ($Map -replace '[/\\]', '_'), $Bots, $SvFps }
 if (-not $Results) { $Results = Join-Path $DevDir "perf_results.jsonl" }
 $qlog = Join-Path $modDir "qconsole.log"

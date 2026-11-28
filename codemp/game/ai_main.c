@@ -20526,7 +20526,7 @@ int BotAISetup(int restart) {
 #endif
 
 	trap->Cvar_Register(&bot_profile, "bot_profile", "0", 0);
-	trap->Cvar_Register(&bot_perf, "bot_perf", "0", CVAR_ARCHIVE);
+	trap->Cvar_Register(&bot_perf, "bot_perf", "7", CVAR_ARCHIVE);	/* 1, 2, 4: measured faster, same decisions; 8 is off (A/B on naboo_theed inconclusive), see docs/reports/BOT_PERFORMANCE.md */
 	trap->Cvar_Register(&bot_perfVerify, "bot_perfVerify", "0", 0);
 	trap->Cvar_Register(&bot_perfBase, "bot_perfBase", "-1", 0);
 	trap->Cvar_Register(&bot_scanCacheMs, "bot_scanCacheMs", "100", CVAR_ARCHIVE);

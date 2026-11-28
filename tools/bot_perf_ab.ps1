@@ -18,7 +18,8 @@ param(
     [Parameter(Mandatory = $true)][string]$OffBase,
     [string]$Label = "ab",
     [string]$Seed = "",
-    [int]$Port = 29240
+    [int]$Port = 29240,
+    [int]$SvFps = 40
 )
 $bench = Join-Path $PSScriptRoot "bot_perf_bench.ps1"
 if (-not $BasePath) {
@@ -30,7 +31,7 @@ for ($m = 1; $m -le $Matches; $m++) {
     foreach ($o in @("testInB", "testInA")) {
         $extra = if ($o -eq "testInB") { "$common $Test $OffBase" } else { "$common $Off $TestBase" }
         $tag = "{0}_{1}_m{2}" -f $Label, $o, $m
-        & $bench -DevDir $DevDir -Bots (2 * $Group) -Map $Map -BasePath $BasePath -Warmup 0 -Duration (60 * $Minutes) -Window 30 `
+        & $bench -DevDir $DevDir -Bots (2 * $Group) -Map $Map -BasePath $BasePath -SvFps $SvFps -Warmup 0 -Duration (60 * $Minutes) -Window 30 `
             -Port $Port -Extra $extra -Tag $tag -Seed $Seed -Results $results -Eval
     }
 }
