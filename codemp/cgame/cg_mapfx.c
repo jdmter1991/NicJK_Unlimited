@@ -82,8 +82,9 @@ void CG_MapFX_Load( void ) {
 
 	numFiles = MapFX_U32( buf + 4 );
 	numFx = MapFX_U32( buf + 8 );
+	// (the size in 64 bits: a huge count must not wrap round to the file's length)
 	if ( memcmp( buf, "TFX1", 4 ) || numFiles > MAPFX_MAX_FILES
-		|| (unsigned int)len != 12 + numFiles * 64 + numFx * MAPFX_RECORD ) {
+		|| (unsigned long long)len != 12ull + (unsigned long long)numFiles * 64ull + (unsigned long long)numFx * MAPFX_RECORD ) {
 		Com_Printf( S_COLOR_YELLOW "CG_MapFX_Load: %s is not an effects file this build reads - not used\n", name );
 		free( buf );
 		return;
@@ -118,8 +119,12 @@ void CG_MapFX_Load( void ) {
 		}
 		e->delay = MapFX_F32( r + 28 );
 		e->random = MapFX_F32( r + 32 );
-		if ( e->delay < 50.0f ) {
+		// (a damaged value - not a number, or beyond an hour - is taken as the shortest: cg.time + it stays an int)
+		if ( !( e->delay >= 50.0f && e->delay <= 3600000.0f ) ) {
 			e->delay = 50.0f;
+		}
+		if ( !( e->random >= 0.0f && e->random <= 3600000.0f ) ) {
+			e->random = 0.0f;
 		}
 		e->next = 0;
 		s_numFx++;

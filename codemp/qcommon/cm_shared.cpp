@@ -125,6 +125,9 @@ int cm_skipBrushShaderCount = 0;
 
 #define SH_CELL			1024.0f
 #define SH_LEAF_TRIS	8
+#define SH_SPLIT_BY_COUNT	40		// tree levels split at the middle of space; below, by count (at most log2 more)
+#define SH_STACK		128			// the tree walk's stack: two per level
+#define SH_WORLD		4.0e6f		// a box beyond this (or not finite) does not size the grid: at most 7,813 cells a side
 #define SH_MAX_SIDES	64
 #define SH_TRACE_PIECE	512.0f		// a long trace is tested in pieces this long, from its start
 
@@ -222,7 +225,7 @@ static int			s_buildNodes;
 static float		*s_triBox;		// per triangle of the shape being built: mins, maxs
 static int			*s_triIdx;
 
-static void CM_SharedBuildNode( int node, int first, int count ) {
+static void CM_SharedBuildNode( int node, int first, int count, int level ) {
 	shNode_t *n = &sh.nodes[node];
 	for ( int k = 0; k < 3; k++ ) {
 		n->mins[k] = 1e30f;
@@ -248,8 +251,10 @@ static void CM_SharedBuildNode( int node, int first, int count ) {
 		}
 	}
 	const float mid = 0.5f * ( n->mins[axis] + n->maxs[axis] );
+	// (deep down - very uneven triangle sizes - split by count instead: every tree stays within the walk's stack)
+	const bool byCount = level >= SH_SPLIT_BY_COUNT;
 	int lo = first, hi = first + count - 1;
-	while ( lo <= hi ) {
+	while ( !byCount && lo <= hi ) {
 		const float *b = s_triBox + 6 * s_triIdx[lo];
 		if ( 0.5f * ( b[axis] + b[3 + axis] ) < mid ) {
 			lo++;
@@ -259,15 +264,15 @@ static void CM_SharedBuildNode( int node, int first, int count ) {
 		}
 	}
 	int left = lo - first;
-	if ( left == 0 || left == count ) {
+	if ( byCount || left == 0 || left == count ) {
 		left = count / 2;			// all centres on one side: halves
 	}
 	const int child = s_buildNodes;
 	s_buildNodes += 2;
 	n->first = child;
 	n->count = 0;
-	CM_SharedBuildNode( child, first, left );
-	CM_SharedBuildNode( child + 1, first + left, count - left );
+	CM_SharedBuildNode( child, first, left, level + 1 );
+	CM_SharedBuildNode( child + 1, first + left, count - left, level + 1 );
 }
 
 static bool CM_SharedLoadShapes( const char *name ) {
@@ -340,7 +345,7 @@ static bool CM_SharedLoadShapes( const char *name ) {
 		sh.trees[i].firstNode = s_buildNodes++;
 		sh.trees[i].firstTri = (int)s->firstTri;
 		if ( s->numTris ) {
-			CM_SharedBuildNode( sh.trees[i].firstNode, 0, (int)s->numTris );
+			CM_SharedBuildNode( sh.trees[i].firstNode, 0, (int)s->numTris, 0 );
 		} else {
 			sh.nodes[sh.trees[i].firstNode].count = 0;
 			sh.nodes[sh.trees[i].firstNode].first = 0;
@@ -361,10 +366,18 @@ static void CM_SharedBuildGrid( void ) {
 	for ( int i = 0; i < numItems; i++ ) {
 		const float *mn = i < sh.numTiles ? sh.tiles[i].mins : sh.places[i - sh.numTiles].mins;
 		const float *mx = i < sh.numTiles ? sh.tiles[i].maxs : sh.places[i - sh.numTiles].maxs;
+		// (a box that is not a finite one inside SH_WORLD - a damaged file - does not size the grid; its item still goes
+		//  in, at the clamped edge cells)
+		if ( !( fabsf( mn[0] ) < SH_WORLD && fabsf( mn[1] ) < SH_WORLD && fabsf( mx[0] ) < SH_WORLD && fabsf( mx[1] ) < SH_WORLD ) ) {
+			continue;
+		}
 		for ( int k = 0; k < 2; k++ ) {
 			lo[k] = Q_min( lo[k], mn[k] );
 			hi[k] = Q_max( hi[k], mx[k] );
 		}
+	}
+	if ( lo[0] > hi[0] || lo[1] > hi[1] ) {
+		lo[0] = lo[1] = hi[0] = hi[1] = 0.0f;
 	}
 	sh.cellSize = SH_CELL;
 	sh.gridOrigin[0] = lo[0];
@@ -676,7 +689,7 @@ static bool CM_SharedPlacement( int pi, const vec3pair_t box, int contentsMask, 
 	}
 	const float *V = sh.verts + 3 * (size_t)s->firstVert;
 	const int *order = sh.order + sh.trees[p->shape].firstTri;
-	int stack[64], depth = 0;
+	int stack[SH_STACK], depth = 0;
 	stack[depth++] = sh.trees[p->shape].firstNode;
 	shBrush_t b;
 	while ( depth ) {
@@ -686,10 +699,11 @@ static bool CM_SharedPlacement( int pi, const vec3pair_t box, int contentsMask, 
 			continue;
 		}
 		if ( !n->count ) {
-			if ( depth + 2 <= 64 ) {
-				stack[depth++] = n->first;
-				stack[depth++] = n->first + 1;
+			if ( depth + 2 > SH_STACK ) {
+				Com_Error( ERR_DROP, "CM_SharedPlacement: shape %u's tree is deeper than %i", p->shape, SH_STACK / 2 );
 			}
+			stack[depth++] = n->first;
+			stack[depth++] = n->first + 1;
 			continue;
 		}
 		for ( int t = n->first; t < n->first + n->count; t++ ) {
