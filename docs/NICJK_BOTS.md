@@ -10,7 +10,16 @@ The bots play by the rules: they press the same keys a player has, their moves s
 | --- | --- | --- |
 | `bot_features` | `46131711` | Sum of the switches below. |
 | `bot_fixes` | `1` | Corrections to old bot code (memory safety, Force power selection). |
-| `bot_profile <seconds>` | `0` | Prints the cost of the bot AI and the `BOTEVAL` counters every so many seconds. |
+| `bot_profile <seconds>` | `0` | Prints the cost of the bot AI and the `BOTEVAL` counters every so many seconds: `BOTPROF` lines (time per frame with percentiles, per bot, per think, thread cycles, think scheduling), `BOTZONE` lines (where the time goes: enemy scan, navigation, visibility, saber, movement checks, usercmd building, ...; self time, calls and traces per frame). See [the performance report](reports/BOT_PERFORMANCE.md). |
+| `bot_profileEval` | `1` | `0` leaves the `BOTEVAL` counters out of the `bot_profile` output. |
+| `bot_perf` | `7` | Bot AI optimisations (sum of: 1 nearest visible waypoint searched nearest first, 2 dangerous objects listed once per frame for all bots, 4 the shield trace of the waypoint check skipped while no shield exists, 8 enemy scan does not re-trace a candidate found hidden for `bot_scanCacheMs`). 1, 2 and 4 give exactly the old decisions (checked with `bot_perfVerify 1`); 8 can notice someone stepping out of cover up to 100 ms later. |
+| `bot_perfVerify` | `0` | Testing: `1` also runs the old code for `bot_perf` 1, 2 and 4 and counts disagreements in the `BOTPROF verify` line. |
+| `bot_perfBase` | `-1` | `bot_perf` of the baseline group in an A/B test (`-1`: the same). |
+| `bot_scanCacheMs` | `100` | How long a hidden enemy candidate is not re-traced with `bot_perf` 8. |
+| `bot_ai_fps` | `0` | How many times a second a bot that is not fighting runs its decision making. `0`: every server frame (the original). A bot that is hurt, in the air, duelling, evading, in a move, near its enemy or near any enemy thinks every frame regardless. Movement commands are built every frame. |
+| `bot_ai_combatFps` | `0` | The same for the fighting bots; `0`: every server frame (the original). |
+| `bot_ai_combatDist` / `bot_ai_threatDist` | `1024` / `600` | Distance to the current enemy / to any enemy at which a bot counts as fighting for `bot_ai_fps`. |
+| `bot_ai_fpsBase` | `-1` | `bot_ai_fps` of the baseline group in an A/B test (`-1`: the same). |
 | `bot_abTest <n>` | `0` | Testing: client slots `0..n-1` play with `bot_abBase`, slots `n..2n-1` with `bot_features`. `BOTEVAL` then reports kills and deaths per group. |
 | `bot_abBase` | `0` | The feature set of the first group in an A/B test. |
 | `bot_jk2Tactics` | `15` | Which parts of switch 33554432 (JK2 1.02 tactics) run: 1 guard, 2 red DFA, 4 saber-lock tapping, 8 heal, 16 back attack, 32 red stance, 64 yellow stance, 128 push knockdown, 256 patient fighting. Only 1, 2, 4 and 8 won their tests. |
@@ -127,6 +136,10 @@ Measured in bot-against-bot matches on a dedicated server. One match is noisy: t
 | Lifts | Bots board and ride them on stock maps. |
 | JK2 1.02 rules (`g_jk2_102sabersystem 1`) | Bots play the 1.02 saber; switch 33554432 adds guard, red DFA, lock tapping and heal and won 7 of 8 A/B matches (kills +18% on mp/ffa3, +14% on swtor_korriban). Only about 13% of full saber hits are blocked: bots without the guard hold attack, and 1.02 does not block for someone holding attack. |
 | MB2-style blocking (`g_mb2manualblock 1`) | Bots guard, perfect-block and back off at low block points. In a 24-bot, 7-minute match: about 2,000 guarded hits blocked (about 1 in 9 perfect), 140 got through, 60 disarms. |
+
+## Performance
+
+The bot AI costs about 14 collision traces per bot per server frame; with 31 bots that is 1.5-3 ms of a server frame on mp/ffa3 and naboo_theed. On large open maps the enemy scan is the biggest part (a third of the time on naboo_theed: many enemies in view but behind walls). `bot_perf 7` (default) removes redundant traces with exactly the same decisions (bot AI traces -4 to -10%). On servers above 40 Hz, `bot_perf 15` plus `bot_ai_fps 20` halves the bot AI time on naboo_theed at 125 Hz while fighting bots keep thinking every frame; it is not on by default because its A/B test on naboo_theed was not conclusive. Measurements, the A/B results and how to repeat them: [reports/BOT_PERFORMANCE.md](reports/BOT_PERFORMANCE.md) (`tools/bot_perf_bench.ps1`, `bot_perf_matrix.ps1`, `bot_perf_ab.ps1`).
 
 ## Reading the test output
 
